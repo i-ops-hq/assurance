@@ -3,7 +3,7 @@
 **We don't score completion. We check it — against conditions declared before the run, by code that
 isn't the worker.**
 
-This repository publishes the pure decision modules from [I-Ops](https://github.com/i-ops): the
+This repository publishes the pure decision modules from I-Ops: the
 arithmetic that decides whether a task is complete, what was read, what may inform an answer, and
 what a run is allowed to do. **No model decides any of this.** If our claims are wrong, the code is
 right here.

@@ -1,6 +1,6 @@
 # Contributing
 
-This repository is a **publication** of the decision layer from [I-Ops](https://github.com/i-ops) —
+This repository is a **publication** of the decision layer from I-Ops —
 pure Python modules that decide whether a task is complete, what was read, what may inform an answer,
 and what a run is allowed to do.
 
