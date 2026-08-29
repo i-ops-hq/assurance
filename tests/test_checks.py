@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from assurance_mcp.checks import check_coverage, list_dated_files
+from assurance_mcp.checks import check_coverage, check_staleness, list_dated_files
 from assurance_mcp.paths import PathEscapeError
 
 
@@ -76,3 +76,35 @@ def test_a_folder_it_cannot_parse_is_not_reported_as_complete(tmp_path) -> None:
     assert result["complete"] is False
     assert result["coverage"]["complete"] is False
     assert result["coverage"]["undetermined"]
+
+
+# --- an error an agent can act on -----------------------------------------------------------------
+#
+# Found 2026-08-29 driving the published server over real stdio JSON-RPC rather than importing its
+# functions. The SDK wraps any exception it did not raise in a ToolError whose message is exactly
+# "Error executing tool <name>", so a missing folder and a path escape reached the agent as the same
+# six words. An agent told only that something went wrong cannot retry.
+
+
+def test_a_missing_folder_tells_the_agent_which_folder() -> None:
+    result = check_coverage("/tmp/definitely-not-here-9f2a")
+
+    assert result["complete"] is False
+    assert "definitely-not-here-9f2a" in result["error"]
+    assert result["error"] == result["summary"]
+
+
+def test_a_path_escape_says_it_escaped(tmp_path) -> None:
+    (tmp_path / "2024-01.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = check_staleness(str(tmp_path), "../../etc/passwd", "2024-01.csv")
+
+    assert result["complete"] is False
+    assert "escapes the named folder" in result["error"]
+
+
+def test_a_file_where_a_folder_was_expected_says_so(tmp_path) -> None:
+    target = tmp_path / "not-a-folder.csv"
+    target.write_text("a,b\n1,2\n", encoding="utf-8")
+
+    assert "not a directory" in list_dated_files(str(target))["error"]

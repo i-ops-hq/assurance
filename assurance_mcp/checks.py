@@ -18,12 +18,39 @@ from assurance_cli.profile import profile_file as profile_csv  # noqa: F401
 from assurance_cli.setdiff import diff_sets_from_lists
 
 
+# Errors this package can explain. Anything else keeps escaping, because a message we did not
+# write is not a message we can promise is safe to hand an agent.
+_EXPLAINABLE = (PathEscapeError, FileNotFoundError, NotADirectoryError)
+
+
+def _refused(message: str) -> dict[str, Any]:
+    """An error the CALLING AGENT can act on, rather than one the framework flattens.
+
+    The MCP SDK wraps any exception other than its own in a `ToolError` whose message is exactly
+    `Error executing tool <name>` — the detail is dropped. So a missing folder and a path that
+    escaped the named folder reached the agent as the same six words, and an agent told only that
+    something went wrong cannot retry: it gives up, or it invents. The SDK's own argument validation
+    returns "Input should be a valid list", which is what a usable error looks like.
+
+    Returning the reason as data keeps it readable on both mcp 1.x and 2.x without depending on
+    which exception type the framework lets through. Found 2026-08-29 driving the published server
+    over real stdio JSON-RPC instead of importing its functions.
+    """
+    return {"error": message, "complete": False, "summary": message}
+
+
 def list_dated_files(folder: str) -> dict[str, Any]:
-    return _list_dated_files(folder)
+    try:
+        return _list_dated_files(folder)
+    except _EXPLAINABLE as exc:
+        return _refused(str(exc))
 
 
 def check_coverage(folder: str, period_range: str | None = None) -> dict[str, Any]:
-    return _check_coverage(folder, period_range)
+    try:
+        return _check_coverage(folder, period_range)
+    except _EXPLAINABLE as exc:
+        return _refused(str(exc))
 
 
 def check_staleness(
@@ -33,7 +60,10 @@ def check_staleness(
     *,
     recorded_facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return _check_staleness(folder, document, source, recorded_facts=recorded_facts)
+    try:
+        return _check_staleness(folder, document, source, recorded_facts=recorded_facts)
+    except _EXPLAINABLE as exc:
+        return _refused(str(exc))
 
 
 def check_set_coverage(

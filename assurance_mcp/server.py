@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from assurance_mcp import __version__
 from assurance_mcp.checks import (
     check_coverage,
     check_set_coverage,
@@ -16,7 +17,13 @@ try:
 except ImportError:  # mcp >= 2
     from mcp.server.mcpserver import MCPServer as FastMCP  # type: ignore[no-redef]
 
-mcp = FastMCP("assurance-mcp")
+# The version reaches the client in the initialize handshake and is what Cursor shows next to the
+# server. It came back as an empty string until 0.2.3 — the handshake is the first thing a client
+# sees, and a blank version there reads as a server nobody maintains.
+try:
+    mcp = FastMCP("assurance-mcp", version=__version__)
+except TypeError:  # older SDKs take no version argument
+    mcp = FastMCP("assurance-mcp")
 
 
 @mcp.tool()
