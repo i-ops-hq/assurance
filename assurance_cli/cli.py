@@ -136,7 +136,12 @@ def _has_findings(payload: dict[str, Any]) -> bool:
     if payload.get("baseline") and not payload["baseline"].get("ok", True):
         return True
     coverage = payload.get("coverage") or payload
-    return bool(coverage.get("error"))
+    if coverage.get("error"):
+        return True
+    # "I could not work out what to check" is a finding, not a success. Exiting 0 here made a folder
+    # whose filenames we cannot parse indistinguishable, to a CI job, from a folder we checked and
+    # found whole — which is the one thing this tool exists not to do.
+    return bool((coverage.get("coverage") or {}).get("undetermined"))
 
 
 def _format_text(payload: dict[str, Any]) -> str:

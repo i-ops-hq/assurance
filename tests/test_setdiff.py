@@ -150,3 +150,89 @@ def test_an_error_is_printed_rather_than_swallowed(capsys: pytest.CaptureFixture
     captured = capsys.readouterr()
     assert captured.out.strip() == ""
     assert "folder does not exist" in captured.err
+
+
+# --- what an outsider's files actually look like --------------------------------------------------
+#
+# From the 2026-08-29 smoke test against fixtures nobody here designed against: Excel exports,
+# filenames with spaces, month words, six-digit purchase orders. Most of it worked. This did not.
+
+
+def test_a_byte_order_mark_does_not_change_what_a_key_is(tmp_path: Path) -> None:
+    """Excel writes CSV and TXT with a BOM by default. Read as plain utf-8 it glues U+FEFF to the
+    FIRST key, so `doc-1` came back reported as missing AND as unexpected in one sentence — a
+    confidently wrong answer, from the most common export path there is."""
+    listing = tmp_path / "keys.txt"
+    listing.write_bytes(b"\xef\xbb\xbfdoc-1\r\ndoc-2\r\ndoc-3\r\n")
+
+    assert read_keys(str(listing), label="--expected") == ["doc-1", "doc-2", "doc-3"]
+
+
+def test_a_bom_in_a_json_export_is_stripped_too(tmp_path: Path) -> None:
+    listing = tmp_path / "found.json"
+    listing.write_bytes(b'\xef\xbb\xbf["doc-1", "doc-2"]')
+
+    assert read_keys(str(listing), label="--found") == ["doc-1", "doc-2"]
+
+
+def test_the_bom_case_end_to_end_reports_one_gap_not_two_wrong_ones(tmp_path: Path) -> None:
+    listing = tmp_path / "keys.txt"
+    listing.write_bytes(b"\xef\xbb\xbfdoc-1\r\ndoc-2\r\ndoc-3\r\n")
+
+    payload = diff_sets(str(listing), "doc-1,doc-2")
+
+    assert payload["read"] == 2
+    assert [entry["key"] for entry in payload["missing"]] == ["doc-3"]
+    assert payload["unexpected"] == []
+
+
+def test_crlf_line_endings_do_not_become_part_of_the_key(tmp_path: Path) -> None:
+    listing = tmp_path / "keys.txt"
+    listing.write_bytes(b"doc-1\r\ndoc-2\r\n")
+
+    assert read_keys(str(listing), label="--expected") == ["doc-1", "doc-2"]
+
+
+def test_a_bom_arriving_on_stdin_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`cat export.txt | assurance diff --found -` has no decode step to strip a BOM: `sys.stdin`
+    is already decoded, by the locale's plain utf-8. The README documents piping, so this path is
+    real and needs the per-key strip that `utf-8-sig` cannot reach."""
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("﻿doc-1\ndoc-2\n"))
+
+    assert read_keys("-", label="--found") == ["doc-1", "doc-2"]
+
+
+def test_a_piped_csv_is_refused_rather_than_read_as_keys(tmp_path: Path) -> None:
+    """Piping a CSV is the obvious thing to try. Read line by line it produced a confident `0 of 3`
+    with the header row and two score columns admitted as keys."""
+    listing = tmp_path / "found.csv"
+    listing.write_text("doc_id,score\ndoc-1,0.9\ndoc-2,0.8\n", encoding="utf-8")
+
+    with pytest.raises(KeySpecError, match="comma-delimited table"):
+        read_keys(str(listing), label="--found")
+
+
+def test_the_refusal_names_the_command_that_fixes_it(tmp_path: Path) -> None:
+    listing = tmp_path / "found.tsv"
+    listing.write_text("doc_id\tscore\ndoc-1\t0.9\n", encoding="utf-8")
+
+    with pytest.raises(KeySpecError, match=r"cut -f1"):
+        read_keys(str(listing), label="--found")
+
+
+def test_a_key_that_merely_contains_a_comma_is_still_a_key(tmp_path: Path) -> None:
+    """The guard fires only when EVERY line has the SAME delimiter count — a table, not a
+    coincidence. A false refusal blocks a legitimate user, so it stays narrow."""
+    listing = tmp_path / "keys.txt"
+    listing.write_text("Smith, John\nDoe, Jane\nplain-key\n", encoding="utf-8")
+
+    assert read_keys(str(listing), label="--expected") == ["Smith, John", "Doe, Jane", "plain-key"]
+
+
+def test_a_single_line_is_never_a_table(tmp_path: Path) -> None:
+    listing = tmp_path / "keys.txt"
+    listing.write_text("a,b,c\n", encoding="utf-8")
+
+    assert read_keys(str(listing), label="--expected") == ["a,b,c"]

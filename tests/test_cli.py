@@ -123,3 +123,34 @@ def test_mixed_series_folder_reports_none(tmp_path: Path):
         (root / name).write_text("v\n1\n", encoding="utf-8")
     result = check_coverage(str(root))
     assert "No dated or numbered series detected" in result["summary"]
+
+
+# --- "I could not check" must not exit like "I checked and it was fine" ---------------------------
+
+
+def test_a_folder_with_no_readable_series_is_a_finding(tmp_path: Path) -> None:
+    """Exit 0 here made an unparseable folder indistinguishable, to a CI job, from a whole one."""
+    for name in ("15.01.2024 shipment.csv", "Jan-24 summary.csv", "20240115_dump.csv"):
+        (tmp_path / name).write_text("a,b\n1,2\n", encoding="utf-8")
+
+    assert main(["check", str(tmp_path)]) == 1
+
+
+def test_the_nested_record_agrees_with_the_wrapper(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The payload carried `complete: false` at the top and `complete: true` one level down, and an
+    integrator reading either one was reading a real field."""
+    (tmp_path / "Jan-24 summary.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    main(["check", str(tmp_path), "--json"])
+    payload = json.loads(capsys.readouterr().out)["coverage"]
+
+    assert payload["complete"] is False
+    assert payload["coverage"]["complete"] is False
+    assert payload["coverage"]["undetermined"]
+
+
+def test_a_folder_that_checks_out_still_exits_zero(monthly_folder: Path) -> None:
+    """The counterweight: the ordinary path must not start failing."""
+    assert main(["check", str(monthly_folder)]) == 0

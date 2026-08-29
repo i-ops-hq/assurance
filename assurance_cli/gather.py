@@ -73,7 +73,7 @@ def check_coverage(
             "complete": False,
             "derivation": "",
             "coverage": _coverage_to_dict(
-                Coverage(scope_label=f"items in {root.name}", expected=[])
+                Coverage(scope_label=f"items in {root.name}", expected=[], undetermined=_UNDETERMINED)
             ),
         }
 
@@ -88,7 +88,7 @@ def check_coverage(
             "complete": False,
             "derivation": "",
             "coverage": _coverage_to_dict(
-                Coverage(scope_label=f"items in {root.name}", expected=[])
+                Coverage(scope_label=f"items in {root.name}", expected=[], undetermined=_UNDETERMINED)
             ),
         }
 
@@ -122,7 +122,7 @@ def check_coverage(
             "complete": False,
             "derivation": "",
             "coverage": _coverage_to_dict(
-                Coverage(scope_label=f"items in {root.name}", expected=[])
+                Coverage(scope_label=f"items in {root.name}", expected=[], undetermined=_UNDETERMINED)
             ),
         }
 
@@ -264,13 +264,21 @@ def _unit_for_kind(kind: SeriesKind) -> str:
     }[kind]
 
 
+_UNDETERMINED = "no dated or numbered series could be read from these filenames"
+"""Why nothing was checked. Carried INTO the coverage record, not just the wrapper around it.
+
+Until 0.2.2 these paths emitted an empty `Coverage`, whose `complete` is True by the arithmetic —
+nothing was required, so nothing is missing. So the payload carried `complete: false` at the top and
+`complete: true` one level down, and an integrator reading either one was reading a real field."""
+
+
 def _error_result(root: Path, message: str) -> dict[str, Any]:
     return {
         "folder": str(root),
         "summary": message,
         "complete": False,
         "derivation": "",
-        "coverage": _coverage_to_dict(Coverage(scope_label=f"items in {root.name}", expected=[])),
+        "coverage": _coverage_to_dict(Coverage(scope_label=f"items in {root.name}", expected=[], undetermined=_UNDETERMINED)),
         "error": message,
     }
 
@@ -290,6 +298,7 @@ def _coverage_to_dict(cov: Coverage) -> dict[str, Any]:
         "unreadable": dict(cov.unreadable),
         "unauthorized": dict(cov.unauthorized),
         "truncated": cov.truncated,
+        "undetermined": cov.undetermined,
     }
 
 

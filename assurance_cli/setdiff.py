@@ -45,7 +45,11 @@ def read_keys(spec: str | None, *, label: str) -> list[str]:
         if candidate.exists():
             if candidate.is_dir():
                 raise KeySpecError(f"{label}: {spec} is a directory, not a list of keys")
-            text = candidate.read_text(encoding="utf-8")
+            # `utf-8-sig`, not `utf-8`. Excel writes CSV and TXT with a byte-order mark by default,
+            # and reading it as plain utf-8 glues U+FEFF to the FIRST key — so `doc-1` was reported
+            # as missing AND as unexpected in the same sentence, which is a confidently wrong answer
+            # produced by the most common export path there is.
+            text = candidate.read_text(encoding="utf-8-sig")
 
     if text is None:
         return _dedupe(part.strip() for part in spec.split(","))
@@ -64,11 +68,38 @@ def _parse(text: str, *, label: str) -> list[str]:
         return _keys_from_json(payload, label=label)
     # A full-line comment is dropped; a `#` inside a key is part of the key, because guessing which
     # is which would silently change someone's denominator.
-    return [
+    lines = [
         line.strip()
         for line in stripped.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
+    _refuse_a_table(lines, label=label)
+    return lines
+
+
+def _refuse_a_table(lines: list[str], *, label: str) -> None:
+    """A delimited table is not a list of keys, and reading it as one is silent nonsense.
+
+    Piping a CSV is the obvious thing to try — it is what people have. Read line by line it produced
+    `0 of 3 — also present and not expected: doc_id,score, doc-1,0.9, doc-2,0.8`: a header row and
+    two score columns admitted as keys, and a confident zero. We cannot pick the column for you, so
+    this says which command does.
+
+    Deliberately narrow, because a key may legitimately contain a comma: it fires only when EVERY
+    line carries the SAME delimiter the SAME number of times, which is a table and not a coincidence.
+    """
+    if len(lines) < 2:
+        return
+    for delimiter, flag in (("\t", "-f1"), (",", "-d, -f1")):
+        counts = {line.count(delimiter) for line in lines}
+        if len(counts) == 1 and counts.pop() >= 1:
+            name = "tab" if delimiter == "\t" else "comma"
+            raise KeySpecError(
+                f"{label}: this looks like a {name}-delimited table, not a list of keys — every "
+                f"line has the same number of {name}s. Reading it line by line would admit the "
+                f"header and every other column as keys. Pick the column you mean, e.g. "
+                f"`cut {flag} file | assurance diff ... --{label.lstrip('-')} -`, or pass JSON."
+            )
 
 
 def _keys_from_json(payload: Any, *, label: str) -> list[str]:
@@ -106,7 +137,9 @@ def _dedupe(values: Any) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     for value in values:
-        value = str(value).strip()
+        # A BOM can still arrive from stdin, where there is no decode step to strip it, and inside a
+        # JSON string. Strip it per key too: a stray U+FEFF changes what a key IS.
+        value = str(value).replace("\ufeff", "").strip()
         if value and value not in seen:
             seen.add(value)
             out.append(value)

@@ -80,11 +80,24 @@ assurance check ~/thesis-data --against-baseline
 
 | | |
 |---|---|
-| `0` | ran, no gap — or not asked to fail on one |
-| `1` | a finding: a gap with `--fail-on-gap`, or a baseline that no longer holds |
-| `2` | could not run: bad path, unreadable list, unparseable JSON |
+| `0` | it checked, and either found no gap or wasn't asked to fail on one |
+| `1` | a finding: a gap with `--fail-on-gap`, a stale baseline, or **nothing it could check** |
+| `2` | could not run: bad path, unreadable list, unparseable JSON, a table where keys were expected |
+
+**"I couldn't check this" exits 1, not 0.** A folder whose filenames it can't parse must not look
+like a folder it checked and found whole.
 
 Diagnostics go to **stderr**, results to **stdout**, so `--json` stays pipeable.
+
+## It expects your files, not tidy ones
+
+- **Excel exports work.** UTF-8 BOM and CRLF are handled; a BOM used to glue itself to your first
+  key and report it as missing *and* unexpected in the same sentence
+- **Spaces, unicode and month words in filenames** — `Inventory Report August 2024.csv` parses
+- **`.xlsx`, and nested subfolders**
+- **A piped CSV is refused, not misread.** It names the column-picking command instead of quietly
+  admitting your header row as a key
+- **When it can't work out a series it says so**, rather than reporting an empty check as a pass
 
 ## Use it for
 
