@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assurance-cli"
+version = "0.1.0"
+description = "CLI for folder assurance checks — coverage, staleness, and baselines."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "I-Ops Operations Intelligence, LLC", email = "hello@i-ops.dev" }]
+requires-python = ">=3.10"
+dependencies = [
+  "assurance-core>=0.2",
+  "openpyxl>=3.1",
+]
+keywords = ["cli", "ai-agents", "governance", "auditing", "assurance", "reproducibility"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Homepage = "https://i-ops.dev"
+Source = "https://github.com/i-ops-hq/assurance-cli"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+assurance = "assurance_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["assurance_cli*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
