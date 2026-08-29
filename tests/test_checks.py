@@ -62,3 +62,17 @@ def test_check_coverage_counterfactual_a_complete_span_must_fail_when_a_month_is
     (complete_folder / "billing_2024-03.csv").unlink()
     broken = check_coverage(str(complete_folder))
     assert broken["complete"] is False
+
+
+def test_a_folder_it_cannot_parse_is_not_reported_as_complete(tmp_path) -> None:
+    """An agent reading `coverage.complete` got True for a folder nothing could be derived from.
+    Found in the 2026-08-29 outsider smoke test — an agent is exactly the caller that would read the
+    nested field and act on it."""
+    for name in ("15.01.2024 shipment.csv", "Jan-24 summary.csv", "20240115_dump.csv"):
+        (tmp_path / name).write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = check_coverage(str(tmp_path))
+
+    assert result["complete"] is False
+    assert result["coverage"]["complete"] is False
+    assert result["coverage"]["undetermined"]
