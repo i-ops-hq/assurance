@@ -1,5 +1,9 @@
 # assurance-mcp
 
+[![PyPI](https://img.shields.io/pypi/v/assurance-mcp)](https://pypi.org/project/assurance-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/assurance-mcp)](https://pypi.org/project/assurance-mcp/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance-mcp/blob/main/LICENSE)
+
 **Read-only. No writes, no deletes, no network.** This MCP server exposes assurance checks as tools
 any agent can call. Point it at a folder and ask *"did I read everything?"* or *"is this document
 still true?"* — the findings are arithmetic, not model output.
@@ -15,14 +19,11 @@ This package is the I/O that gathers facts; assurance-core is the verdict.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-
-# Until assurance-core is on PyPI, install both from git or a local checkout:
-pip install "git+https://github.com/i-ops-hq/assurance-core.git"
-pip install "git+https://github.com/i-ops-hq/assurance-mcp.git"
-
-# Or from a local checkout next to this repo:
-pip install -e ../assurance-core -e .
+pip install assurance-mcp
 ```
+
+That pulls in [`assurance-core`](https://pypi.org/project/assurance-core/), which holds the decision
+logic. Python 3.10 or newer.
 
 ## Configure your MCP client
 
@@ -97,4 +98,4 @@ python -c "import assurance_mcp.checks"
 
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](https://github.com/i-ops-hq/assurance-mcp/blob/main/LICENSE).
