@@ -14,14 +14,24 @@ from assurance_cli.setdiff import KeySpecError, diff_sets, format_diff
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="assurance", description="Folder assurance checks — arithmetic, not models.")
+    parser = argparse.ArgumentParser(
+        prog="assurance",
+        description=(
+            "Did the job cover everything it was supposed to cover? Arithmetic, not models. "
+            "`diff` is the general command — it compares any two sets of keys. `check` is the "
+            "special case for a folder of dated or numbered files."
+        ),
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     init_parser = sub.add_parser("init", help="Write .assurance.json baseline")
     init_parser.add_argument("folder", help="Folder to baseline")
     init_parser.add_argument("--update", action="store_true", help="Overwrite an existing baseline")
 
-    check_parser = sub.add_parser("check", help="Check a folder for coverage or staleness")
+    check_parser = sub.add_parser(
+        "check",
+        help="Special case: a folder of DATED or NUMBERED files (tabular). For anything else use `diff`",
+    )
     check_parser.add_argument("folder", help="Folder to check")
     check_parser.add_argument("--expect", choices=["monthly", "quarterly", "weekly", "daily", "numbered"])
     check_parser.add_argument("--from", dest="from_point", metavar="FROM")

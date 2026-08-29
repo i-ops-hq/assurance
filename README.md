@@ -29,6 +29,10 @@ No account · no API key · no network call · **no model decides any of it**
 
 ## Three commands
 
+**`diff` is the general one.** `check` is the special case for a folder of
+dated or numbered *tabular* files — if your files are `.md`, or named in a format it can't read, use
+`diff` and declare the set yourself.
+
 ### `assurance diff` — any two sets of keys
 
 ```bash
@@ -72,6 +76,8 @@ every ratio so you can disagree with the denominator, not just the result.
 
 ```bash
 assurance init ~/thesis-data
+# Baseline written to ~/thesis-data/.assurance.json — 34 tabular files recorded.
+
 # ... weeks pass, several people touch the folder ...
 assurance check ~/thesis-data --against-baseline
 ```

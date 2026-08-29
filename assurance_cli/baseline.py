@@ -19,7 +19,12 @@ def init_baseline(folder: str, *, update: bool = False) -> dict[str, Any]:
     root = resolve_folder(folder)
     path = root / BASELINE_NAME
     if path.exists() and not update:
-        return {"written": False, "path": str(path), "reason": "baseline already exists; use --update"}
+        return {
+            "written": False,
+            "path": str(path),
+            "reason": "baseline already exists; use --update",
+            "summary": f"A baseline already exists at {path}. Pass --update to overwrite it.",
+        }
 
     entries: dict[str, Any] = {}
     for file_path in sorted(root.rglob("*")):
@@ -50,7 +55,22 @@ def init_baseline(folder: str, *, update: bool = False) -> dict[str, Any]:
         "files": entries,
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {"written": True, "path": str(path), "file_count": len(entries)}
+    # A summary, because text mode renders one and prints nothing without it. `assurance init`
+    # wrote the file and then said nothing at all, so success was indistinguishable from a hung
+    # command — reported by an outside reviewer 2026-08-29. The count is the useful half: a baseline
+    # over zero files is a baseline that will never notice anything.
+    noun = "file" if len(entries) == 1 else "files"
+    return {
+        "written": True,
+        "path": str(path),
+        "file_count": len(entries),
+        "summary": (
+            f"Baseline written to {path} — {len(entries)} tabular {noun} recorded. "
+            "Re-check with `assurance check <folder> --against-baseline`."
+            if entries
+            else f"Baseline written to {path} — no tabular files found, so it records nothing."
+        ),
+    }
 
 
 def check_against_baseline(folder: str) -> dict[str, Any]:
