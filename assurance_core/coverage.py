@@ -109,6 +109,9 @@ class Coverage:
     truncated: str = ""
     """Non-empty when the enumeration hit a cap, carrying the reason. Makes `complete` False on its
     own, because a capped denominator makes every ratio here a guess."""
+    derivation: str = ""
+    """How the expected set was arrived at — one line a user can disagree with before trusting the
+    ratio. Empty on every run that does not need it, so `summary()` for those cases does not move."""
 
     @property
     def complete(self) -> bool:
@@ -160,6 +163,8 @@ class Coverage:
             parts.append(f"not cleared to open {', '.join(sorted(self.unauthorized))}")
         if self.truncated:
             parts.append(f"the list was cut short ({self.truncated}), so this count is a floor")
+        if self.derivation:
+            parts.append(self.derivation)
 
         return " — ".join(parts)
 
