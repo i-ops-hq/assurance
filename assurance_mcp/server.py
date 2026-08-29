@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from assurance_mcp.checks import check_coverage, check_staleness, list_dated_files
+from assurance_mcp.checks import (
+    check_coverage,
+    check_set_coverage,
+    check_staleness,
+    list_dated_files,
+)
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -46,6 +51,34 @@ def list_dated_files_tool(folder: str) -> dict[str, Any]:
     Read-only. Helps an agent decide what to ask next.
     """
     return list_dated_files(folder)
+
+
+@mcp.tool()
+def check_set_coverage_tool(
+    expected: list[str],
+    found: list[str],
+    scope: str | None = None,
+    where: str | None = None,
+    derivation: str | None = None,
+) -> dict[str, Any]:
+    """Check what a task required against what was actually read, over any two sets of keys.
+
+    Read-only, and touches no filesystem — the caller holds both lists. Use this when the thing you
+    must account for is not dated files in a folder: documents the question spans against the chunks
+    a retriever returned, files changed in a pull request against files reviewed, table partitions
+    against partitions loaded, required controls against controls with evidence, declared eval cases
+    against cases actually run.
+
+    `expected` is the caller's declaration and is never inferred here. `scope` names the items for
+    the sentence ("documents the question spans"); `where` names where they were looked for ("the
+    retrieved set"); `derivation` records how the expected set was arrived at, so a reader can
+    disagree with the denominator rather than only with the result.
+
+    Returns the coverage record: `complete`, `read` of `required`, and each way an expectation
+    failed to be evidence kept separate. Anything present that was not expected is reported under
+    `unexpected` and deliberately earns no credit against the denominator.
+    """
+    return check_set_coverage(expected, found, scope=scope, where=where, derivation=derivation)
 
 
 def main() -> None:
