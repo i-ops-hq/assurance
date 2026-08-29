@@ -1,6 +1,7 @@
 # assurance-mcp
 
 [![PyPI](https://img.shields.io/pypi/v/assurance-mcp)](https://pypi.org/project/assurance-mcp/)
+[![Tests](https://github.com/i-ops-hq/assurance-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance-mcp/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/pypi/pyversions/assurance-mcp)](https://pypi.org/project/assurance-mcp/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance-mcp/blob/main/LICENSE)
 
