@@ -161,6 +161,25 @@ _BETWEEN = re.compile(
     re.IGNORECASE,
 )
 _BARE_YEAR = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+# Range separators beyond the words. `-` is already handled by `_BETWEEN`; these two are not, and
+# both are natural things to type.
+_SYMBOL_RANGE = re.compile(r"^\s*(.+?)\s*(?::|\.\.)\s*(.+?)\s*$")
+
+
+def _periods_mentioned(text: str) -> list["Period"]:
+    """Every distinct month named anywhere in the text, in order.
+
+    Used only to notice that a request names MORE THAN ONE, which means any single-month reading of
+    it is a guess. Deliberately not used to build a range: two months in a string do not tell you
+    the relation between them.
+    """
+    seen: list[Period] = []
+    for pattern in (_NAMED, _NAMED_REVERSED, _NUMERIC, _NUMERIC_REVERSED):
+        for match in pattern.finditer(text):
+            period = parse_period(match.group(0))
+            if period is not None and period not in seen:
+                seen.append(period)
+    return seen
 
 
 def months_between(start: Period, end: Period) -> list[Period]:
@@ -223,6 +242,25 @@ def parse_period_range(text: str, available: list[Period]) -> tuple[Period, Peri
         if left and right:
             a, b = sorted((int(left.group(1)), int(right.group(1))))
             return Period(year=a, month=1), Period(year=b, month=12)
+
+    symbol = _SYMBOL_RANGE.match(body)
+    if symbol:
+        first, second = parse_period(symbol.group(1)), parse_period(symbol.group(2))
+        if first and second:
+            return (first, second) if first <= second else (second, first)
+
+    # A range we could not read must NOT collapse to the first month in it. `parse_period` searches,
+    # so "2024-01:2024-06" found January and reported a scope of one month — 1 of 1, complete, exit
+    # 0 — for a request that named six. A denominator invented from a request we did not understand,
+    # then called complete. Found 2026-08-29 in an outside review.
+    #
+    # `:` and `..` are read as ranges below. This guard is for the ones nobody has typed yet: if the
+    # body names two different months and none of the forms above related them, we do not understand
+    # the request, and None is the honest answer — the caller falls back to the whole folder and
+    # says so.
+    mentioned = _periods_mentioned(body)
+    if len(mentioned) > 1:
+        return None
 
     single = parse_period(body)
     if single:

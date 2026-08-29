@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import pytest
 
-from assurance_core.report_period import Period, latest, parse_period, period_from_filename
+from assurance_core.report_period import (
+    Period,
+    latest,
+    parse_period,
+    parse_period_range,
+    period_from_filename,
+)
 
 
 @pytest.mark.parametrize(
@@ -71,3 +77,40 @@ def test_the_label_is_what_we_say_back_to_the_user():
     a period the harness chose is a decision the user has to be able to catch."""
     assert Period(2026, 1).label == "January 2026"
     assert str(Period(2025, 6)) == "June 2025"
+
+
+# --- a range we cannot read must not collapse to the first month in it ----------------------------
+#
+# Found 2026-08-29 by an outside reviewer: `assurance check <folder> 2024-01:2024-06` reported
+# "1 of 1 months from January 2024 to January 2024", complete, exit 0. `parse_period` SEARCHES, so
+# it found January inside the string and a six-month request became a one-month scope that passed.
+# A denominator invented from a request we did not understand, then called complete — the same class
+# as the Coverage constructor bug found the same day.
+
+
+@pytest.mark.parametrize("text", ["2024-01:2024-06", "2024-01..2024-06", "June 2024:January 2024"])
+def test_symbol_separated_ranges_are_read_as_ranges(text: str) -> None:
+    window = parse_period_range(text, [Period(2024, m) for m in range(1, 13)])
+
+    assert window == (Period(2024, 1), Period(2024, 6))
+
+
+@pytest.mark.parametrize("text", ["2024-01 ~ 2024-06", "2024-01 | 2024-06", "2024-01 and 2024-06"])
+def test_a_separator_we_do_not_know_returns_none_rather_than_the_first_month(text: str) -> None:
+    """The guard for every separator nobody has typed yet. None is a real answer: the caller falls
+    back to the whole folder and says so, instead of scoping to a month we picked."""
+    assert parse_period_range(text, [Period(2024, m) for m in range(1, 13)]) is None
+
+
+def test_a_request_naming_one_month_is_still_that_month() -> None:
+    """The counterweight — the guard must not swallow the single-period case."""
+    window = parse_period_range("2024-03", [Period(2024, m) for m in range(1, 13)])
+
+    assert window == (Period(2024, 3), Period(2024, 3))
+
+
+def test_the_word_forms_are_untouched() -> None:
+    available = [Period(2024, m) for m in range(1, 13)]
+
+    assert parse_period_range("2024-01 to 2024-06", available) == (Period(2024, 1), Period(2024, 6))
+    assert parse_period_range("last 6 months", available) == (Period(2024, 7), Period(2024, 12))
