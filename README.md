@@ -3,13 +3,58 @@
 **We don't score completion. We check it — against conditions declared before the run, by code that
 isn't the worker.**
 
-This repository publishes the pure decision modules from I-Ops: the
+This repository publishes the pure decision modules from [I-Ops](https://i-ops.dev): the
 arithmetic that decides whether a task is complete, what was read, what may inform an answer, and
 what a run is allowed to do. **No model decides any of this.** If our claims are wrong, the code is
 right here.
 
 **Provenance:** cut from I-Ops `0.56.2` on 2026-08-28. I-Ops is upstream; this repo is a
 publication, never a source.
+
+## Install
+
+```bash
+pip install assurance-core
+```
+
+Python 3.10 or newer. **Zero dependencies** — nothing is pulled in, nothing phones home.
+Not on PyPI yet, so until it is:
+
+```bash
+pip install git+https://github.com/i-ops-hq/assurance-core.git
+```
+
+## Use it in your own agent
+
+Two runnable examples in [`examples/`](examples). The first is the question almost nobody asks:
+
+```python
+from assurance_core.coverage import Coverage, EvidenceRef, Expectation
+
+# Declare what the task requires, BEFORE it runs.
+expected = [Expectation(key=f"2024-{m:02d}", label=f"{m:02d}/2024") for m in range(1, 13)]
+
+# Record what your agent actually opened, as it opens it.
+found = {e.key: EvidenceRef(key=e.key, path=f"/reports/{e.key}.csv", reader="my_agent")
+         for e in expected if e.key != "2024-03"}
+
+coverage = Coverage(scope_label="2024 monthly reports", expected=expected, found=found,
+                    missing=[e for e in expected if e.key not in found])
+
+print(coverage.summary())   # 11 of 12 2024 monthly reports — not in this folder: 03/2024
+print(coverage.complete)    # False
+```
+
+Every tool call can return 200 and the answer can still be built on eleven twelfths of the data.
+`coverage.complete` is the difference between a run that succeeded and a run that was *right*.
+
+The rest of the modules do the same job for other questions: `staleness` asks whether a document
+still matches the source it was made from, `admission` decides which retrieved sources may inform an
+answer, `task_contract` records what done means before the first step runs, and `policy` and
+`rule_of_two` decide what a run is allowed to do at all.
+
+**None of them import a model, and a test proves it** — see *Model independence is gated, not
+claimed* below.
 
 ## What this is not
 

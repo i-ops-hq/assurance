@@ -3,7 +3,7 @@
 If you believe you have found a security issue in the decision logic published here, please report it
 privately:
 
-**Email:** security@i-ops.com
+**Email:** hello@i-ops.dev
 
 Include enough detail to reproduce the issue. We aim to acknowledge reports within one week.
 
