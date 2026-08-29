@@ -350,3 +350,41 @@ def test_evidence_outside_the_scope_is_still_recorded() -> None:
 def test_a_full_read_still_counts_every_expectation() -> None:
     """The regression guard for the fix itself: the ordinary case must not move."""
     assert Coverage.of(expected=["a", "b"], found=["a", "b"]).read == 2
+
+
+# --- "nothing was checked" is not "nothing was required" ------------------------------------------
+#
+# Found 2026-08-29 in an outsider smoke test: the CLI was pointed at a folder whose filenames it
+# could not parse, and the payload carried `complete: false` at the top with a nested coverage
+# record saying `complete: true`. Both were real fields. An empty `Coverage` is complete by the
+# arithmetic — nothing required, nothing missing — which is right for a scope that required nothing
+# and catastrophically wrong for a scope we simply failed to derive.
+
+
+def test_an_underivable_scope_is_not_complete() -> None:
+    coverage = Coverage.of(expected=[], found=[], undetermined="no series could be read")
+
+    assert coverage.complete is False
+    assert coverage.summary() == "Nothing was checked — no series could be read"
+
+
+def test_a_scope_that_genuinely_required_nothing_is_still_complete() -> None:
+    """The counterweight: this must keep working, or every empty scope becomes a false alarm."""
+    coverage = Coverage.of(expected=[], found=[])
+
+    assert coverage.complete is True
+    assert coverage.summary() == "Nothing was required."
+
+
+def test_undetermined_outranks_a_full_read() -> None:
+    """If the denominator could not be derived, a numerator means nothing."""
+    coverage = Coverage.of(expected=["a"], found=["a"], undetermined="the scope was a guess")
+
+    assert coverage.complete is False
+
+
+def test_undetermined_travels_in_the_record() -> None:
+    payload = Coverage.of(expected=[], found=[], undetermined="no series could be read").to_dict()
+
+    assert payload["undetermined"] == "no series could be read"
+    assert payload["complete"] is False

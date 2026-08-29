@@ -111,6 +111,18 @@ class Coverage:
     truncated: str = ""
     """Non-empty when the enumeration hit a cap, carrying the reason. Makes `complete` False on its
     own, because a capped denominator makes every ratio here a guess."""
+    undetermined: str = ""
+    """Non-empty when the expected set could not be derived AT ALL, carrying the reason.
+
+    Not the same as `truncated`, which is a denominator that is wrong. This is a denominator that
+    does not exist — nothing was checked, because nothing could be worked out to check. It has to
+    make `complete` False and it has to say so out loud, or *"I could not check this"* is delivered
+    in the same shape as *"I checked this and it is fine"*, which is the failure this whole module
+    exists to prevent, arriving through the one door nobody was watching.
+
+    Found 2026-08-29 pointing the CLI at a folder whose filenames it could not parse: the payload
+    carried `complete: false` at the top and a nested coverage record saying `complete: true`. Two
+    fields, one payload, opposite answers."""
     where: str = "this folder"
     """Where the expectations were looked for, as it reads mid-sentence: "not in this folder",
     "not in the retrieved set", "not among the changed files". The default keeps the folder wording
@@ -132,6 +144,7 @@ class Coverage:
         unreadable: dict[str, str] | None = None,
         unauthorized: dict[str, str] | None = None,
         truncated: str = "",
+        undetermined: str = "",
         derivation: str = "",
         where: str = "this folder",
     ) -> "Coverage":
@@ -191,6 +204,7 @@ class Coverage:
             unreadable=unreadable,
             unauthorized=unauthorized,
             truncated=truncated,
+            undetermined=undetermined,
             derivation=derivation,
             where=where,
         )
@@ -223,9 +237,13 @@ class Coverage:
 
         `unaccounted` counts against it for the same reason one layer down: a record that cannot say
         what happened to an expectation has not established that nothing happened to it.
+
+        `undetermined` counts against it hardest of all: there was no denominator, so there is no
+        ratio, so there is nothing here that could be complete.
         """
         return not (
-            self.missing
+            self.undetermined
+            or self.missing
             or self.unaccounted
             or self.gone
             or self.ambiguous
@@ -257,6 +275,11 @@ class Coverage:
         Deliberately leads with the ratio, because "22 of 24" is the thing that makes someone look
         twice at an answer that otherwise reads as finished.
         """
+        if self.undetermined:
+            # Before the empty-expected branch: an empty expected set because nothing was REQUIRED
+            # and an empty one because nothing could be WORKED OUT are opposite facts.
+            return f"Nothing was checked — {self.undetermined}"
+
         if not self.expected:
             return self.scope_label or "Nothing was required."
 
@@ -306,6 +329,7 @@ class Coverage:
             "unreadable": dict(self.unreadable),
             "unauthorized": dict(self.unauthorized),
             "truncated": self.truncated,
+            "undetermined": self.undetermined,
             "derivation": self.derivation,
             "where": self.where,
             "found": [
