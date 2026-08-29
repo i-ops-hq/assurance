@@ -109,3 +109,53 @@ def test_detect_series_counterfactual_two_files_must_not_infer():
     """Counterfactual: two monthly files must not establish a range."""
     names = ["2024-01.csv", "2024-12.csv"]
     assert detect_series(names) is None
+
+
+# --- the separator, widened 2026-08-29 -------------------------------------------------------------
+#
+# `--expect numbered` was an advertised choice that matched almost nothing real: the pattern required
+# an underscore, so `run_001` worked and `INV-0001` and `report-001` did not. Found by running the
+# documented command rather than reading it. Safe to widen because NUMBERED is tried LAST in
+# `point_from_filename` — it only ever sees a name no date format claimed.
+
+
+@pytest.mark.parametrize(
+    "names, prefix",
+    [
+        (["INV-0001.txt", "INV-0002.txt", "INV-0003.txt"], "inv"),
+        (["run_001.log", "run_002.log", "run_003.log"], "run"),
+        (["report.014.md", "report.015.md", "report.016.md"], "report"),
+    ],
+)
+def test_a_numbered_run_is_detected_whichever_separator_it_uses(names, prefix) -> None:
+    detected = detect_series(names)
+
+    assert detected is not None and detected.kind is SeriesKind.NUMBERED
+    assert point_from_filename(names[0]).prefix == prefix
+
+
+def test_a_bare_number_is_still_declined() -> None:
+    """`0001.txt` is not distinguishable from a year, a version, or an id. Guessing at a denominator
+    is worse than declining to give one."""
+    assert detect_series(["0001.txt", "0002.txt", "0003.txt"]) is None
+
+
+def test_widening_the_separator_did_not_let_it_steal_a_date() -> None:
+    detected = detect_series(["2024-01-r.csv", "2024-02-r.csv", "2024-03-r.csv"])
+
+    assert detected is not None and detected.kind is SeriesKind.MONTHLY
+
+
+def test_a_missing_item_is_named_the_way_the_user_would_search_for_it() -> None:
+    """`INV-0006.csv` was reported as "inv 6", which nobody can grep for. The KEY stays normalised
+    because it is the join between expected and found; the LABEL follows the folder."""
+    start = point_from_filename("INV-0001.csv")
+    end = point_from_filename("INV-0008.csv")
+
+    assert start.key == "inv_0001"
+    assert start.label == "INV-0001"
+    assert [label for _, label in enumerate_between(start, end)][5] == "INV-0006"
+
+
+def test_the_underscore_form_reads_as_it_always_did() -> None:
+    assert point_from_filename("run_001.log").label == "run_001"

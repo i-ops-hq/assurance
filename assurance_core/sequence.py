@@ -8,7 +8,7 @@ across I-Ops; this module adds broader shapes without breaking it. Monthly parsi
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol
 
@@ -77,8 +77,19 @@ class NumberedPoint:
     """One step in a numbered run series — `run_001`, `experiment_042`."""
 
     prefix: str
+    """Lowercased, and part of the stable KEY. The key is the join between expected and found, so it
+    is normalised and never changes shape."""
     number: int
     width: int = 3
+    separator: str = field(default="_", compare=False)
+    """The separator observed in the filenames, carried so the LABEL can be searched for."""
+    shown: str = field(default="", compare=False)
+    """The prefix as the user actually wrote it — `INV`, not `inv`. Same reason."""
+
+    # Both are `compare=False` on purpose: they are how the item is DISPLAYED, not which item it is.
+    # `INV-0006` and `inv_0006` are the same step of the same series, and a set or a dict keyed by
+    # points must agree with that. Identity stays prefix + number + width, which is also what
+    # `order=True` sorts on and what `_numbered_between` compares.
 
     @property
     def key(self) -> str:
@@ -86,7 +97,13 @@ class NumberedPoint:
 
     @property
     def label(self) -> str:
-        return f"{self.prefix} {self.number}"
+        """What a person reads, and — this is the point — what they can search their folder for.
+
+        Until 0.3.0 this was `f"{prefix} {number}"`, so a missing `INV-0006.csv` was reported as
+        "inv 6". Zero padding, the original case and the observed separator all matter, because the
+        one thing someone does with this sentence is go and look for the item it names.
+        """
+        return f"{self.shown or self.prefix}{self.separator}{self.number:0{self.width}d}"
 
 
 class SequencePoint(Protocol):
@@ -120,7 +137,13 @@ def point_label(point: Period | QuarterlyPoint | WeeklyPoint | DailyPoint | Numb
 _QUARTERLY = re.compile(r"(?<!\d)(20\d{2})[-_ ]?Q([1-4])(?!\d)", re.IGNORECASE)
 _WEEKLY = re.compile(r"(?<!\d)(20\d{2})[-_ ]?W(\d{1,2})(?!\d)", re.IGNORECASE)
 _DAILY = re.compile(r"(?<!\d)(20\d{2})[-_/](\d{1,2})[-_/](\d{1,2})(?!\d)")
-_NUMBERED = re.compile(r"(?i)([a-z][a-z0-9]*)_(\d{2,})")
+# Separator is `-`, `_` or `.`, because `INV-0001`, `run_001` and `report.014` are all the same
+# idea and only one of them was matched until 0.3.0. Safe to widen: NUMBERED is tried LAST in
+# `point_from_filename`, after monthly, quarterly, weekly and daily, so it can only ever see a
+# name that no date format already claimed. A letter prefix is still required — a bare `0001`
+# is not distinguishable from a year, a version, or an id, and guessing would be worse than
+# declining.
+_NUMBERED = re.compile(r"(?i)([a-z][a-z0-9]*)([-_.])(\d{2,})")
 
 
 def _valid_quarter(year: int, quarter: int) -> QuarterlyPoint | None:
@@ -181,9 +204,14 @@ def point_from_filename(name: str) -> Period | QuarterlyPoint | WeeklyPoint | Da
 
     match = _NUMBERED.search(name)
     if match:
-        prefix = match.group(1).lower()
-        raw = match.group(2)
-        return NumberedPoint(prefix=prefix, number=int(raw), width=len(raw))
+        raw = match.group(3)
+        return NumberedPoint(
+            prefix=match.group(1).lower(),
+            number=int(raw),
+            width=len(raw),
+            separator=match.group(2),
+            shown=match.group(1),
+        )
 
     return None
 
@@ -332,7 +360,13 @@ def _numbered_between(start: NumberedPoint, end: NumberedPoint) -> list[Numbered
         return []
     width = max(start.width, end.width)
     return [
-        NumberedPoint(prefix=start.prefix, number=n, width=width)
+        NumberedPoint(
+            prefix=start.prefix,
+            number=n,
+            width=width,
+            separator=start.separator,
+            shown=start.shown,
+        )
         for n in range(start.number, end.number + 1)
     ]
 
@@ -382,8 +416,14 @@ def parse_point(text: str, kind: SeriesKind) -> Period | QuarterlyPoint | Weekly
     if kind is SeriesKind.NUMBERED:
         match = _NUMBERED.search(body)
         if match:
-            raw = match.group(2)
-            return NumberedPoint(prefix=match.group(1).lower(), number=int(raw), width=len(raw))
+            raw = match.group(3)
+            return NumberedPoint(
+                prefix=match.group(1).lower(),
+                number=int(raw),
+                width=len(raw),
+                separator=match.group(2),
+                shown=match.group(1),
+            )
         if body.isdigit():
             return NumberedPoint(prefix="", number=int(body), width=len(body))
     return None

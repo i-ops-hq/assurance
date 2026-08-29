@@ -207,3 +207,146 @@ def test_a_complete_input_set_lets_a_fully_checked_run_be_verified():
         }
     )
     assert outcome is Outcome.VERIFIED_COMPLETE
+
+
+# --- the ergonomics defect: an API that produced the answer it exists to prevent ------------------
+#
+# Found 2026-08-29 while broadening the package for outside use. The plain constructor takes
+# `missing` as an argument, so the obvious first call a reader writes — expected plus found — read
+# eleven of twelve months and reported `complete is True`. Upstream I-Ops was never exposed: all
+# three of its call sites classify each expectation as they walk it. That is the point. The
+# invariant was being held by convention in three places rather than by the type, and an outside
+# caller inherits none of the convention.
+
+
+def test_the_naive_construction_cannot_report_complete() -> None:
+    """The regression guard for the defect itself: expected without missing is not completion."""
+    naive = Coverage(scope_label="months", expected=_months("m1", "m2"), found=_found("m1"))
+
+    assert naive.complete is False
+    assert [e.key for e in naive.unaccounted] == ["m2"]
+    assert "does not say what happened to m2" in naive.summary()
+
+
+def test_of_derives_the_gap_so_the_caller_cannot_drop_one() -> None:
+    coverage = Coverage.of(expected=["m1", "m2", "m3"], found=["m1", "m3"], scope_label="months")
+
+    assert coverage.complete is False
+    assert [e.key for e in coverage.missing] == ["m2"]
+    assert coverage.unaccounted == []
+    assert coverage.summary() == "2 of 3 months — not in this folder: m2"
+
+
+def test_of_accepts_bare_keys_and_typed_records_interchangeably() -> None:
+    """Two lists of strings is the smallest useful call; the typed path must stay available."""
+    bare = Coverage.of(expected=["a", "b"], found=["a"])
+    typed = Coverage.of(expected=_months("a", "b"), found=_found("a"))
+
+    assert bare.read == typed.read == 1
+    assert bare.required == typed.required == 2
+    assert [e.key for e in bare.missing] == [e.key for e in typed.missing] == ["b"]
+
+
+def test_a_bare_key_is_not_recorded_as_a_path() -> None:
+    """Inventing provenance the caller never claimed would make the evidence record a liar."""
+    coverage = Coverage.of(expected=["chunk-7"], found=["chunk-7"])
+
+    assert coverage.found["chunk-7"].path == ""
+
+
+def test_duplicate_expectations_do_not_inflate_the_denominator() -> None:
+    """A scope naming March twice does not make an answer one month better."""
+    coverage = Coverage.of(expected=["m1", "m1", "m2"], found=["m1", "m2"])
+
+    assert coverage.required == 2
+    assert coverage.complete is True
+
+
+def test_of_routes_each_expectation_to_exactly_one_outcome() -> None:
+    """found / gone / ambiguous / unreadable / unauthorized all suppress `missing` for their key."""
+    coverage = Coverage.of(
+        expected=["ok", "tombstoned", "two-candidates", "empty", "classified", "absent"],
+        found=["ok"],
+        gone={"tombstoned": "tombstoned was here until Tuesday"},
+        ambiguous={"two-candidates": ["/a.csv", "/b.csv"]},
+        unreadable={"empty": "no rows"},
+        unauthorized={"classified": "finance-confidential"},
+    )
+
+    assert [e.key for e in coverage.missing] == ["absent"]
+    assert coverage.unaccounted == []
+    assert coverage.complete is False
+
+
+# --- the locus, so the sentence is not folder-shaped for callers who have no folder ---------------
+
+
+def test_the_default_locus_keeps_the_folder_sentence_unmoved() -> None:
+    assert "not in this folder: m2" in Coverage.of(expected=["m1", "m2"], found=["m1"]).summary()
+
+
+def test_a_caller_diffing_something_other_than_a_folder_names_its_own_locus() -> None:
+    coverage = Coverage.of(
+        expected=["doc-1", "doc-2"],
+        found=["doc-1"],
+        scope_label="documents the question spans",
+        where="the retrieved set",
+    )
+
+    assert coverage.summary() == (
+        "1 of 2 documents the question spans — not in the retrieved set: doc-2"
+    )
+
+
+# --- the record as data ---------------------------------------------------------------------------
+
+
+def test_to_dict_keeps_the_six_outcomes_apart() -> None:
+    """"Not in the folder", "a tombstone says it was here" and "you are not cleared for it" send a
+    reader to do three different things, so one `missing` bucket would destroy the vocabulary."""
+    payload = Coverage.of(
+        expected=["a", "b", "c"],
+        found=["a"],
+        gone={"b": "b was here until Tuesday"},
+    ).to_dict()
+
+    assert payload["complete"] is False
+    assert payload["read"] == 1 and payload["required"] == 3
+    assert [entry["key"] for entry in payload["missing"]] == ["c"]
+    assert payload["gone"] == {"b": "b was here until Tuesday"}
+    assert payload["unaccounted"] == []
+
+
+def test_to_dict_is_json_serialisable() -> None:
+    import json
+
+    json.dumps(Coverage.of(expected=["a"], found=_found("a")).to_dict())
+
+
+# --- the ratio must be against the denominator, not against the evidence pile -------------------
+#
+# Caught 2026-08-29 by running the new `assurance diff` rather than reading it: a retriever that
+# returned doc-1, doc-4 and doc-9 against a five-document scope printed "3 of 5". Two of the three
+# were among the five. Upstream was never exposed because its evidence is always derived from the
+# expectations; a caller diffing two independent sets is exposed immediately.
+
+
+def test_evidence_outside_the_scope_does_not_inflate_the_numerator() -> None:
+    coverage = Coverage.of(expected=["a", "b", "c"], found=["a", "z"])
+
+    assert coverage.read == 1
+    assert coverage.required == 3
+    assert coverage.summary().startswith("1 of 3")
+
+
+def test_evidence_outside_the_scope_is_still_recorded() -> None:
+    """It does not earn credit against the denominator; it is not thrown away either."""
+    coverage = Coverage.of(expected=["a"], found=["a", "z"])
+
+    assert set(coverage.found) == {"a", "z"}
+    assert [entry["key"] for entry in coverage.to_dict()["found"]] == ["a", "z"]
+
+
+def test_a_full_read_still_counts_every_expectation() -> None:
+    """The regression guard for the fix itself: the ordinary case must not move."""
+    assert Coverage.of(expected=["a", "b"], found=["a", "b"]).read == 2

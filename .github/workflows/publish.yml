@@ -1,13 +1,18 @@
 name: publish
 
-# Trusted Publishing (OIDC). No API token is stored anywhere — GitHub proves the
-# workflow's identity to PyPI directly. Before the first run, register a publisher at
+# Trusted Publishing (OIDC). No API token is stored anywhere — GitHub proves the workflow's identity
+# to PyPI directly. The publisher is registered per project at
 # https://pypi.org/manage/project/assurance-core/settings/publishing/
-#   owner: i-ops-hq   repository: assurance-core
-#   workflow: publish.yml   environment: pypi
+#   owner: i-ops-hq   repository: assurance-core   workflow: publish.yml   environment: pypi
 #
-# Then release by tagging: `git tag v0.1.1 && git push --tags`.
-# The version in pyproject.toml is the source of truth; the tag only triggers.
+# RELEASING: pyproject.toml is the version. The tag only triggers.
+#   1. bump `version` in pyproject.toml   2. commit   3. `git tag vX.Y.Z && git push --tags`
+#
+# Two guards below, both of which exist because both failures actually happened on 2026-08-29:
+#   - a tag that disagrees with pyproject.toml rebuilt the OLD version and died on a PyPI 400
+#     ninety seconds later, with a red X on a release that never happened
+#   - re-running a workflow for a version already on PyPI failed the same way, so every repo
+#     carried failed deployments for packages that were live and fine
 
 on:
   push:
@@ -17,19 +22,51 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      already-on-pypi: ${{ steps.published.outputs.already }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: |
+
+      - name: The tag must agree with pyproject.toml
+        id: version
+        run: |
+          VERSION=$(python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "pyproject.toml declares $VERSION"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [ "$TAG" != "$VERSION" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME would publish $VERSION, not $TAG. The tag only triggers; pyproject.toml is the version. Bump the file, commit, delete the tag, then retag."
+              exit 1
+            fi
+          fi
+
+      - name: Is this version already on PyPI?
+        id: published
+        run: |
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/assurance-core/${{ steps.version.outputs.version }}/json")
+          if [ "$CODE" = "200" ]; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::assurance-core ${{ steps.version.outputs.version }} is already on PyPI. Building and testing anyway; the upload will be skipped rather than failed."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and check the distributions
+        run: |
           python -m pip install --upgrade pip build twine
           python -m build
           python -m twine check dist/*
+
       - name: Tests must pass before anything is published
         run: |
           python -m pip install -e ".[dev]"
           python -m pytest -q
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -37,6 +74,9 @@ jobs:
 
   publish:
     needs: build
+    # A version already on PyPI is not a failure, it is a no-op. Skipping keeps the deployment
+    # record honest: the environment shows releases that happened, and nothing else.
+    if: needs.build.outputs.already-on-pypi != 'true'
     runs-on: ubuntu-latest
     # A dedicated environment so publishing rights are not implied by commit access.
     environment: pypi
@@ -48,3 +88,6 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Belt and braces against a race between the check above and the upload.
+          skip-existing: true
