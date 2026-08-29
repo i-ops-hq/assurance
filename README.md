@@ -1,5 +1,10 @@
 # assurance-core
 
+[![PyPI](https://img.shields.io/pypi/v/assurance-core)](https://pypi.org/project/assurance-core/)
+[![Tests](https://github.com/i-ops-hq/assurance-core/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance-core/actions/workflows/tests.yml)
+[![Python](https://img.shields.io/pypi/pyversions/assurance-core)](https://pypi.org/project/assurance-core/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance-core/blob/main/LICENSE)
+
 **We don't score completion. We check it — against conditions declared before the run, by code that
 isn't the worker.**
 
@@ -18,15 +23,10 @@ pip install assurance-core
 ```
 
 Python 3.10 or newer. **Zero dependencies** — nothing is pulled in, nothing phones home.
-Not on PyPI yet, so until it is:
-
-```bash
-pip install git+https://github.com/i-ops-hq/assurance-core.git
-```
 
 ## Use it in your own agent
 
-Two runnable examples in [`examples/`](examples). The first is the question almost nobody asks:
+Two runnable examples in [`examples/`](https://github.com/i-ops-hq/assurance-core/tree/main/examples). The first is the question almost nobody asks:
 
 ```python
 from assurance_core.coverage import Coverage, EvidenceRef, Expectation
@@ -153,12 +153,12 @@ python -c "import sys; assert not [m for m in sys.modules if m.startswith('app.'
 
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](https://github.com/i-ops-hq/assurance-core/blob/main/LICENSE).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Feature requests belong upstream.
+See [CONTRIBUTING.md](https://github.com/i-ops-hq/assurance-core/blob/main/CONTRIBUTING.md). Feature requests belong upstream.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md).
+See [SECURITY.md](https://github.com/i-ops-hq/assurance-core/blob/main/SECURITY.md).
