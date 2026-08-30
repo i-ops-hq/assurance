@@ -42,9 +42,8 @@ operation or force an approval gate*, not "log a warning".
 **unapproved** — `pay`, `transfer` and `execute` among the things it let through. So `for_capability`
 treats an unrecognised capability as holding **all three** properties. A capability this module has
 never heard of is exactly the case where guessing "probably harmless" is how the gate fails.
-`test_every_registered_capability_declares_its_properties` is the drift gate that keeps the table
-honest; the table lives here because `app.core` must not import `app.services`, so it is a mirror in
-the same sense `schemas.agents.OrchestratorCapability` is.
+The properties are DERIVED from what a capability does, by `properties_from(table)`, so they are
+never a second thing to declare beside the effects and cannot drift from them.
 
 ## The calibration, and the risk in it
 
@@ -92,10 +91,9 @@ class Property(str, Enum):
     EGRESS = "egress"
 
 
-# What each capability grants. Mirrors the registry the way `schemas.agents` mirrors
-# `orchestrator.Capability`, because `app.core` must not import `app.services` — and it is gated by
-# `test_every_registered_capability_declares_its_properties` for exactly the reason that mirror is:
-# the last unguarded mirror in this repo drifted for nine days.
+# What each capability grants, derived from what it DOES rather than declared a second time. The
+# last unguarded mirror in the system this was cut from drifted for nine days, so a derivation is
+# preferred to a pair wherever one is available.
 #
 # `EGRESS` here must agree with `orchestrator.outward_capabilities()`, and a test checks that too.
 # Derived from `app.core.effects`, not declared a second time.

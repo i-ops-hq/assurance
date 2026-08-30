@@ -58,9 +58,9 @@ def extract_numeric_tokens(text: str) -> set[str]:
 # bug**: `.rtf` is in `orchestrator.DOCUMENT_EXT` and was absent from the first version of this list,
 # so the leak stayed fully live for RTF — a first-class supported type — while looking fixed.
 #
-# `assurance_core` must not import `app.services`, so this cannot BE those sets; it mirrors them, and
-# `tests/test_semantic_checks.py::test_every_supported_file_type_is_stripped` walks them against it.
-# Same arrangement as `schemas.agents.OrchestratorCapability`, for the same reason.
+# A pure module cannot import the service layer that owns those sets, so this cannot BE them; it
+# mirrors them, and a test walks the two against each other. An unguarded mirror in the system this
+# was cut from drifted for nine days, which is why the guard is not optional.
 DOCUMENT_LIKE_EXTENSIONS: frozenset[str] = frozenset(
     {
         # orchestrator.TABULAR_EXT
