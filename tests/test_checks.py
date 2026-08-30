@@ -108,3 +108,15 @@ def test_a_file_where_a_folder_was_expected_says_so(tmp_path) -> None:
     target.write_text("a,b\n1,2\n", encoding="utf-8")
 
     assert "not a directory" in list_dated_files(str(target))["error"]
+
+
+def test_the_agent_is_told_which_names_could_not_be_read(tmp_path) -> None:
+    """An agent asked to explain a gap can now distinguish "never produced" from "named
+    differently" without a second tool call, because the evidence is in the same record."""
+    for month in ("01", "02", "04"):
+        (tmp_path / f"2025-{month}-report.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (tmp_path / "March FINAL v2.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = check_coverage(str(tmp_path))
+
+    assert result["coverage"]["unmatched"] == ["March FINAL v2.csv"]
