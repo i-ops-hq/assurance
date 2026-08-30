@@ -31,7 +31,7 @@ from typing import Any
 
 from assurance_core.effects import Effect
 from assurance_core.policy import Mode, Policy, Request, Rule
-from assurance_core.worker import VINCI
+from assurance_core.worker import WorkerDefinition
 
 KNOWN_EFFECTS = frozenset(e.value for e in Effect)
 
@@ -216,11 +216,17 @@ def policy_from_document(document: dict[str, Any]) -> Policy:
     return Policy(deny=parsed.deny, allow=parsed.allow, mode=parsed.mode)
 
 
-def default_allow_vinci() -> tuple[tuple[str, Rule], ...]:
-    """The shipped default allow — same predicate `run_policy` uses with no file."""
+def default_allow(worker: WorkerDefinition) -> tuple[tuple[str, Rule], ...]:
+    """The shipped default allow — the same predicate `run_policy` uses with no file.
+
+    Takes the worker rather than closing over one. An earlier form hardcoded a single worker id,
+    which meant **no outside caller could use it at all**: it allowed a worker they do not run and
+    denied the one they do. A published function nobody but its author can call is worse than one
+    that was never published.
+    """
     return (
         (
-            "workspace user may have Vinci produce effects it can be held to",
-            lambda r: r.worker.worker_id == VINCI.worker_id,
+            f"workspace user may have {worker.display_name} produce effects it can be held to",
+            lambda r: r.worker.worker_id == worker.worker_id,
         ),
     )

@@ -8,7 +8,19 @@ from assurance_core.effects import Effect
 from assurance_core.policy import Mode, Request, decide
 from assurance_core.policy_config import PolicyConfigError, parse_policy_document, policy_from_document
 from assurance_core.principal import Principal, PrincipalKind
-from assurance_core.worker import VINCI, WorkerDefinition, WorkerSurface
+from assurance_core.worker import WorkerDefinition, WorkerSurface
+
+
+# A worker to test against, defined HERE rather than imported from the library.
+# This module used to export a named constant for one specific product's worker, which is how
+# three outside reviewers concluded the package was that product's SDK. A library ships the
+# type; the caller brings the instance, and its own tests are the first caller to prove it.
+EXAMPLE_WORKER = WorkerDefinition(
+    worker_id="example-worker",
+    display_name="Example Worker",
+    provider="example",
+    surfaces=frozenset(WorkerSurface),
+)
 
 
 def _user() -> Principal:
@@ -38,7 +50,7 @@ def test_rule_cannot_carry_executable_code():
                 "allow": [
                     {
                         "name": "evil",
-                        "worker": "vinci",
+                        "worker": "example-worker",
                         "eval": "True",
                     }
                 ]
@@ -71,8 +83,8 @@ def test_dry_run_in_file_yields_observed_only_and_structural_refusals_do_not_sof
             ],
             "allow": [
                 {
-                    "name": "vinci may act",
-                    "worker": "vinci",
+                    "name": "the example worker may act",
+                    "worker": "example-worker",
                 }
             ],
         }
@@ -80,7 +92,7 @@ def test_dry_run_in_file_yields_observed_only_and_structural_refusals_do_not_sof
     assert policy.mode is Mode.DRY_RUN
 
     denied = decide(
-        Request(principal=_user(), worker=VINCI, effect=Effect.STAGE),
+        Request(principal=_user(), worker=EXAMPLE_WORKER, effect=Effect.STAGE),
         policy,
     )
     assert denied.allowed is False

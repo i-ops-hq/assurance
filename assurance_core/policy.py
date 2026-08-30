@@ -192,7 +192,7 @@ def decide(request: Request, policy: Policy) -> Decision:
     **Why step 1 is here and not in a deny rule.** It WAS a deny rule, in `decision_log.run_policy`,
     and a fresh-context review found the hole: `run_plan` lets a caller inject its own `Policy` via
     `context["policy"]`, and an injected policy without that rule permitted `SEND` and `DESTROY` for
-    Vinci. A protection that lives in one factory function is a property of that function, not of
+    a fully integrated worker. A protection that lives in one factory function is a property of that function, not of
     the system. Verified by constructing such a policy and asking — it returned `allowed=True`.
     """
     needed = EFFECT_NEEDS.get(request.effect)

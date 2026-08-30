@@ -106,12 +106,11 @@ Every module is walked by an AST test that fails on a model or service import. C
 
 - **It will not derive your expected set.** That's your declaration on purpose — a denominator a
   tool invents is one nobody can argue with
-- **Some modules carry I-Ops' own data as their worked example.** `worker.VINCI` is a
-  `WorkerDefinition` for our product, `policy_config.default_allow_vinci()` builds a rule set around
-  it, and `effects.CAPABILITY_EFFECTS` is our capability table (`draft`, `render`, and what may
-  stage a Gmail draft). They are there because this is a publication of a working system, not a
-  clean-room SDK — but they are **examples, not the interface**. `coverage`, `staleness`,
-  `admission`, `sequence` and `report_period` carry nothing product-specific
+- **`effects.CAPABILITY_EFFECTS` is still our capability table** (`draft`, `render`, and what may
+  stage a mail draft). The *idea* is reusable — declare what a capability does once, derive
+  `outward` from it, keep a set of effects nothing may hold — but the table itself describes our
+  runtime, not yours. Read it as a worked example. Everything else here is generic: as of 0.5.0 the
+  library ships worker and policy **types**, and you bring your own instances
 - **Many conditions still have no verifier**, so the honest answer stays *complete but unverified*
 - **Source admission is provenance-only** — inert on a corpus with no tombstones or supersessions
 - **Staleness needs a prior artifact record**, which this library does not provide

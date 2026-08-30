@@ -21,7 +21,6 @@ from assurance_core.principal import (
 )
 from assurance_core.worker import (
     REQUIRES,
-    VINCI,
     Guarantee,
     WorkerDefinition,
     WorkerIntegrationLevel,
@@ -29,6 +28,18 @@ from assurance_core.worker import (
     claim_refused,
     guarantees_for,
     level_for,
+)
+
+
+# A worker to test against, defined HERE rather than imported from the library.
+# This module used to export a named constant for one specific product's worker, which is how
+# three outside reviewers concluded the package was that product's SDK. A library ships the
+# type; the caller brings the instance, and its own tests are the first caller to prove it.
+EXAMPLE_WORKER = WorkerDefinition(
+    worker_id="example-worker",
+    display_name="Example Worker",
+    provider="example",
+    surfaces=frozenset(WorkerSurface),
 )
 
 INTERN = Principal("intern", PrincipalKind.USER, "Intern")
@@ -185,8 +196,8 @@ def test_the_level_is_derived_and_not_a_field():
 
 
 def test_our_own_worker_derives_native():
-    assert VINCI.integration_level is WorkerIntegrationLevel.NATIVE
-    assert VINCI.guarantees == frozenset(Guarantee)
+    assert EXAMPLE_WORKER.integration_level is WorkerIntegrationLevel.NATIVE
+    assert EXAMPLE_WORKER.guarantees == frozenset(Guarantee)
 
 
 def test_a_refusal_names_what_would_be_needed():

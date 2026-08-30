@@ -28,7 +28,19 @@ from assurance_core.principal import (
     delegate,
     resolve,
 )
-from assurance_core.worker import VINCI, Guarantee, WorkerDefinition, WorkerSurface
+from assurance_core.worker import Guarantee, WorkerDefinition, WorkerSurface
+
+
+# A worker to test against, defined HERE rather than imported from the library.
+# This module used to export a named constant for one specific product's worker, which is how
+# three outside reviewers concluded the package was that product's SDK. A library ships the
+# type; the caller brings the instance, and its own tests are the first caller to prove it.
+EXAMPLE_WORKER = WorkerDefinition(
+    worker_id="example-worker",
+    display_name="Example Worker",
+    provider="example",
+    surfaces=frozenset(WorkerSurface),
+)
 
 MANAGER = Principal("mgr", PrincipalKind.USER, "Manager")
 INTERN = Principal("intern", PrincipalKind.USER, "Intern")
@@ -64,18 +76,18 @@ def test_the_same_effects_are_permitted_for_a_worker_we_supervise():
     produced = [e for e in EFFECT_NEEDS if e not in NOT_YET_PRODUCED]
     assert produced, "if nothing is produced this test proves nothing at all"
     for effect in produced:
-        assert decide(Request(MANAGER, VINCI, effect), PERMISSIVE).allowed, effect
+        assert decide(Request(MANAGER, EXAMPLE_WORKER, effect), PERMISSIVE).allowed, effect
 
 
 @pytest.mark.parametrize("effect", sorted(NOT_YET_PRODUCED, key=lambda e: e.value))
 def test_an_effect_nothing_produces_is_refused_even_for_the_worker_we_built(effect):
     """The other half of "not a blanket refusal": the blanket exists, and it is a different one.
 
-    A black-box worker is refused because we cannot supervise it. Vinci is refused because the
+    A black-box worker is refused because we cannot supervise it. A native one is refused because the
     product does not do this at all. Both refuse; the reasons are not interchangeable, and an
     operator reading the feed should be able to tell which one they are looking at.
     """
-    decision = decide(Request(MANAGER, VINCI, effect), PERMISSIVE)
+    decision = decide(Request(MANAGER, EXAMPLE_WORKER, effect), PERMISSIVE)
 
     assert not decision.allowed
     assert decision.source == "not_produced"
@@ -105,7 +117,7 @@ def test_a_worker_that_cannot_say_what_it_read_may_not_read():
 
 
 def test_nothing_is_permitted_by_default():
-    assert not decide(Request(MANAGER, VINCI, Effect.READ), Policy()).allowed
+    assert not decide(Request(MANAGER, EXAMPLE_WORKER, Effect.READ), Policy()).allowed
 
 
 def test_deny_beats_allow():
@@ -114,8 +126,8 @@ def test_deny_beats_allow():
         allow=(("anything", lambda r: True),),
     )
 
-    assert not decide(Request(MANAGER, VINCI, Effect.STAGE), policy).allowed
-    assert decide(Request(MANAGER, VINCI, Effect.READ), policy).allowed
+    assert not decide(Request(MANAGER, EXAMPLE_WORKER, Effect.STAGE), policy).allowed
+    assert decide(Request(MANAGER, EXAMPLE_WORKER, Effect.READ), policy).allowed
 
 
 def test_a_broken_deny_rule_still_denies_and_a_broken_allow_does_not_permit():
@@ -123,10 +135,10 @@ def test_a_broken_deny_rule_still_denies_and_a_broken_allow_does_not_permit():
     def boom(_request):
         raise RuntimeError("bad rule")
 
-    denied = decide(Request(MANAGER, VINCI, Effect.READ), Policy(deny=(("broken", boom),)))
+    denied = decide(Request(MANAGER, EXAMPLE_WORKER, Effect.READ), Policy(deny=(("broken", boom),)))
     assert not denied.allowed
 
-    allowed = decide(Request(MANAGER, VINCI, Effect.READ), Policy(allow=(("broken", boom),)))
+    allowed = decide(Request(MANAGER, EXAMPLE_WORKER, Effect.READ), Policy(allow=(("broken", boom),)))
     assert not allowed.allowed
 
 
@@ -135,7 +147,7 @@ def test_a_rule_that_returns_a_non_boolean_is_broken_not_a_no_match():
     disables a rule still listed as in force."""
     policy = Policy(deny=(("looks like a label", lambda r: "nothing may stage"),))
 
-    assert not decide(Request(MANAGER, VINCI, Effect.STAGE), policy).allowed
+    assert not decide(Request(MANAGER, EXAMPLE_WORKER, Effect.STAGE), policy).allowed
 
 
 def test_dry_run_forwards_a_rule_refusal_and_still_reports_it():
@@ -143,7 +155,7 @@ def test_dry_run_forwards_a_rule_refusal_and_still_reports_it():
         deny=(("nothing may stage", lambda r: r.effect is Effect.STAGE),), mode=Mode.DRY_RUN
     )
 
-    decision = decide(Request(MANAGER, VINCI, Effect.STAGE), policy)
+    decision = decide(Request(MANAGER, EXAMPLE_WORKER, Effect.STAGE), policy)
 
     assert not decision.allowed
     assert decision.forward and decision.observed_only
