@@ -154,3 +154,26 @@ def test_the_nested_record_agrees_with_the_wrapper(
 def test_a_folder_that_checks_out_still_exits_zero(monthly_folder: Path) -> None:
     """The counterweight: the ordinary path must not start failing."""
     assert main(["check", str(monthly_folder)]) == 0
+
+
+def test_a_file_named_outside_the_scheme_is_reported_beside_the_gap(tmp_path: Path) -> None:
+    """The case an outside reader described on 2026-08-29: eleven months parse, March is "not in
+    this folder", and a file called `March FINAL v2.csv` sits there unmentioned. Knowing a name here
+    could not be read is what separates "never produced" from "produced and named differently"."""
+    for month in ("01", "02", "04", "05", "06", "07", "08", "09", "10", "11", "12"):
+        (tmp_path / f"2025-{month}-report.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (tmp_path / "March FINAL v2.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = check_coverage(str(tmp_path))
+
+    assert result["coverage"]["unmatched"] == ["March FINAL v2.csv"]
+    assert "could not be read as any of them" in result["summary"]
+    assert "March FINAL v2.csv" in result["summary"]
+
+
+def test_a_folder_where_everything_parses_reports_nothing_unread(monthly_folder: Path) -> None:
+    """The clause must stay rare enough to mean something."""
+    result = check_coverage(str(monthly_folder))
+
+    assert result["coverage"]["unmatched"] == []
+    assert "could not be read" not in result["summary"]

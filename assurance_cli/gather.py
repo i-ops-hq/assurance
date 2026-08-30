@@ -25,6 +25,8 @@ from assurance_cli.profile import TABULAR_SUFFIXES, profile_file
 
 MAX_PERIODS = 36
 MAX_NUMBERED = 500
+# Enough to say "it is probably right there" without pasting a whole directory into one sentence.
+MAX_UNREAD = 20
 MIN_FILES_TO_INFER = 3
 
 _KIND_FROM_NAME = {
@@ -39,7 +41,7 @@ _KIND_FROM_NAME = {
 def list_dated_files(folder: str) -> dict[str, Any]:
     """List sequence points present in a folder from dated tabular filenames."""
     root = resolve_folder(folder)
-    by_key = _indexed_files(root)
+    by_key, unread = _indexed_files(root)
     keys = sorted(by_key)
     return {
         "folder": str(root),
@@ -65,7 +67,7 @@ def check_coverage(
 ) -> dict[str, Any]:
     """Check whether every step in the span is present — cold start, no prior state."""
     root = resolve_folder(folder)
-    by_key = _indexed_files(root)
+    by_key, unread = _indexed_files(root)
     if not by_key:
         return {
             "folder": str(root),
@@ -132,7 +134,7 @@ def check_coverage(
         truncated = f"stopped at {cap} {unit}"
         expected_keys = expected_keys[-cap:]
 
-    cov = Coverage(scope_label=scope, truncated=truncated, derivation=derivation)
+    cov = Coverage(scope_label=scope, truncated=truncated, derivation=derivation, unmatched=unread)
     for key, label in expected_keys:
         expectation = Expectation(key=key, label=label, why=derivation or f"in {scope}")
         cov.expected.append(expectation)
@@ -218,8 +220,17 @@ def check_staleness(
     return _finding_to_dict(finding)
 
 
-def _indexed_files(root: Path) -> dict[str, list[Path]]:
+def _indexed_files(root: Path) -> tuple[dict[str, list[Path]], list[str]]:
+    """The files that parse to a point, and the names of the tabular files that do not.
+
+    That second list used to be `continue` and nothing else. It is the difference between two causes
+    that produce an identical `missing` line — never produced, or produced under a name the
+    enumeration could not read — and it was being discarded at the one moment we had it. A folder of
+    twelve files, eleven parsing as months and one called "March FINAL v2.csv", reported March as
+    not in the folder and never mentioned the twelfth file anywhere.
+    """
     found: dict[str, list[Path]] = {}
+    unread: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in TABULAR_SUFFIXES:
             continue
@@ -231,10 +242,11 @@ def _indexed_files(root: Path) -> dict[str, list[Path]]:
             continue
         point = point_from_filename(path.name)
         if point is None:
+            unread.append(path.name)
             continue
         key = point_key(point)  # type: ignore[arg-type]
         found.setdefault(key, []).append(path)
-    return found
+    return found, unread[:MAX_UNREAD]
 
 
 def _label_for_key(key: str, filename: str) -> str:
@@ -296,6 +308,7 @@ def _coverage_to_dict(cov: Coverage) -> dict[str, Any]:
         "gone": dict(cov.gone),
         "ambiguous": dict(cov.ambiguous),
         "unreadable": dict(cov.unreadable),
+        "unmatched": list(cov.unmatched),
         "unauthorized": dict(cov.unauthorized),
         "truncated": cov.truncated,
         "undetermined": cov.undetermined,

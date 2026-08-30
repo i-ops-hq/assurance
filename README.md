@@ -72,6 +72,14 @@ assurance check ~/invoices --expect numbered
 Monthly, quarterly, weekly, daily, numbered. That last line is the **derivation**: it prints with
 every ratio so you can disagree with the denominator, not just the result.
 
+When a file is there under a name it can't read, it says so beside the gap, because that's the
+difference between *never produced* and *produced and named differently*:
+
+```
+11 of 12 months from 2025-01 to 2025-12 — not in this folder: March 2025
+— 1 name here could not be read as any of them: March FINAL v2.csv
+```
+
 ### `assurance init` — did anything change underneath?
 
 ```bash
