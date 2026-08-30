@@ -53,6 +53,10 @@ with `key`/`id`/`name`/`path`), **`-` for stdin**, or an **inline comma list**.
 
 ### `assurance check` — a folder of dated or numbered files
 
+**This one is for CI, not for an agent.** Anything with a shell will list the directory and spot the
+gap itself. We tested that and the run without our tool did better. The value here is a gate with no
+model in it, returning the same exit code every time.
+
 ```bash
 assurance check ~/reports
 ```
