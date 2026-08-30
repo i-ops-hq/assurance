@@ -120,17 +120,38 @@ def _keys_from_json(payload: Any, *, label: str) -> list[str]:
         if isinstance(entry, str):
             keys.append(entry)
         elif isinstance(entry, dict):
-            for field in ("key", "id", "name", "path"):
-                if isinstance(entry.get(field), str):
-                    keys.append(entry[field])
-                    break
-            else:
+            found = _identifier(entry)
+            if found is None:
                 raise KeySpecError(
-                    f"{label}: entry {index} is an object with no key/id/name/path field"
+                    f"{label}: entry {index} is an object with none of {', '.join(_ID_FIELDS)}, "
+                    "at the top level or under 'metadata'"
                 )
+            keys.append(found)
         else:
             raise KeySpecError(f"{label}: entry {index} is {type(entry).__name__}, not a key")
     return keys
+
+
+# What a chunk record from a vector store calls its parent document. `document`/`doc`/`source`
+# were added in 0.3.1 so a retrieval payload works without being reshaped first: chunks are what a
+# retriever returns, documents are what a scope is declared in, and the de-duplication below turns
+# five chunks of one document into one document covered. Diffing chunks directly is the mistake that
+# makes a coverage record report a gap nobody can ever close.
+_ID_FIELDS = ("key", "id", "name", "path", "document", "doc", "source", "document_id", "doc_id")
+
+
+def _identifier(entry: dict[str, Any]) -> str | None:
+    for field in _ID_FIELDS:
+        value = entry.get(field)
+        if isinstance(value, str) and value:
+            return value
+    metadata = entry.get("metadata")
+    if isinstance(metadata, dict):
+        for field in _ID_FIELDS:
+            value = metadata.get(field)
+            if isinstance(value, str) and value:
+                return value
+    return None
 
 
 def _dedupe(values: Any) -> list[str]:

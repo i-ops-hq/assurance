@@ -81,7 +81,7 @@ def test_an_object_entry_with_no_identifying_field_is_refused(tmp_path: Path) ->
     listing = tmp_path / "found.json"
     listing.write_text('[{"score": 0.9}]', encoding="utf-8")
 
-    with pytest.raises(KeySpecError, match="no key/id/name/path"):
+    with pytest.raises(KeySpecError, match="none of"):
         read_keys(str(listing), label="--found")
 
 
@@ -236,3 +236,48 @@ def test_a_single_line_is_never_a_table(tmp_path: Path) -> None:
     listing.write_text("a,b,c\n", encoding="utf-8")
 
     assert read_keys(str(listing), label="--expected") == ["a,b,c"]
+
+
+# --- a chunk payload from a vector store ---------------------------------------------------------
+#
+# Added 0.3.1 after building a real retrieval pipeline. A retriever returns chunks with the parent
+# document under `source` or `metadata.source`; a scope is declared in documents. Requiring the
+# caller to reshape that first is friction with no honesty benefit, and the de-duplication is what
+# turns five chunks of one document into one document covered.
+
+
+def test_a_vector_store_payload_is_read_without_reshaping(tmp_path: Path) -> None:
+    listing = tmp_path / "chunks.json"
+    listing.write_text(json.dumps([
+        {"text": "...", "score": 0.84, "metadata": {"source": "acme/msa-2023.md"}},
+        {"text": "...", "score": 0.77, "metadata": {"source": "acme/msa-2023.md"}},
+        {"text": "...", "score": 0.75, "metadata": {"source": "acme/sla-exhibit-b.md"}},
+    ]), encoding="utf-8")
+
+    assert read_keys(str(listing), label="--found") == ["acme/msa-2023.md", "acme/sla-exhibit-b.md"]
+
+
+@pytest.mark.parametrize("field", ["document", "doc", "source", "document_id", "doc_id"])
+def test_the_common_parent_document_fields_are_read(tmp_path: Path, field: str) -> None:
+    listing = tmp_path / "chunks.json"
+    listing.write_text(json.dumps([{field: "acme/msa-2023.md", "text": "..."}]), encoding="utf-8")
+
+    assert read_keys(str(listing), label="--found") == ["acme/msa-2023.md"]
+
+
+def test_five_chunks_from_two_documents_are_two_keys(tmp_path: Path) -> None:
+    """Five chunks of one document is one document covered, not five."""
+    listing = tmp_path / "chunks.json"
+    listing.write_text(json.dumps(
+        [{"source": "a.md"}] * 4 + [{"source": "b.md"}]), encoding="utf-8")
+
+    assert read_keys(str(listing), label="--found") == ["a.md", "b.md"]
+
+
+def test_a_chunk_with_no_identifying_field_still_refuses(tmp_path: Path) -> None:
+    """Widening the accepted fields must not turn into guessing at somebody's schema."""
+    listing = tmp_path / "chunks.json"
+    listing.write_text(json.dumps([{"text": "...", "score": 0.9}]), encoding="utf-8")
+
+    with pytest.raises(KeySpecError, match="none of"):
+        read_keys(str(listing), label="--found")

@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-cli"
-version = "0.3.0"
+version = "0.3.1"
 description = "CLI for folder assurance checks — coverage, staleness, and baselines."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "I-Ops Operations Intelligence, LLC", email = "hello@i-ops.dev" }]
 requires-python = ">=3.10"
 dependencies = [
-  "assurance-core>=0.4",
+  "assurance-core>=0.7",
   "openpyxl>=3.1",
 ]
 keywords = ["cli", "ai-agents", "governance", "auditing", "assurance", "reproducibility"]
