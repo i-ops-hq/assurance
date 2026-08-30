@@ -15,6 +15,7 @@ from assurance_cli.gather import list_dated_files as _list_dated_files
 # Re-export path helpers for tests that imported them here.
 from assurance_cli.paths import PathEscapeError, resolve_folder, resolve_inside  # noqa: F401
 from assurance_cli.profile import profile_file as profile_csv  # noqa: F401
+from assurance_core.retrieval import ChunkWithoutDocument, retrieval_coverage
 from assurance_cli.setdiff import diff_sets_from_lists
 
 
@@ -81,3 +82,25 @@ def check_set_coverage(
         where=where or "",
         derivation=derivation or "",
     )
+
+
+def check_retrieval_coverage(
+    expected_documents: list[str],
+    retrieved_chunks: list[Any],
+    scope: str | None = None,
+    derivation: str | None = None,
+) -> dict[str, Any]:
+    """Coverage for a retrieval step, mapping chunks to their parent documents first."""
+    try:
+        coverage = retrieval_coverage(
+            expected_documents,
+            retrieved_chunks,
+            scope_label=scope or "documents this question spans",
+            derivation=derivation or "",
+        )
+    except ChunkWithoutDocument as exc:
+        return _refused(str(exc))
+
+    payload = coverage.to_dict()
+    payload["out_of_scope"] = list(coverage.unmatched)
+    return payload

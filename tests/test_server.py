@@ -65,3 +65,60 @@ def test_set_coverage_never_invents_the_denominator() -> None:
 
     assert result["required"] == 0
     assert result["read"] == 0
+
+
+# --- the retrieval tool ----------------------------------------------------------------------------
+#
+# Added 0.3.1 from a real pipeline. `check_set_coverage_tool` diffs two sets of the same unit; a
+# retrieval step returns CHUNKS against a scope declared in DOCUMENTS, and diffing those directly
+# gives a record that can never be complete.
+
+
+def test_retrieval_coverage_maps_chunks_to_their_parent_documents() -> None:
+    import assurance_mcp.server as server
+
+    result = server.check_retrieval_coverage_tool(
+        expected_documents=[
+            "acme/msa-2023.md", "acme/amendment-1.md", "acme/amendment-2.md",
+            "acme/amendment-3.md", "acme/sla-exhibit-b.md",
+        ],
+        retrieved_chunks=[
+            {"metadata": {"source": "acme/msa-2023.md"}, "score": 0.84},
+            {"metadata": {"source": "acme/msa-2023.md"}, "score": 0.77},
+            {"metadata": {"source": "acme/sla-exhibit-b.md"}, "score": 0.75},
+            {"metadata": {"source": "globex/amendment-1.md"}, "score": 0.73},
+            {"metadata": {"source": "globex/msa-2024.md"}, "score": 0.72},
+        ],
+        scope="documents this question spans",
+    )
+
+    assert result["complete"] is False
+    assert result["read"] == 2 and result["required"] == 5
+    assert [e["key"] for e in result["missing"]] == [
+        "acme/amendment-1.md", "acme/amendment-2.md", "acme/amendment-3.md",
+    ]
+
+
+def test_documents_retrieved_from_outside_the_scope_are_named() -> None:
+    """On a multi-tenant corpus this is often the more alarming line: measured with
+    bge-small-en-v1.5, two Globex documents outranked the Acme amendment holding the answer."""
+    import assurance_mcp.server as server
+
+    result = server.check_retrieval_coverage_tool(
+        expected_documents=["acme/msa.md"],
+        retrieved_chunks=[{"source": "acme/msa.md"}, {"source": "globex/msa.md"}],
+    )
+
+    assert result["out_of_scope"] == ["globex/msa.md"]
+    assert result["complete"] is True, "retrieving extra is not a coverage gap"
+
+
+def test_a_chunk_with_no_document_field_tells_the_agent_what_to_pass() -> None:
+    import assurance_mcp.server as server
+
+    result = server.check_retrieval_coverage_tool(
+        expected_documents=["a.md"], retrieved_chunks=[{"text": "...", "score": 0.9}]
+    )
+
+    assert result["complete"] is False
+    assert "document_of" in result["error"]

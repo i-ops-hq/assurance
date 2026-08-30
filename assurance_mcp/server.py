@@ -7,6 +7,7 @@ from typing import Any
 from assurance_mcp import __version__
 from assurance_mcp.checks import (
     check_coverage,
+    check_retrieval_coverage,
     check_set_coverage,
     check_staleness,
     list_dated_files,
@@ -86,6 +87,36 @@ def check_set_coverage_tool(
     `unexpected` and deliberately earns no credit against the denominator.
     """
     return check_set_coverage(expected, found, scope=scope, where=where, derivation=derivation)
+
+
+@mcp.tool()
+def check_retrieval_coverage_tool(
+    expected_documents: list[str],
+    retrieved_chunks: list[Any],
+    scope: str | None = None,
+    derivation: str | None = None,
+) -> dict[str, Any]:
+    """Check a retrieval step: did something come back from every document the question spans?
+
+    Read-only, touches no filesystem. Use this instead of `check_set_coverage_tool` whenever the
+    thing you retrieved is CHUNKS, because the two sides are not the same unit.
+
+    `retrieved_chunks` may be document ids, or the records your vector store returned — the parent
+    document is read from `document`, `doc`, `source`, `path` or `id`, at the top level or under
+    `metadata`. Chunks are reduced to parent documents and de-duplicated: five chunks of one document
+    is one document covered, not five.
+
+    **Do not diff chunk ids against a document scope.** Top-k returns k chunks and a scope holds
+    more, so such a record can never be complete no matter how good the retrieval was.
+
+    `expected_documents` is YOUR declaration — a metadata filter, a graph walk, a join. Never the
+    retriever's own output: a denominator the retriever picks always reports that it did fine.
+
+    Returns the coverage record. Documents retrieved from OUTSIDE the declared scope appear under
+    `out_of_scope`; they earn no credit and do not make the run incomplete, but on a multi-tenant
+    corpus they are often the more alarming line.
+    """
+    return check_retrieval_coverage(expected_documents, retrieved_chunks, scope, derivation)
 
 
 def main() -> None:
