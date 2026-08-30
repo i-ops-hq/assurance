@@ -51,12 +51,60 @@ That is the structural difference from the folder demo. There, the agent had the
 and look. Here the corpus was read by *code*, before the model existed in the request, and the model
 was handed four chunks. It cannot list what it was not given, and neither can a better one.
 
-## Where the expected set comes from
+## Where the expected set comes from, and why it is a query
 
-`retriever.in_scope()` reads corpus metadata: `tenant=acme, doc_type in (msa, amendment, exhibit)`.
+`retriever.in_scope()` is a metadata query over the corpus:
+`scope_from_metadata(catalogue(), tenant="acme", doc_type=("msa", "amendment", "exhibit"))`.
+
 That is possible for the pipeline because the pipeline can see the corpus, and impossible for the
-model because it cannot. **The declaration is the caller's — that is the whole design.** A
-denominator the retriever chooses is a denominator that always reports the retriever did fine.
+model because it cannot. The declaration is the caller's, which is the whole design. A denominator
+the retriever chooses always reports that the retriever did fine.
+
+**The important part is what is not here. Nobody declared that amendment-3 supersedes msa-2023.**
+
+This framing came from a practitioner on r/Rag (u/lulu_dev, 2026-08-30), and it is a better argument
+than the one this demo originally made:
+
+> Build the expected set as a metadata query, not a pairwise declaration. "For this customer +
+> contract type, what does the corpus contain as of today" is answerable without anyone declaring
+> that amendment-3 specifically supersedes msa-2023. Then completeness is a set-membership check,
+> not a graph of hand-maintained anchors that can silently be incomplete.
+
+The alternative is a declared relationship, an anchor from one document to another, expanded at query
+time. That is a real design and a good one, and it captures something a metadata query cannot: *why*
+one document supersedes another. But a link somebody forgot to create looks exactly like a link
+nobody needed, and nothing at query time separates the two. **A metadata query catches the gap before
+anyone has got around to declaring anything.**
+
+Filters can be a value, a set of values, or a predicate, so "as of today" works:
+
+```python
+scope_from_metadata(catalogue, tenant="acme", effective_from=lambda d: d <= today)
+```
+
+The honest residual, and it is the same shape one level down. This moves the trust to the metadata.
+A document with no tenant tag falls out of the expected set and out of the retrieved set together, so
+the check passes and nothing says otherwise. Every fix here relocates the trust rather than removing
+it, which is worth knowing when you choose where to put yours.
+
+## Block, or warn?
+
+Also from that thread, and also better than what this demo had:
+
+> Tie it to downstream stakes rather than pick one universally. A dashboard summary or an internal
+> Slack answer, warn. Anything that becomes a customer-facing commitment, or feeds another automated
+> action, block, because the failure mode here isn't "wrong answer", it's "confidently wrong answer
+> that looks fully grounded".
+
+```python
+from assurance_core.retrieval import Stakes, response_for
+
+response_for(coverage, Stakes.ADVISORY)   # 'warn'   a person will read this
+response_for(coverage, Stakes.ACTIONED)   # 'block'  a machine acts on it, or it goes to a customer
+```
+
+A warning works when a human is going to look. When the next step is another machine, there is
+nobody to read it.
 
 ## The same check as one command
 

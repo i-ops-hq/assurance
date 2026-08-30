@@ -25,6 +25,7 @@ is often the more alarming line, so it is reported rather than dropped.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from enum import Enum
 from typing import Any
 
 from assurance_core.coverage import Coverage
@@ -105,3 +106,95 @@ def retrieval_coverage(
         unmatched=outside,
         unmatched_label="came from outside the declared scope",
     )
+
+
+# ---------------------------------------------------------------------------------------------------
+# Building the expected set, and deciding what to do about a gap.
+#
+# Both of these came from a practitioner on r/Rag (u/lulu_dev, 2026-08-30) answering the two questions
+# left open in the post announcing this module. They are recorded here because the answers were better
+# than the ones we had.
+# ---------------------------------------------------------------------------------------------------
+
+
+class Stakes(str, Enum):
+    """What happens downstream of the answer. **Declared by the caller, never inferred.**"""
+
+    ADVISORY = "advisory"
+    """A person reads the answer and judges it. A dashboard, an internal summary, a chat reply."""
+
+    ACTIONED = "actioned"
+    """The answer becomes a commitment to someone outside, or another automated step acts on it."""
+
+
+def response_for(coverage: Coverage, stakes: Stakes) -> str:
+    """`proceed`, `warn` or `block`, given a coverage record and what rides on the answer.
+
+    **This is policy, not arithmetic.** The library computes whether the set was covered; what to do
+    about a gap depends on consequences only the caller knows, so the caller declares them.
+
+    The rule is not ours. From a practitioner running this in production, asked whether a check like
+    this should block or warn:
+
+        > I'd tie it to downstream stakes rather than pick one universally. A dashboard summary or an
+        > internal Slack answer, warn, let the human see the caveat and judge for themselves. Anything
+        > that becomes a customer-facing commitment, or feeds another automated action, block, because
+        > the failure mode here isn't "wrong answer", it's "confidently wrong answer that looks fully
+        > grounded", and that's exactly the shape of mistake a human downstream won't catch by
+        > inspection.
+
+    That last clause is the whole argument. A warning works when a human is going to look. When the
+    next step is another machine, there is nobody to read the warning.
+    """
+    if coverage.complete:
+        return "proceed"
+    return "block" if stakes is Stakes.ACTIONED else "warn"
+
+
+def scope_from_metadata(
+    catalogue: Mapping[str, Mapping[str, Any]],
+    **filters: Any,
+) -> list[str]:
+    """The expected set as a **metadata query** over the corpus, rather than a list of declared pairs.
+
+    `catalogue` maps document id to its metadata. Each filter is matched against that metadata:
+
+    - a scalar matches by equality           `tenant="acme"`
+    - a collection matches by membership     `doc_type=("msa", "amendment")`
+    - a callable matches if it returns true  `effective_from=lambda d: d <= today`
+
+    Why this and not a graph of declared relationships. Asked how to build the expected set without
+    hand-declaring every supersession pair, the same practitioner pointed out that the documents
+    already carry what is needed:
+
+        > Build the expected set as a metadata query, not a pairwise declaration. "For this customer +
+        > contract type, what does the corpus contain as of today" is answerable without anyone
+        > declaring that amendment-3 specifically supersedes msa-2023. Then completeness is a
+        > set-membership check, not a graph of hand-maintained anchors that can silently be
+        > incomplete.
+
+    **That is the stronger argument, and it is theirs.** A declared link between two documents is a
+    thing somebody has to remember to create, and a missing link looks exactly like a link nobody
+    needed. A metadata query catches the gap *before anyone has got around to declaring anything*.
+
+    It does not replace declared relationships, which still capture WHY one document supersedes
+    another. It just does not depend on them to notice that the retrieval was short.
+
+    The honest residual: this moves the trust to the metadata. A document with no tenant tag falls out
+    of the expected set and out of the retrieved set together, so the check passes and nothing says
+    otherwise. Every fix in this area relocates the trust rather than removing it, which is worth
+    knowing when you decide where to put yours.
+    """
+    matched = []
+    for document, metadata in catalogue.items():
+        if all(_matches(metadata.get(field), wanted) for field, wanted in filters.items()):
+            matched.append(document)
+    return sorted(matched)
+
+
+def _matches(value: Any, wanted: Any) -> bool:
+    if callable(wanted):
+        return bool(wanted(value))
+    if isinstance(wanted, (list, tuple, set, frozenset)):
+        return value in wanted
+    return value == wanted

@@ -10,8 +10,11 @@ import pytest
 from assurance_core.coverage import Coverage
 from assurance_core.retrieval import (
     ChunkWithoutDocument,
+    Stakes,
     document_of,
+    response_for,
     retrieval_coverage,
+    scope_from_metadata,
 )
 
 SCOPE = [
@@ -145,3 +148,72 @@ def test_the_expected_set_is_never_taken_from_the_retriever() -> None:
 
 def test_duplicate_expectations_do_not_inflate_the_denominator() -> None:
     assert retrieval_coverage(["a", "a", "b"], [{"document": "a"}]).required == 2
+
+
+# --- the expected set as a metadata query --------------------------------------------------------
+#
+# From u/lulu_dev on r/Rag, 2026-08-30, answering how to build the expected set without hand-declaring
+# every supersession pair. Their argument was better than ours: a metadata query catches the gap
+# BEFORE anyone has got around to declaring a relationship, and a declared link that nobody created
+# looks exactly like a link nobody needed.
+
+CATALOGUE = {
+    "acme/msa-2023.md": {"tenant": "acme", "doc_type": "msa", "effective": "2023-01-01"},
+    "acme/amendment-3.md": {"tenant": "acme", "doc_type": "amendment", "effective": "2025-04-01"},
+    "acme/draft.md": {"tenant": "acme", "doc_type": "draft", "effective": "2026-01-01"},
+    "globex/msa.md": {"tenant": "globex", "doc_type": "msa", "effective": "2024-01-01"},
+}
+
+
+def test_a_scalar_filter_matches_by_equality() -> None:
+    assert scope_from_metadata(CATALOGUE, tenant="globex") == ["globex/msa.md"]
+
+
+def test_a_collection_filter_matches_by_membership() -> None:
+    assert scope_from_metadata(CATALOGUE, tenant="acme", doc_type=("msa", "amendment")) == [
+        "acme/amendment-3.md",
+        "acme/msa-2023.md",
+    ]
+
+
+def test_a_callable_filter_covers_as_of_dates() -> None:
+    """"What does the corpus contain as of today" is the case that makes this worth having."""
+    assert scope_from_metadata(CATALOGUE, tenant="acme", effective=lambda d: d <= "2025-12-31") == [
+        "acme/amendment-3.md",
+        "acme/msa-2023.md",
+    ]
+
+
+def test_the_query_finds_the_amendment_without_anyone_declaring_supersession() -> None:
+    """The whole point. Nobody had to record that amendment-3 supersedes msa-2023."""
+    scope = scope_from_metadata(CATALOGUE, tenant="acme", doc_type=("msa", "amendment"))
+
+    assert "acme/amendment-3.md" in scope
+
+
+def test_a_document_missing_the_field_does_not_match() -> None:
+    """The honest residual, made explicit. An untagged document falls out of the expected set, and
+    out of the retrieved set with it, so the check passes and nothing says otherwise."""
+    catalogue = dict(CATALOGUE, **{"acme/untagged.md": {"doc_type": "amendment"}})
+
+    assert "acme/untagged.md" not in scope_from_metadata(catalogue, tenant="acme")
+
+
+# --- block or warn, which is policy and not arithmetic --------------------------------------------
+
+
+def test_a_complete_run_proceeds_whatever_the_stakes() -> None:
+    complete = Coverage.of(expected=["a"], found=["a"])
+
+    assert response_for(complete, Stakes.ADVISORY) == "proceed"
+    assert response_for(complete, Stakes.ACTIONED) == "proceed"
+
+
+def test_a_gap_warns_when_a_person_will_read_it() -> None:
+    assert response_for(Coverage.of(expected=["a", "b"], found=["a"]), Stakes.ADVISORY) == "warn"
+
+
+def test_a_gap_blocks_when_the_next_step_is_a_machine() -> None:
+    """A warning works when a human is going to look. When another automated step acts on the
+    answer, there is nobody to read the warning."""
+    assert response_for(Coverage.of(expected=["a", "b"], found=["a"]), Stakes.ACTIONED) == "block"
