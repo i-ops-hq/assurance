@@ -5,12 +5,18 @@
 [![Python](https://img.shields.io/pypi/pyversions/assurance-mcp)](https://pypi.org/project/assurance-mcp/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance-mcp/blob/main/LICENSE)
 
-## Give your agent a way to find out what it missed.
+## For an agent that retrieves before it answers
 
-An agent can't audit its own reading. Ask one whether it saw everything and it says yes — from the
-inside, a complete answer and an answer built on two thirds of the data feel identical.
+If your agent can list the folder it is reasoning about, **you probably do not need this.** We A/B'd
+exactly that inside Cursor and the run *without* these tools did better: it listed the directory,
+spotted the odd filename, and checked itself. That is the right behaviour and we are not going to
+pretend otherwise.
 
-These tools answer it from the outside, in arithmetic, with **no model involved**.
+Where it earns its place is where the agent **cannot** see the whole set. It performed a retrieval and
+holds `k` results, and nothing in those results says what the other set contained. It cannot list what
+it was not given, and neither can a better model.
+
+`check_retrieval_coverage_tool` answers that, in arithmetic, with **no model involved**.
 
 **Read-only by construction.** No writes, no deletes, no network. Proven by
 `test_the_server_never_writes`: no tool opens a file for writing, and no `requests`, `urllib`,
