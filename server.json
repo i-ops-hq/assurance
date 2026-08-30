@@ -1,0 +1,19 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.i-ops-hq/assurance-mcp",
+  "title": "Assurance",
+  "description": "Read-only checks for what an agent did not read. Coverage over a retrieval step or a folder, with the gap named rather than inferred. No model decides any of it.",
+  "version": "0.4.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "assurance-mcp",
+      "version": "0.4.0",
+      "transport": { "type": "stdio" }
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/i-ops-hq/assurance-mcp",
+    "source": "github"
+  }
+}
