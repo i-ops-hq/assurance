@@ -178,7 +178,7 @@ def claim_refused(worker: WorkerDefinition, guarantee: Guarantee) -> str | None:
     """The sentence to show instead of a guarantee this worker cannot support, or None if it can.
 
     Written once, here, so a refusal cannot be phrased optimistically at a call site. `NORTH_STAR` §5:
-    *do not claim full policy enforcement, preflight, or recovery for a black-box worker unless I-Ops
+    *do not claim full policy enforcement, preflight, or recovery for a black-box worker unless the runtime
     actually controls those boundaries.*
     """
     if worker.honours(guarantee):

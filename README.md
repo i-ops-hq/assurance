@@ -98,7 +98,8 @@ Every module is walked by an AST test that fails on a model or service import. C
 | `staleness` | Do recorded figures still match the source? |
 | `admission` | Should this source inform the answer, given provenance? |
 | `verification` · `task_contract` · `run_outcome` | What was *done* meant to be, and what happened? |
-| `policy` · `principal` · `worker` · `effects` | Who may have which worker produce which effect? |
+| `effects` | What does a capability actually DO, and what may it never do? |
+| `policy` · `principal` · `worker` | Who may have which worker produce which effect? |
 | `rule_of_two` · `run_budget` | Too many risk properties at once? Limits enforced by code? |
 | `report_period` · `sequence` · `semantic_checks` | Which month, which series, which figure |
 
@@ -106,11 +107,10 @@ Every module is walked by an AST test that fails on a model or service import. C
 
 - **It will not derive your expected set.** That's your declaration on purpose — a denominator a
   tool invents is one nobody can argue with
-- **`effects.CAPABILITY_EFFECTS` is still our capability table** (`draft`, `render`, and what may
-  stage a mail draft). The *idea* is reusable — declare what a capability does once, derive
-  `outward` from it, keep a set of effects nothing may hold — but the table itself describes our
-  runtime, not yours. Read it as a worked example. Everything else here is generic: as of 0.5.0 the
-  library ships worker and policy **types**, and you bring your own instances
+- **Nothing here is one product's data any more.** As of 0.6.0 the library ships types and
+  derivations only; you bring the instances. `EffectTable`, `WorkerDefinition` and
+  `properties_from(table)` all take your runtime's capabilities, and a test walks every published
+  file to keep it that way
 - **Many conditions still have no verifier**, so the honest answer stays *complete but unverified*
 - **Source admission is provenance-only** — inert on a corpus with no tombstones or supersessions
 - **Staleness needs a prior artifact record**, which this library does not provide

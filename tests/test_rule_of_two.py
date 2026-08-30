@@ -4,7 +4,40 @@ from __future__ import annotations
 
 import inspect
 
-from assurance_core.rule_of_two import ALL_PROPERTIES, Property, assess, for_capability
+from assurance_core import rule_of_two
+from assurance_core.effects import Effect, EffectTable
+from assurance_core.rule_of_two import (
+    ALL_PROPERTIES,
+    Property,
+    for_capability,
+    properties_from,
+)
+
+# An example runtime's capabilities, defined HERE. Until 0.6.0 this module derived its property
+# table at import from one product's hardcoded capabilities, so every query below was answerable
+# only for that product. The library now derives from a table you bring; these tests are the first
+# caller that has to bring one.
+EXAMPLE_TABLE = EffectTable(
+    capabilities={
+        "locate": frozenset({Effect.READ}),
+        "profile": frozenset({Effect.READ}),
+        "digest": frozenset({Effect.READ}),
+        "narrate": frozenset(),
+        "research": frozenset({Effect.FETCH}),
+        "render": frozenset({Effect.WRITE_FILE}),
+        "draft": frozenset({Effect.WRITE_FILE, Effect.STAGE}),
+    },
+    never_held=frozenset({Effect.SEND, Effect.DESTROY}),
+)
+EXAMPLE_PROPERTIES = properties_from(EXAMPLE_TABLE)
+
+
+def assess(**kwargs):
+    """`rule_of_two.assess` with the example table bound, so the calls below read as they did.
+
+    Omitting `properties` makes every capability unknown and therefore maximally risky — the
+    fail-closed direction, correct as a default and wrong for tests about a known runtime."""
+    return rule_of_two.assess(properties=EXAMPLE_PROPERTIES, **kwargs)
 
 
 def test_a_session_holding_two_properties_runs_unattended():
@@ -82,9 +115,10 @@ def test_a_fixed_plan_is_recorded_and_never_discounts_the_verdict():
 
 
 def test_nothing_here_inspects_content():
-    signature = inspect.signature(assess)
+    signature = inspect.signature(rule_of_two.assess)
 
     assert set(signature.parameters) == {
+        "properties",
         "capabilities",
         "web_enabled",
         "external_paths",
@@ -97,10 +131,19 @@ def test_nothing_here_inspects_content():
 
 
 def test_the_rule_of_two_table_is_derived_not_mirrored():
-    from assurance_core.effects import CAPABILITY_EFFECTS, is_outward
-    from assurance_core.rule_of_two import CAPABILITY_PROPERTIES
-
-    assert set(CAPABILITY_PROPERTIES) == set(CAPABILITY_EFFECTS)
-    assert {n for n, p in CAPABILITY_PROPERTIES.items() if Property.EGRESS in p} == {
-        n for n in CAPABILITY_EFFECTS if is_outward(n)
+    """EGRESS must fall out of `is_outward`, not be listed a second time beside it. This repo has
+    paid for mirrors: the capability union drifted for nine days and cost eleven flows their trace."""
+    assert set(EXAMPLE_PROPERTIES) == set(EXAMPLE_TABLE.capabilities)
+    assert {n for n, p in EXAMPLE_PROPERTIES.items() if Property.EGRESS in p} == {
+        n for n in EXAMPLE_TABLE.capabilities if EXAMPLE_TABLE.is_outward(n)
     }
+
+
+def test_a_caller_who_brings_no_table_gets_the_safe_answer():
+    """The failure mode that matters. Forgetting the table must make a run too restrictive and say
+    so, never quietly too permissive."""
+    forgot = rule_of_two.assess(capabilities=["locate"], has_grants=True)
+    remembered = assess(capabilities=["locate"], has_grants=True)
+
+    assert forgot.held >= remembered.held
+    assert for_capability("locate") == ALL_PROPERTIES

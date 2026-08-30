@@ -1,7 +1,7 @@
 r"""The Agents Rule of Two, computed per session instead of written down.
 
-the product design §4 named this as owed, and
-the strategy docs argues it is **the single most defensible security
+`docs/design/SECURITY_POSTURE_2026-08.md` §4 named this as owed, and
+`docs/strategy/AGENTIC_SYSTEMS_RESEARCH_2026-08.md` argues it is **the single most defensible security
 primitive available today, because it does not depend on detecting injections.** Meta's formulation: an
 agent session must satisfy no more than two of
 
@@ -17,8 +17,8 @@ granted.
 
 ## The incident this is for — PocketOS, 25 April 2026
 
-Corroborated across six outlets; the strategy docs §1. A Cursor agent running
-a frontier model deleted a company's production database **and every volume-level backup** in nine
+Corroborated across six outlets; `docs/strategy/RESEARCH_2026-08-24.md` §1. A Cursor agent running
+Claude Opus 4.6 deleted a company's production database **and every volume-level backup** in nine
 seconds. It had been given a routine STAGING task, hit a credential mismatch, **did not stop to ask**,
 scanned the codebase for a way forward, and found an API token in an unrelated file that carried
 blanket authority over the whole account.
@@ -43,7 +43,7 @@ operation or force an approval gate*, not "log a warning".
 treats an unrecognised capability as holding **all three** properties. A capability this module has
 never heard of is exactly the case where guessing "probably harmless" is how the gate fails.
 `test_every_registered_capability_declares_its_properties` is the drift gate that keeps the table
-honest; the table lives here because `assurance_core` must not import `app.services`, so it is a mirror in
+honest; the table lives here because `app.core` must not import `app.services`, so it is a mirror in
 the same sense `schemas.agents.OrchestratorCapability` is.
 
 ## The calibration, and the risk in it
@@ -59,7 +59,7 @@ refused a call, not whether the bytes coming back are trustworthy. Routing does 
 **Not counted: a file inside a folder the user explicitly granted.** Strictly, a PDF someone emailed
 you and you filed in `Work/` is untrusted content. Counting it would put nearly every run into the
 trifecta, and a gate that fires on every run is one people click through — approval fatigue, which
-the measurement design treats as a measurable failure and the context assurance doctrine names as the
+`MEASUREMENT_AND_SIMULATION.md` treats as a measurable failure and `CONTEXT_ASSURANCE.md` names as the
 way oversight is bypassed in practice. **This is a deliberate under-count and it is the weakest line in
 this module.** It is written here so that the next person changing it is arguing with a stated
 position rather than discovering an accident.
@@ -77,7 +77,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from assurance_core.effects import CAPABILITY_EFFECTS, Effect
+from collections.abc import Mapping
+
+from assurance_core.effects import Effect, EffectTable
 from assurance_core.policy import DEFAULT_MODE as _DEFAULT_MODE
 from assurance_core.policy import Mode as _Mode
 
@@ -91,12 +93,12 @@ class Property(str, Enum):
 
 
 # What each capability grants. Mirrors the registry the way `schemas.agents` mirrors
-# `orchestrator.Capability`, because `assurance_core` must not import `app.services` — and it is gated by
+# `orchestrator.Capability`, because `app.core` must not import `app.services` — and it is gated by
 # `test_every_registered_capability_declares_its_properties` for exactly the reason that mirror is:
 # the last unguarded mirror in this repo drifted for nine days.
 #
 # `EGRESS` here must agree with `orchestrator.outward_capabilities()`, and a test checks that too.
-# Derived from `assurance_core.effects`, not declared a second time.
+# Derived from `app.core.effects`, not declared a second time.
 #
 # This WAS a hand-written table listing each capability's properties, mirroring the registry and
 # gated by a drift test. The table is gone because the effects table already says what every
@@ -124,17 +126,32 @@ _EFFECT_TO_PROPERTY: dict[Effect, Property] = {
     Effect.DESTROY: Property.EGRESS,
 }
 
-CAPABILITY_PROPERTIES: dict[str, frozenset[Property]] = {
-    name: frozenset(_EFFECT_TO_PROPERTY[e] for e in declared)
-    for name, declared in CAPABILITY_EFFECTS.items()
-}
-
 ALL_PROPERTIES: frozenset[Property] = frozenset(Property)
 
+CapabilityProperties = Mapping[str, "frozenset[Property]"]
 
-def for_capability(name: str) -> frozenset[Property]:
-    """What one capability grants. An unknown name holds everything — see the module docstring."""
-    return CAPABILITY_PROPERTIES.get(name, ALL_PROPERTIES)
+
+def properties_from(table: EffectTable) -> dict[str, frozenset[Property]]:
+    """Derive each capability's risk properties from what it DOES.
+
+    Takes the table rather than closing over one. Before 0.6.0 this module built the mapping at
+    import from a single product's hardcoded capabilities, which made every query below answerable
+    only for that product.
+    """
+    return {
+        name: frozenset(_EFFECT_TO_PROPERTY[e] for e in declared)
+        for name, declared in table.capabilities.items()
+    }
+
+
+def for_capability(name: str, properties: CapabilityProperties | None = None) -> frozenset[Property]:
+    """What one capability grants. **An unknown name holds everything** — see the module docstring.
+
+    Omitting `properties` means every name is unknown, so every name holds everything. That is the
+    fail-closed direction on purpose: a caller who forgets to pass their table gets a run that is too
+    restrictive and says so, never one that is quietly too permissive.
+    """
+    return (properties or {}).get(name, ALL_PROPERTIES)
 
 
 @dataclass(frozen=True)
@@ -221,6 +238,7 @@ def assess(
     has_grants: bool = False,
     mailbox_connected: bool = False,
     plan_is_fixed: bool = False,
+    properties: CapabilityProperties | None = None,
     foreign_worker: bool = False,
 ) -> Assessment:
     """Compute the three properties from what the session was actually granted.
@@ -233,7 +251,7 @@ def assess(
     assessment = Assessment(plan_is_fixed=plan_is_fixed)
 
     for name in capabilities or []:
-        for prop in for_capability(name):
+        for prop in for_capability(name, properties):
             assessment.grant(prop, name, f"the {name} step")
 
     if web_enabled:

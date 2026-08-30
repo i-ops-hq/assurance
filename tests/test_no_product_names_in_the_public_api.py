@@ -79,3 +79,32 @@ def test_the_guard_would_catch_a_reintroduction() -> None:
         VINCI = object()
 
     assert [n for n in _public_names(Planted) if any(p in n.lower() for p in PRODUCT_NAMES)] == ["VINCI"]
+
+
+def test_no_published_source_file_mentions_the_product_at_all() -> None:
+    """Stronger than the namespace check above, and it exists because the namespace check was not
+    enough.
+
+    Two docstrings still named the product after 0.5.0 removed the public constants: one written
+    fresh, and one whose scrub was silently undone by re-copying the module from upstream. The
+    publication is a copy plus a hand-applied scrub, and a hand-applied step is one that gets
+    forgotten on the copy after next.
+
+    `vinci_client` stays allowed: it appears only in denylists of imports these modules must never
+    make, and a list naming what is FORBIDDEN is not an advert for it.
+    """
+    offenders: dict[str, list[str]] = {}
+    for module in sorted(PACKAGE.glob("*.py")):
+        hits = [
+            f"{n}: {line.strip()[:70]}"
+            for n, line in enumerate(module.read_text(encoding="utf-8").splitlines(), 1)
+            if any(product in line.lower() for product in PRODUCT_NAMES)
+            and "vinci_client" not in line
+        ]
+        if hits:
+            offenders[module.name] = hits
+
+    assert not offenders, (
+        f"published source names the product: {offenders}. The public namespace being clean is not "
+        "enough — a reader greps."
+    )

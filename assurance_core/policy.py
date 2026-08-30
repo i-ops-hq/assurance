@@ -1,6 +1,6 @@
 r"""Policy v1 — may THIS principal have THIS worker produce THIS effect?
 
-The three axes the build plan §E asks for, and the three objects that now exist to carry them:
+The three axes an authority model has to separate, and the three objects that carry them:
 `Principal` (who), `WorkerDefinition` (which worker), `Effect` (what it does). This is the function
 that puts them together.
 
@@ -17,7 +17,7 @@ would read as though it had.
 
 So a grant is checked against the worker's derived guarantees BEFORE the rules are consulted, and a
 worker that cannot be held to an effect is refused it no matter what any rule says. That is
-the north star §5's "guarantees degrade honestly with integration depth" applied to authorisation
+`NORTH_STAR` §5's "guarantees degrade honestly with integration depth" applied to authorisation
 rather than to marketing copy.
 
 One consequence is worth stating because it looks strict until you follow it: **a worker that cannot
@@ -28,7 +28,7 @@ failure this product exists to remove.
 ## Shape, borrowed and not
 
 Deny before allow, default deny, fail closed on a broken rule, and a `dry-run` mode: all from
-a published policy-engine study, which had paid for each of them.
+OpenBot's policy engine (`docs/design/OPENBOT_GATEWAY_STUDY.md`), which had paid for each of them.
 
 **Not borrowed: CEL.** An expression language is right for an operator writing browser boundaries
 against a page nobody controls. Our rules answer authority questions, and *only code may enforce
@@ -42,9 +42,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
-from assurance_core.effects import Effect
+from assurance_core.effects import NEVER_PRODUCED, Effect
 from assurance_core.principal import Principal
-from assurance_core.effects import NOT_YET_PRODUCED, Effect
+from assurance_core.effects import NEVER_PRODUCED, Effect
 from assurance_core.worker import Guarantee, WorkerDefinition
 
 NEVER_SOFTENS: frozenset[str] = frozenset({"unsupported", "not_produced"})
@@ -105,7 +105,7 @@ class Request:
     effect: Effect
     resource: str = ""
     """What the effect is aimed at — a folder label, a source name. Never a filesystem path: see
-    the product design on authority naming a resource rather than a location."""
+    `docs/design/DISTRIBUTION_BOUNDARY.md` on authority naming a resource rather than a location."""
 
 
 Rule = Callable[[Request], bool]
@@ -158,7 +158,7 @@ class Decision:
 def _fires(name: str, rule: Rule, request: Request, on_error: bool) -> bool:
     """Run one rule. Never raises.
 
-    `on_error` differs by list, which is the published asymmetry and it is right: **a broken `allow` must
+    `on_error` differs by list, which is OpenBot's asymmetry and it is right: **a broken `allow` must
     not permit, and a broken `deny` must not stop denying.** A rule returning anything but a boolean
     is broken the same way as one that throws — it has not answered the question, and reading a
     non-answer as "no match" would silently disable a rule still listed as in force.
@@ -176,7 +176,7 @@ def decide(request: Request, policy: Policy) -> Decision:
     Order, and each step is a different question:
 
     1. **Can the worker be held to it at all?** If not, refused — and no rule can override that.
-    2. **Does this product perform the effect at all?** `effects.NOT_YET_PRODUCED`, refused
+    2. **Does this runtime perform the effect at all?** `effects.NEVER_PRODUCED`, refused
        structurally too.
     3. **Deny rules**, so a rule that removes permission is never defeated by a broader grant.
     4. **Allow rules.**
@@ -211,16 +211,16 @@ def decide(request: Request, policy: Policy) -> Decision:
             ),
         )
 
-    if request.effect in NOT_YET_PRODUCED:
+    if request.effect in NEVER_PRODUCED:
         return Decision(
             allowed=False,
             mode=policy.mode,
             matched=None,
             source="not_produced",
             reason=(
-                f"Nothing in this product performs {request.effect.value}. Refused before any rule "
-                "is consulted, so no policy — however permissive, however well-intentioned — can "
-                "grant an effect this product does not implement."
+                f"Nothing under this runtime performs {request.effect.value}. Refused before "
+                "any rule is consulted, so no policy — however permissive, however "
+                "well-intentioned — can grant an effect the runtime does not implement."
             ),
         )
 

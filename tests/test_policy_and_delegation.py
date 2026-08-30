@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from assurance_core.effects import NOT_YET_PRODUCED, Effect
+from assurance_core.effects import NEVER_PRODUCED, Effect
 from assurance_core.policy import (
     EFFECT_NEEDS,
     DEFAULT_MODE,
@@ -73,13 +73,13 @@ def test_the_same_effects_are_permitted_for_a_worker_we_supervise():
     worker now, structurally — see the test below — so including them here would have made this
     pass or fail for a reason that has nothing to do with supervision.
     """
-    produced = [e for e in EFFECT_NEEDS if e not in NOT_YET_PRODUCED]
+    produced = [e for e in EFFECT_NEEDS if e not in NEVER_PRODUCED]
     assert produced, "if nothing is produced this test proves nothing at all"
     for effect in produced:
         assert decide(Request(MANAGER, EXAMPLE_WORKER, effect), PERMISSIVE).allowed, effect
 
 
-@pytest.mark.parametrize("effect", sorted(NOT_YET_PRODUCED, key=lambda e: e.value))
+@pytest.mark.parametrize("effect", sorted(NEVER_PRODUCED, key=lambda e: e.value))
 def test_an_effect_nothing_produces_is_refused_even_for_the_worker_we_built(effect):
     """The other half of "not a blanket refusal": the blanket exists, and it is a different one.
 

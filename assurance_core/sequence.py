@@ -1,7 +1,7 @@
 """Sequence points beyond monthly — quarterly, weekly, daily, and numbered runs.
 
 Pure: no filesystem, no model, no clock. `Period` in `report_period` stays the monthly type used
-across I-Ops; this module adds broader shapes without breaking it. Monthly parsing delegates to
+in `report_period`; this module adds broader shapes without breaking it. Monthly parsing delegates to
 `report_period` so a monthly corpus produces byte-identical keys and labels.
 """
 
@@ -172,7 +172,7 @@ def point_from_filename(name: str) -> Period | QuarterlyPoint | WeeklyPoint | Da
     """The sequence step a filename names, or None when it names none.
 
     Monthly shapes delegate to `report_period.period_from_filename` so keys and labels stay identical
-    to what I-Ops already uses. Daily is tried before monthly so `2024-03-15` is not read as March.
+    to what `report_period` already reads. Daily is tried before monthly so `2024-03-15` is not read as March.
     """
     match = _DAILY.search(name)
     if match:

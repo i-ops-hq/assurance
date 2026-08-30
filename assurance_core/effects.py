@@ -1,40 +1,58 @@
 r"""What a capability DOES, as opposed to what it is called.
 
-Borrowed from reading a published policy-engine study. Their comment
-is the whole argument:
+Borrowed from reading a published policy-engine study. Their comment is the whole argument:
 
 > `tool.name` describes **mechanism**. An operator thinks in **effects** — "do not activate anything
 > called submit" — and mechanism is a poor proxy for effect: a button is activated by a click OR by
 > Enter OR by Space, so a rule naming `computer_click` covers only one activation path.
 
-And the story that proves it: an agent denied the click **presses Enter in the form instead**, and the
-order goes through. *A form has three doors.*
+And the story that proves it: an agent denied the click **presses Enter in the form instead**, and
+the order goes through. *A form has three doors.*
 
 ## What this replaces
 
-`@register(outward=True)` was a boolean, and `chat_groundedness.ACTION_TOOLS` is a list of names. Both
-describe mechanism, so the next outward capability is a fourth door — invisible to every rule written
-against the ones that exist today.
+A boolean like `@register(outward=True)`, and a list of tool names. Both describe mechanism, so the
+next outward capability is a fourth door — invisible to every rule written against the ones that
+exist today. Declare what a capability *does*, and `outward` becomes a consequence of the
+declaration rather than a second thing to remember.
 
-**Declaring what a capability does made one thing visible immediately, and it is worth stating
-plainly: nothing in this product SENDS.** `deliver` reads as the sending step from its name and does
-not send — it writes an `.eml` and stages a Gmail draft behind the same approval card `draft` and
-`invite` use, through the same `save_and_stage` helper. Under a boolean, `render` (writes a
-spreadsheet to your own workspace) and `deliver` (prepares mail for a human to release) were the same
-kind of thing. They are not, and `SEND` being unreachable is a stronger claim than any of them.
+## Bring your own table
 
-## One table, not a mirror
+This module ships the vocabulary and the queries. **The capabilities are yours.** Build an
+`EffectTable` from your own runtime's steps:
 
-The table lives in `assurance_core` and the registry validates against it at import, rather than each side
-declaring separately and a gate comparing them. This repo has paid for mirrors — the capability union
-drifted for nine days and cost eleven flows their trace — so where a single source of truth is
-available, that is better than a well-tested pair.
+    TABLE = EffectTable(
+        capabilities={
+            "search": frozenset({Effect.FETCH}),
+            "write_report": frozenset({Effect.WRITE_FILE}),
+            "queue_email": frozenset({Effect.WRITE_FILE, Effect.STAGE}),
+        },
+        never_held=frozenset({Effect.SEND, Effect.DESTROY}),
+    )
 
-`assurance_core` must not import `app.services`, which is why the table is here and the check is there.
+    TABLE.is_outward("write_report")     # True
+    TABLE.capabilities_with(Effect.SEND) # frozenset() — and construction would have refused it
+
+Until 0.6.0 this module carried one specific product's nineteen capabilities as module-level state,
+with the queries closed over them. That table described that runtime and nobody else's, so the
+functions were readable and useless — the same defect the 0.5.0 policy helper had, one module
+over, found by the same outside review.
+
+## `never_held` is a claim the type enforces
+
+The interesting half. A table may declare effects that **no capability in it is allowed to hold**,
+and construction fails if one does. That turns "nothing here sends" from a property you assert in a
+test into one the object cannot be built without.
+
+It is deliberately declared and not derived. Deriving it from the table would mean the guarantee
+quietly disappears the moment somebody adds a capability holding the effect — which is precisely the
+day you want a failure, not a silently smaller promise.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -45,105 +63,107 @@ class Effect(str, Enum):
     """Opens the user's own files. Sensitive, and it changes nothing."""
 
     WRITE_FILE = "write_file"
-    """Creates or modifies a file on this machine. Reversible — `undo_service` snapshots first."""
+    """Creates or modifies a file on this machine. Reversible where the runtime snapshots first."""
 
     STAGE = "stage"
-    """Prepares an outward action that a PERSON must release. A staged Gmail draft is not sent mail;
+    """Prepares an outward action that a PERSON must release. A staged email draft is not sent mail;
     it is a proposal sitting where the user can read it, and the click is theirs."""
 
     SEND = "send"
     """Transmits outside this machine with no further human step.
 
-    **Declared and unreachable.** No capability holds it — see `NOT_YET_PRODUCED` below and the
-    module docstring. It exists so that the day something does send, the declaration is a deliberate
-    line in a diff rather than an unnoticed change of meaning to `outward`."""
+    A good candidate for `never_held`: the day something does send, the declaration should be a
+    deliberate line in a diff rather than an unnoticed change of meaning to `is_outward`."""
 
     DESTROY = "destroy"
     """Removes state that nothing here can put back.
 
-    Distinct from `WRITE_FILE`, which is reversible *by construction* because `undo_service` snapshots
+    Distinct from `WRITE_FILE`, which is reversible *by construction* when the runtime snapshots
     before it. Once the snapshot is itself the thing being deleted, "predict -> approve -> reversible"
     has lost its third leg, and an approval card in front of an irreversible call is a much smaller
     guarantee than it looks like from the outside.
 
-    **Declared and unreachable**, on the same terms as `SEND`. It is here because the vocabulary could
-    not previously NAME the PocketOS class of action: one `volumeDelete` that took a production
-    database and every volume-level backup with it, in nine seconds. An effect a vocabulary cannot
-    name is an effect no rule can refuse — the gap was never that our policy was too permissive, it
-    was that the question could not be asked. `test_pocketos_scenario.py` asks it."""
+    It is in the vocabulary because a vocabulary that cannot NAME an action cannot refuse one. The
+    PocketOS incident is the case: a single `volumeDelete` took a production database and every
+    volume-level backup with it, in nine seconds. The gap there was never that a policy was too
+    permissive — it was that the question could not be asked."""
 
     FETCH = "fetch"
     """Retrieves content from outside this machine. Inbound, and the reason a session holds untrusted
     input: what comes back was written by somebody else."""
 
 
-CAPABILITY_EFFECTS: dict[str, frozenset[Effect]] = {
-    # Reads. They open the user's documents and change nothing.
-    "locate": frozenset({Effect.READ}),
-    "profile": frozenset({Effect.READ}),
-    "digest": frozenset({Effect.READ}),
-    "gather": frozenset({Effect.READ}),
-    "collect": frozenset({Effect.READ}),
-    "roster": frozenset({Effect.READ}),
-    "attach": frozenset({Effect.READ}),
-    "address": frozenset({Effect.READ}),
-    # Pure. Arithmetic over facts already gathered, and one question to the user.
-    "compute": frozenset(),
-    "ask_format": frozenset(),
-    "ask_gather_folder": frozenset(),
-    # Model steps. They read evidence and write prose; they touch nothing themselves.
-    "narrate": frozenset(),
-    "compose": frozenset(),
-    "cover": frozenset(),
-    # The web, and the only inbound path off this machine.
-    "research": frozenset({Effect.FETCH}),
-    # Writes a document into the workspace. NOT the same kind of thing as the three below, which is
-    # exactly what the `outward` boolean could not say.
-    "render": frozenset({Effect.WRITE_FILE}),
-    # Write an `.eml` AND stage a Gmail draft behind one approval card. None of them sends.
-    "draft": frozenset({Effect.WRITE_FILE, Effect.STAGE}),
-    "invite": frozenset({Effect.WRITE_FILE, Effect.STAGE}),
-    "deliver": frozenset({Effect.WRITE_FILE, Effect.STAGE}),
-}
-
-
-NOT_YET_PRODUCED: frozenset[Effect] = frozenset({Effect.SEND, Effect.DESTROY})
-"""Effects in the vocabulary that no capability currently holds.
-
-Same discipline as `run_outcome.NOT_YET_REACHABLE`: a value that quietly enters a vocabulary and then
-gets counted as though it happens is the failure the vocabulary exists to prevent. Gated by
-`test_effects.py`, so making either one reachable requires deleting an assertion that argues against
-it.
-
-The two are unreachable for different reasons, and the difference matters. `SEND` is a step we have
-not built. `DESTROY` is one the architecture argues we should not hold at all: *in a high-risk
-environment the worker should not have the authority to delete production state* — so the honest
-answer to "would you have stopped PocketOS?" is not "our approval card would have caught it", it is
-"a worker under this runtime is not granted that authority, and where we cannot route the call we
-refuse the effect rather than claim to supervise it."
-"""
-
-# Effects that reach past the boundary of the run. `@register(outward=...)` is derived from this, so
-# the boolean is now a CONSEQUENCE of the declaration rather than a second thing to remember.
+# Effects that reach past the boundary of the run. `is_outward` is derived from this, so the boolean
+# is a CONSEQUENCE of the declaration rather than a second thing to remember.
 OUTWARD_EFFECTS: frozenset[Effect] = frozenset(
     {Effect.WRITE_FILE, Effect.STAGE, Effect.SEND, Effect.DESTROY}
 )
 
 
-def effects_for(capability: str) -> frozenset[Effect]:
-    """What a capability does. An unknown name holds everything — fail closed.
+NEVER_PRODUCED: frozenset[Effect] = frozenset({Effect.SEND, Effect.DESTROY})
+"""Effects no capability of the embedding runtime implements, refused before any rule is consulted.
 
-    The same choice `rule_of_two.for_capability` makes, for the same reason: a capability this table
-    has never heard of is exactly where guessing "probably harmless" is how a gate fails.
+A **runtime-level** claim, not a per-worker one, and the distinction is load-bearing. The PocketOS
+argument is that *a worker under this runtime is not granted that authority* — so a foreign worker we
+have routed is still under it, and moving this onto `WorkerDefinition` would quietly permit `DESTROY`
+for exactly the routed-worker case the refusal exists to cover. That was tried on 2026-08-30 and a
+test caught it.
+
+It lives here rather than on `Policy` for the mirror-image reason: `run_plan` lets a caller inject a
+policy, and a guarantee an injected document can drop is not a guarantee.
+
+The default is the conservative pair. A runtime that genuinely sends should narrow it deliberately —
+that is a line in a diff, which is the point.
+"""
+
+class EffectTableError(ValueError):
+    """A table declared an effect it must never hold, and then held it."""
+
+
+@dataclass(frozen=True)
+class EffectTable:
+    """One runtime's capabilities and what each of them does.
+
+    Frozen, and validated on construction: a table that both forbids an effect and grants it is a
+    contradiction, and the useful moment to find that out is before anything runs.
     """
-    return CAPABILITY_EFFECTS.get(capability, frozenset(Effect))
 
+    capabilities: Mapping[str, frozenset[Effect]]
+    never_held: frozenset[Effect] = field(default_factory=frozenset)
+    """Effects declared unreachable for this table. See the module docstring: declared, not derived."""
 
-def is_outward(capability: str) -> bool:
-    """Whether a capability acts past the run. Derived, never declared twice."""
-    return bool(effects_for(capability) & OUTWARD_EFFECTS)
+    def __post_init__(self) -> None:
+        violations = {
+            name: sorted(e.value for e in effects & self.never_held)
+            for name, effects in self.capabilities.items()
+            if effects & self.never_held
+        }
+        if violations:
+            raise EffectTableError(
+                f"declared never_held, but held by {violations}. Either the capability is wrong or "
+                "the promise is — and a promise the table contradicts is worse than no promise."
+            )
 
+    def declares(self, capability: str) -> bool:
+        """Whether this table has heard of the capability at all."""
+        return capability in self.capabilities
 
-def capabilities_with(effect: Effect) -> frozenset[str]:
-    """Every capability holding one effect — the query a policy rule wants to ask."""
-    return frozenset(n for n, e in CAPABILITY_EFFECTS.items() if effect in e)
+    def effects_for(self, capability: str) -> frozenset[Effect]:
+        """What a capability does. **An unknown name holds everything — fail closed.**
+
+        A capability the table has never heard of is exactly where guessing "probably harmless" is
+        how a gate fails. Use `declares()` when you want to distinguish unknown from harmless.
+        """
+        return self.capabilities.get(capability, frozenset(Effect))
+
+    def is_outward(self, capability: str) -> bool:
+        """Whether a capability acts past the run. Derived, never declared twice."""
+        return bool(self.effects_for(capability) & OUTWARD_EFFECTS)
+
+    def capabilities_with(self, effect: Effect) -> frozenset[str]:
+        """Every capability holding one effect — the query a policy rule wants to ask."""
+        return frozenset(name for name, e in self.capabilities.items() if effect in e)
+
+    def held(self) -> frozenset[Effect]:
+        """Every effect some capability in this table can produce."""
+        return frozenset().union(*self.capabilities.values()) if self.capabilities else frozenset()
