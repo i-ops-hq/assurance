@@ -131,6 +131,11 @@ class Coverage:
     "March FINAL v2.csv", reported March as not in the folder and never mentioned the twelfth file
     anywhere. The careful wording — an observation, never the inference "missing" — was still an
     INCOMPLETE observation, which is the failure that careful wording exists to prevent."""
+    unmatched_label: str = "could not be read as any of them"
+    """How the `unmatched` clause reads. The default is the folder case, where a name that matched no
+    expectation is a name the enumeration could not parse. A retrieval caller means something else by
+    it — those chunks were read perfectly well, they came from outside the declared scope — and the
+    same sentence would be wrong for them. Same reasoning as `where`."""
     undetermined: str = ""
     """Non-empty when the expected set could not be derived AT ALL, carrying the reason.
 
@@ -165,6 +170,7 @@ class Coverage:
         unauthorized: dict[str, str] | None = None,
         truncated: str = "",
         unmatched: list[str] | None = None,
+        unmatched_label: str = "could not be read as any of them",
         undetermined: str = "",
         derivation: str = "",
         where: str = "this folder",
@@ -226,6 +232,7 @@ class Coverage:
             unauthorized=unauthorized,
             truncated=truncated,
             unmatched=list(unmatched or []),
+            unmatched_label=unmatched_label,
             undetermined=undetermined,
             derivation=derivation,
             where=where,
@@ -328,8 +335,7 @@ class Coverage:
             # After the gap it explains, because it is the first thing to check when something is
             # reported absent: a name here that could not be read is where it probably went.
             parts.append(
-                f"{_count(self.unmatched)} here could not be read as any of them: "
-                f"{_names_of(self.unmatched)}"
+                f"{_count(self.unmatched)} here {self.unmatched_label}: {_names_of(self.unmatched)}"
             )
         if self.truncated:
             parts.append(f"the list was cut short ({self.truncated}), so this count is a floor")

@@ -23,11 +23,20 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 EXPECTED_EXIT = {
     "01_did_it_read_everything.py": 1,
     "05_review_gate_for_an_agent.py": 1,
+    "ask.py": 1,          # refuses on an under-evidenced retrieval, by design
 }
 
 
 def _example_files() -> list[Path]:
-    return sorted(path for path in EXAMPLES.glob("*.py"))
+    """Top-level examples, plus the dependency-free half of the RAG pipeline.
+
+    `dense.py` is deliberately excluded: it needs `fastembed` and downloads a model, so it is a
+    manual check rather than one every contributor pays for on every run."""
+    files = sorted(path for path in EXAMPLES.glob("*.py"))
+    pipeline = EXAMPLES / "rag-pipeline" / "ask.py"
+    if pipeline.exists():
+        files.append(pipeline)
+    return files
 
 
 def test_there_are_examples_to_run() -> None:
@@ -38,10 +47,11 @@ def test_there_are_examples_to_run() -> None:
 @pytest.mark.parametrize("example", _example_files(), ids=lambda p: p.name)
 def test_the_example_runs(example: Path) -> None:
     result = subprocess.run(
-        [sys.executable, str(example)],
+        [sys.executable, str(example), *(["--check"] if example.name == "ask.py" else [])],
         capture_output=True,
         text=True,
         timeout=60,
+        cwd=example.parent,          # the pipeline imports its sibling retriever
     )
 
     assert result.returncode == EXPECTED_EXIT.get(example.name, 0), (

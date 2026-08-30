@@ -95,6 +95,7 @@ Every module is walked by an AST test that fails on a model or service import. C
 | | |
 |---|---|
 | `coverage` | Did the worker read everything the task required? |
+| `retrieval` | Did the retriever return something from every document the question spans? |
 | `staleness` | Do recorded figures still match the source? |
 | `admission` | Should this source inform the answer, given provenance? |
 | `verification` · `task_contract` · `run_outcome` | What was *done* meant to be, and what happened? |
