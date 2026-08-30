@@ -388,3 +388,53 @@ def test_undetermined_travels_in_the_record() -> None:
 
     assert payload["undetermined"] == "no series could be read"
     assert payload["complete"] is False
+
+
+# --- the shape of a gap is not its cause ----------------------------------------------------------
+#
+# From an outside reader, 2026-08-29: knowing a gap is "nothing matched" tells you the shape of the
+# problem and not the cause. It does not distinguish a file that was never produced from one named
+# differently. The distinguishing evidence was sitting in the folder and being dropped.
+
+
+def test_an_unreadable_name_is_reported_beside_the_gap_it_explains() -> None:
+    coverage = Coverage.of(
+        expected=["2025-01", "2025-02", "2025-03"],
+        found=["2025-01", "2025-02"],
+        scope_label="months",
+        unmatched=["March FINAL v2.csv"],
+    )
+
+    assert coverage.summary() == (
+        "2 of 3 months — not in this folder: 2025-03 "
+        "— 1 name here could not be read as any of them: March FINAL v2.csv"
+    )
+
+
+def test_something_the_scope_never_asked_for_is_not_a_coverage_gap() -> None:
+    """Reported, and it earns no verdict. The same rule `diff` applies to a retriever pulling from
+    outside its filter."""
+    coverage = Coverage.of(expected=["a", "b"], found=["a", "b"], unmatched=["notes.txt"])
+
+    assert coverage.complete is True
+
+
+def test_a_folder_with_nothing_unread_says_exactly_what_it_said_before() -> None:
+    """The clause must not appear on every run, or it stops meaning anything."""
+    coverage = Coverage.of(expected=["a", "b"], found=["a"], scope_label="months")
+
+    assert coverage.summary() == "1 of 2 months — not in this folder: b"
+
+
+def test_many_unreadable_names_are_summarised_not_pasted() -> None:
+    coverage = Coverage.of(
+        expected=["a"], found=[], scope_label="months",
+        unmatched=[f"file-{n}.csv" for n in range(6)],
+    )
+
+    assert "6 names here could not be read" in coverage.summary()
+    assert "and 3 more" in coverage.summary()
+
+
+def test_unmatched_travels_in_the_record() -> None:
+    assert Coverage.of(expected=["a"], found=["a"], unmatched=["x.csv"]).to_dict()["unmatched"] == ["x.csv"]

@@ -61,6 +61,24 @@ Most tools give you one `missing` bucket. It throws away the only thing you need
 A capped `"24 of 24 — complete"` is worse than no number at all, so `truncated` makes `complete`
 false on its own. *We don't know what we didn't see* is not *nothing*.
 
+### The shape of a gap is not its cause
+
+Those six say what happened to something the task **required**. They don't say *why*, and an outside
+reader put it precisely: `missing` doesn't distinguish a file that was never produced from one
+that was named differently.
+
+So there's a seventh field on a different axis. `unmatched` is what's sitting in the searched space
+that couldn't be tied to **any** expectation:
+
+```
+2 of 3 months — not in this folder: 2025-03
+2 of 3 months — not in this folder: 2025-03 — 1 name here could not be read as any of them: March FINAL v2.csv
+```
+
+Same gap. The first probably means it was never produced. The second means it's almost certainly
+right there. `unmatched` deliberately does **not** affect `complete` — something the scope never
+asked for isn't a coverage gap.
+
 The wording is deliberate too: **"not in this folder"**, never **"missing"**. The first is a fact
 about a directory listing. The second is a guess about the world.
 

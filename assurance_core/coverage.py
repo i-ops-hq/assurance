@@ -111,6 +111,26 @@ class Coverage:
     truncated: str = ""
     """Non-empty when the enumeration hit a cap, carrying the reason. Makes `complete` False on its
     own, because a capped denominator makes every ratio here a guess."""
+    unmatched: list[str] = field(default_factory=list)
+    """Present in the searched space, and matched to NO expectation. Usually: named in a way the
+    enumeration could not read.
+
+    This is the other axis. The six outcomes above all answer *what happened to a thing the task
+    required*. This one answers *what is sitting here that I could not account for*, and it is the
+    difference between two causes that produce an identical `missing` line:
+
+        "not in this folder: March 2025"                       -> it may never have been produced
+        "not in this folder: March 2025 ... 1 name unread"     -> it is probably right there
+
+    Deliberately does NOT affect `complete`. Something the scope never asked for is not a coverage
+    gap, the same way `diff` reports what a retriever pulled from outside its filter without
+    counting it.
+
+    Added 2026-08-29 after an outside reader pointed out that classifying a gap tells you its shape
+    and not its cause. A folder of twelve files, eleven parsing as months and one called
+    "March FINAL v2.csv", reported March as not in the folder and never mentioned the twelfth file
+    anywhere. The careful wording — an observation, never the inference "missing" — was still an
+    INCOMPLETE observation, which is the failure that careful wording exists to prevent."""
     undetermined: str = ""
     """Non-empty when the expected set could not be derived AT ALL, carrying the reason.
 
@@ -144,6 +164,7 @@ class Coverage:
         unreadable: dict[str, str] | None = None,
         unauthorized: dict[str, str] | None = None,
         truncated: str = "",
+        unmatched: list[str] | None = None,
         undetermined: str = "",
         derivation: str = "",
         where: str = "this folder",
@@ -204,6 +225,7 @@ class Coverage:
             unreadable=unreadable,
             unauthorized=unauthorized,
             truncated=truncated,
+            unmatched=list(unmatched or []),
             undetermined=undetermined,
             derivation=derivation,
             where=where,
@@ -302,6 +324,13 @@ class Coverage:
             # NOT folded in with `missing`. "You are not cleared for this" is a different sentence
             # and a different next step — see the context assurance doctrine on escalating task ownership.
             parts.append(f"not cleared to open {', '.join(sorted(self.unauthorized))}")
+        if self.unmatched:
+            # After the gap it explains, because it is the first thing to check when something is
+            # reported absent: a name here that could not be read is where it probably went.
+            parts.append(
+                f"{_count(self.unmatched)} here could not be read as any of them: "
+                f"{_names_of(self.unmatched)}"
+            )
         if self.truncated:
             parts.append(f"the list was cut short ({self.truncated}), so this count is a floor")
         if self.derivation:
@@ -328,6 +357,7 @@ class Coverage:
             "ambiguous": {key: list(value) for key, value in self.ambiguous.items()},
             "unreadable": dict(self.unreadable),
             "unauthorized": dict(self.unauthorized),
+            "unmatched": list(self.unmatched),
             "truncated": self.truncated,
             "undetermined": self.undetermined,
             "derivation": self.derivation,
@@ -345,6 +375,16 @@ class Coverage:
                 for ref in self.found.values()
             ],
         }
+
+
+def _count(items: list[str]) -> str:
+    return "1 name" if len(items) == 1 else f"{len(items)} names"
+
+
+def _names_of(items: list[str]) -> str:
+    if len(items) <= 3:
+        return ", ".join(items)
+    return f"{', '.join(items[:3])} and {len(items) - 3} more"
 
 
 def _names(expectations: list[Expectation]) -> str:
