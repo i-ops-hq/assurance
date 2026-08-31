@@ -158,7 +158,13 @@ def test_config_discovery_prefers_project_over_home(tmp_path: Path, monkeypatch:
     assert found == (project / ".mcp.json").resolve()
 
 
-def test_config_discovery_prints_path(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+def test_config_discovery_prints_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    # chdir, because `run_pin_action(save=True)` writes its pin file relative to cwd. Without this
+    # the test wrote `.assurance/mcp-pins.json` into THIS REPO, carrying a pytest temp path and the
+    # developer's username, and it was committed and re-dirtied on every run.
+    monkeypatch.chdir(tmp_path)
     config_path = tmp_path / ".cursor" / "mcp.json"
     config_path.parent.mkdir()
     config_path.write_text(

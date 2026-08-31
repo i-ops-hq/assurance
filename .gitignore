@@ -5,3 +5,6 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# Written by `assurance pin --save`; never this repo's own, and tests must not create it.
+.assurance/

@@ -59,6 +59,22 @@ Stdio servers only in this release; HTTP/SSE transports are named and skipped.
 Exit `1` means a definition moved and needs a human look. Exit `2` means the gate could not run
 (missing `mcp` extra, no config, no pin file yet).
 
+### `assurance drift` — is the failure rate shifting?
+
+Control chart over any binary outcome stream. Needs at least **21 runs** (20 baseline + 1 monitored).
+Refuses below that with a message naming how many more are needed. No model, no labels.
+
+```bash
+assurance drift events.jsonl --field outcome --failure verification_failed
+assurance drift results.csv  --column status --failure error --baseline 0.05
+```
+
+Exit `1` when a shift is detected — a CI gate the same way `pin --check` works.
+
+```yaml
+- run: assurance drift outcomes.jsonl --field outcome --failure error
+```
+
 ### `assurance diff` — any two sets of keys
 
 ```bash

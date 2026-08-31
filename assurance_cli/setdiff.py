@@ -218,6 +218,7 @@ def diff_sets(
 
 
 def format_diff(payload: dict[str, Any]) -> str:
+    """Render a diff payload as human-readable text."""
     lines = [payload.get("summary", "")]
     if payload.get("unexpected"):
         found = payload["unexpected"]

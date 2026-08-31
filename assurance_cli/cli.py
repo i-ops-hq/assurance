@@ -9,12 +9,14 @@ from typing import Any
 
 from assurance_cli.baseline import check_against_baseline, init_baseline
 from assurance_cli.gather import check_coverage
+from assurance_cli.drift import run_drift
 from assurance_cli.paths import PathEscapeError
 from assurance_cli.pin import run_pin_action
 from assurance_cli.setdiff import KeySpecError, diff_sets, format_diff
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Command-line entry for assurance checks."""
     parser = argparse.ArgumentParser(
         prog="assurance",
         description=(
@@ -81,6 +83,21 @@ def main(argv: list[str] | None = None) -> int:
     pin_parser.add_argument("--config", metavar="PATH",
                             help="Explicit MCP config instead of discovery")
 
+    drift_parser = sub.add_parser(
+        "drift",
+        help="Detect a shift in a binary outcome stream",
+        description="Control chart over any 0/1 outcome series — no model, no labels.",
+    )
+    drift_parser.add_argument("file", help="JSONL or CSV of run outcomes")
+    drift_parser.add_argument("--field", help="JSONL field to read")
+    drift_parser.add_argument("--column", help="CSV column to read")
+    drift_parser.add_argument("--failure", required=True, help="Value that counts as a failure")
+    drift_parser.add_argument("--baseline-runs", type=int, default=None)
+    drift_parser.add_argument("--baseline-rate", "--baseline", type=float, default=None, dest="baseline_rate")
+    drift_parser.add_argument("--label", default="outcomes")
+    drift_parser.add_argument("--seed", type=int, default=20260823)
+    drift_parser.add_argument("--json", action="store_true", dest="as_json")
+
     args = parser.parse_args(argv)
 
     try:
@@ -91,6 +108,26 @@ def main(argv: list[str] | None = None) -> int:
             return _run_diff(args)
         if args.command == "pin":
             return run_pin_action(save=args.save, check=args.check, config=args.config)
+        if args.command == "drift":
+            drift_argv = ["drift"]
+            if args.file:
+                drift_argv.append(args.file)
+            if args.field:
+                drift_argv.extend(["--field", args.field])
+            if args.column:
+                drift_argv.extend(["--column", args.column])
+            drift_argv.extend(["--failure", args.failure])
+            if args.baseline_runs is not None:
+                drift_argv.extend(["--baseline-runs", str(args.baseline_runs)])
+            if args.baseline_rate is not None:
+                drift_argv.extend(["--baseline-rate", str(args.baseline_rate)])
+            if args.label != "outcomes":
+                drift_argv.extend(["--label", args.label])
+            if args.seed != 20260823:
+                drift_argv.extend(["--seed", str(args.seed)])
+            if args.as_json:
+                drift_argv.append("--json")
+            return run_drift(drift_argv[1:])
         return _run_check(args)
     except KeySpecError as exc:
         return _emit({"error": str(exc)}, args, code=2)

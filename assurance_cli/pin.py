@@ -59,6 +59,7 @@ def _require_mcp() -> tuple[Any, Any, Any]:
 
 @dataclass(frozen=True)
 class StdioServer:
+    """One stdio MCP server entry from a config file."""
     name: str
     command: str
     args: list[str]
@@ -110,6 +111,7 @@ def parse_stdio_servers(config: dict[str, Any]) -> tuple[list[StdioServer], list
 
 
 def pins_path(cwd: Path | None = None) -> Path:
+    """Path to `.assurance/mcp-pins.json` for the working directory."""
     return (cwd or Path.cwd()) / PINS_DIR / PINS_FILE
 
 
@@ -131,6 +133,7 @@ async def _list_tools_async(server: StdioServer) -> list[tuple[str, str | None, 
 
 
 def list_tools(server: StdioServer) -> list[tuple[str, str | None, dict[str, Any] | None]]:
+    """List tools from one live stdio MCP server."""
     return asyncio.run(_list_tools_async(server))
 
 
@@ -149,7 +152,8 @@ def _server_snapshot(
 def _load_pins_file(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"no pin file at {path} — run `assurance pin --save` first")
-    return json.loads(path.read_text(encoding="utf-8"))
+    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return data
 
 
 def _write_pins_file(path: Path, config_path: Path, servers: dict[str, dict[str, dict[str, str]]]) -> None:
@@ -178,6 +182,7 @@ def save_pins(
     cwd: Path | None = None,
     skipped: list[str] | None = None,
 ) -> int:
+    """Snapshot tool definitions from every stdio server into `.assurance/mcp-pins.json`."""
     for line in skipped or []:
         print(line, file=sys.stderr)
     if not servers:
@@ -238,6 +243,7 @@ def check_pins(
     cwd: Path | None = None,
     skipped: list[str] | None = None,
 ) -> int:
+    """Compare live tool definitions against the saved pin file."""
     for line in skipped or []:
         print(line, file=sys.stderr)
 
@@ -297,6 +303,7 @@ def check_pins(
 
 
 def run_pin_action(*, save: bool, check: bool, config: str | None = None) -> int:
+    """Run ``assurance pin --save`` or ``--check``."""
     try:
         config_path = discover_config_path(config)
     except FileNotFoundError as exc:
@@ -323,6 +330,7 @@ def run_pin_action(*, save: bool, check: bool, config: str | None = None) -> int
 
 
 def run_pin(argv: list[str] | None = None) -> int:
+    """CLI entry for the pin subcommand."""
     parser = argparse.ArgumentParser(
         prog="assurance pin",
         description="Pin MCP tool definitions and detect supply-chain drift (CVE-2025-54136).",

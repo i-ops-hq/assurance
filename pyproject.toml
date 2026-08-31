@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-cli"
-version = "0.3.2"
+version = "0.4.0"
 description = "CLI for folder assurance checks — coverage, staleness, and baselines."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "I-Ops Operations Intelligence, LLC", email = "hello@i-ops.dev" }]
 requires-python = ">=3.10"
 dependencies = [
-  "assurance-core>=0.9",
+  "assurance-core>=0.10",
   "openpyxl>=3.1",
 ]
 keywords = ["cli", "ai-agents", "governance", "auditing", "assurance", "reproducibility"]
@@ -33,7 +33,15 @@ Source = "https://github.com/i-ops-hq/assurance-cli"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.27.0,<3"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "mypy>=1.0", "types-openpyxl"]
+
+[tool.mypy]
+strict = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../assurance-core"
+
+[[tool.mypy.overrides]]
+module = "mcp.*"
+ignore_missing_imports = true
 
 [project.scripts]
 assurance = "assurance_cli.cli:main"

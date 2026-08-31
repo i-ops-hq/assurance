@@ -5,11 +5,12 @@ from __future__ import annotations
 import csv
 import hashlib
 from pathlib import Path
+from typing import Any
 
 TABULAR_SUFFIXES = {".csv", ".tsv", ".xlsx"}
 
 
-def profile_file(path: Path) -> dict | None:
+def profile_file(path: Path) -> dict[str, Any] | None:
     """Return a facts-shaped dict compatible with `staleness.extract_measures`, or None."""
     suffix = path.suffix.lower()
     if suffix == ".xlsx":
@@ -31,7 +32,7 @@ def file_sha256(path: Path) -> str:
         return ""
 
 
-def _profile_csv(path: Path, *, delimiter: str) -> dict | None:
+def _profile_csv(path: Path, *, delimiter: str) -> dict[str, Any] | None:
     try:
         with path.open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle, delimiter=delimiter)
@@ -43,10 +44,10 @@ def _profile_csv(path: Path, *, delimiter: str) -> dict | None:
     if not fieldnames:
         return {"rows": 0, "numeric": []}
 
-    return _facts_from_rows(fieldnames, rows)
+    return _facts_from_rows(list(fieldnames), rows)
 
 
-def _profile_xlsx(path: Path) -> dict | None:
+def _profile_xlsx(path: Path) -> dict[str, Any] | None:
     try:
         from openpyxl import load_workbook
     except ImportError:
@@ -55,6 +56,9 @@ def _profile_xlsx(path: Path) -> dict | None:
     try:
         workbook = load_workbook(path, read_only=True, data_only=True)
         sheet = workbook.active
+        if sheet is None:
+            workbook.close()
+            return {"rows": 0, "numeric": []}
         rows_iter = sheet.iter_rows(values_only=True)
         header = next(rows_iter, None)
         if not header:
@@ -72,7 +76,7 @@ def _profile_xlsx(path: Path) -> dict | None:
     return _facts_from_rows(fieldnames, rows)
 
 
-def _facts_from_rows(fieldnames: list[str], rows: list[dict]) -> dict:
+def _facts_from_rows(fieldnames: list[str], rows: list[dict[str, Any]]) -> dict[str, Any]:
     numeric: list[dict[str, object]] = []
     row_count = len(rows)
     for column in fieldnames:

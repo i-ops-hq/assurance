@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from assurance_core.coverage import Coverage, EvidenceRef, Expectation
 from assurance_core.report_period import Period, parse_period_range
 from assurance_core.sequence import (
+    DailyPoint,
     DetectedSeries,
+    NumberedPoint,
+    QuarterlyPoint,
     SeriesKind,
+    WeeklyPoint,
     detect_series,
     enumerate_between,
     explicit_derivation,
@@ -19,6 +23,8 @@ from assurance_core.sequence import (
     point_key,
 )
 from assurance_core.staleness import Finding, Verdict, compare
+
+SequencePoint = Period | QuarterlyPoint | WeeklyPoint | DailyPoint | NumberedPoint
 
 from assurance_cli.paths import PathEscapeError, resolve_folder, resolve_inside
 from assurance_cli.profile import TABULAR_SUFFIXES, profile_file
@@ -103,20 +109,25 @@ def check_coverage(
         if start is None or end is None:
             return _error_result(root, "Could not parse --from / --to for the detected series kind.")
         expected_keys = enumerate_between(start, end)
-        derivation = explicit_derivation(kind, point_key(start), point_key(end))  # type: ignore[arg-type]
-        scope = f"{unit} from {point_key(start)} to {point_key(end)} in {root.name}"  # type: ignore[arg-type]
+        derivation = explicit_derivation(kind, point_key(start), point_key(end))
+        scope = f"{unit} from {point_key(start)} to {point_key(end)} in {root.name}"
     elif period_range and kind is SeriesKind.MONTHLY:
         available = sorted(p for p in (point_from_filename(n) for n in filenames) if isinstance(p, Period))
-        window = parse_period_range(period_range, available)  # type: ignore[arg-type]
+        window = parse_period_range(period_range, available)
         if window is None:
             return _error_result(root, f"Could not parse period range: {period_range!r}")
         expected_keys = enumerate_between(window[0], window[1])
         derivation = f"Range set by request: {period_range!r}."
         scope = f"months from {window[0].label} to {window[1].label} in {root.name}"
     elif detected is not None and len(detected.points) >= MIN_FILES_TO_INFER:
-        expected_keys = enumerate_between(detected.earliest, detected.latest)  # type: ignore[arg-type]
+        expected_keys = enumerate_between(
+            cast(SequencePoint, detected.earliest), cast(SequencePoint, detected.latest)
+        )
         derivation = inference_derivation(detected)
-        scope = f"{unit} from {point_key(detected.earliest)} to {point_key(detected.latest)} in {root.name}"  # type: ignore[arg-type]
+        scope = (
+            f"{unit} from {point_key(cast(SequencePoint, detected.earliest))} "
+            f"to {point_key(cast(SequencePoint, detected.latest))} in {root.name}"
+        )
     else:
         return {
             "folder": str(root),
@@ -244,7 +255,7 @@ def _indexed_files(root: Path) -> tuple[dict[str, list[Path]], list[str]]:
         if point is None:
             unread.append(path.name)
             continue
-        key = point_key(point)  # type: ignore[arg-type]
+        key = point_key(point)
         found.setdefault(key, []).append(path)
     return found, unread[:MAX_UNREAD]
 
@@ -254,8 +265,8 @@ def _label_for_key(key: str, filename: str) -> str:
     if point is None:
         return key
     if isinstance(point, Period):
-        return point.label
-    return point.label
+        return str(point.label)
+    return str(point.label)
 
 
 def _resolve_kind(expect: str | None, detected: DetectedSeries | None) -> SeriesKind | None:
