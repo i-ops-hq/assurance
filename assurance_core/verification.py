@@ -39,6 +39,8 @@ from enum import Enum
 
 
 class VerificationStatus(str, Enum):
+    """Outcome of one independent verification check."""
+
     PASS = "pass"
     """Checked against the world, and it is as the contract required."""
 

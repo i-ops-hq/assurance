@@ -5,6 +5,29 @@
 [![Python](https://img.shields.io/pypi/pyversions/assurance-core)](https://pypi.org/project/assurance-core/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance-core/blob/main/LICENSE)
 
+## Is your failure rate drifting, or is this week just noise?
+
+Textbook EWMA at 3σ and tabular CUSUM at `k=0.5, h=4` were measured against in-control streams — every
+alarm is false by construction:
+
+| baseline rate | EWMA, 3σ | tabular CUSUM, k=.5 h=4 |
+|---|---|---|
+| 5%  | 45% | 47% |
+| 10% | 32% | 62% |
+| 25% | 13% | 33% |
+| 50% |  0% | 13% |
+
+`assurance_core.spc` keeps the Bernoulli CUSUM instrument and calibrates thresholds by simulation per
+baseline rate and series length — no labels, no judge, no model. Minimum **20 baseline runs** before a
+chart is honest; below that it refuses and names the shortfall.
+
+```python
+from assurance_core.spc import chart
+
+result = chart("failures", baseline=[0]*60, monitor=[0,0,0,1,1,1])
+print(result.verdict)  # a sentence, never a score
+```
+
 ## Did your agent read everything it was supposed to read?
 
 Every tool call can return 200 and the answer still be built on two thirds of the data.

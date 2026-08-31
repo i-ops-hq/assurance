@@ -123,11 +123,11 @@ class Budget:
         is how a cheap plan or an untrusted worker gets a tighter leash.
         """
         return cls(
-            iterations=_clamp(iterations, MAX_ITERATIONS),
-            tool_calls=_clamp(tool_calls, MAX_TOOL_CALLS),
-            frontier_calls=_clamp(frontier_calls, MAX_FRONTIER_CALLS),
+            iterations=int(_clamp(iterations, MAX_ITERATIONS)),
+            tool_calls=int(_clamp(tool_calls, MAX_TOOL_CALLS)),
+            frontier_calls=int(_clamp(frontier_calls, MAX_FRONTIER_CALLS)),
             seconds=float(_clamp(seconds, MAX_SECONDS)),
-            retries=_clamp(retries, MAX_RETRIES),
+            retries=int(_clamp(retries, MAX_RETRIES)),
         )
 
 

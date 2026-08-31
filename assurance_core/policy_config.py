@@ -134,7 +134,11 @@ def _predicate_from_match(match: dict[str, Any], *, where: str) -> Rule:
 
     if "effect" in match:
         effect = _parse_effect_name(match["effect"], field=f"{where}.effect")
-        checks.append(lambda r, e=effect: r.effect is e)
+
+        def _match_effect(request: Request, e: Effect = effect) -> bool:
+            return request.effect is e
+
+        checks.append(_match_effect)
 
     if "effect_in" in match:
         raw_list = match["effect_in"]
@@ -143,23 +147,43 @@ def _predicate_from_match(match: dict[str, Any], *, where: str) -> Rule:
         effects = frozenset(
             _parse_effect_name(item, field=f"{where}.effect_in") for item in raw_list
         )
-        checks.append(lambda r, es=effects: r.effect in es)
+
+        def _match_effect_in(request: Request, es: frozenset[Effect] = effects) -> bool:
+            return request.effect in es
+
+        checks.append(_match_effect_in)
 
     if "principal" in match:
         principal_id = _require_str(match["principal"], field=f"{where}.principal")
-        checks.append(lambda r, p=principal_id: r.principal.principal_id == p)
+
+        def _match_principal(request: Request, p: str = principal_id) -> bool:
+            return request.principal.principal_id == p
+
+        checks.append(_match_principal)
 
     if "worker" in match:
         worker_id = _require_str(match["worker"], field=f"{where}.worker")
-        checks.append(lambda r, w=worker_id: r.worker.worker_id == w)
+
+        def _match_worker(request: Request, w: str = worker_id) -> bool:
+            return request.worker.worker_id == w
+
+        checks.append(_match_worker)
 
     if "resource" in match:
         resource = _require_str(match["resource"], field=f"{where}.resource")
-        checks.append(lambda r, res=resource: r.resource == res)
+
+        def _match_resource(request: Request, res: str = resource) -> bool:
+            return request.resource == res
+
+        checks.append(_match_resource)
 
     if "resource_not" in match:
         resource = _require_str(match["resource_not"], field=f"{where}.resource_not")
-        checks.append(lambda r, res=resource: r.resource != res)
+
+        def _match_resource_not(request: Request, res: str = resource) -> bool:
+            return request.resource != res
+
+        checks.append(_match_resource_not)
 
     if not checks:
         raise PolicyConfigError(

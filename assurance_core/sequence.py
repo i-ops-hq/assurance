@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol
+from typing import Protocol, cast
 
 from assurance_core.report_period import Period, months_between, parse_period
 
@@ -121,12 +121,14 @@ def _monthly_key(period: Period) -> str:
 
 
 def point_key(point: Period | QuarterlyPoint | WeeklyPoint | DailyPoint | NumberedPoint) -> str:
+    """Stable sortable key for any supported sequence point."""
     if isinstance(point, Period):
         return _monthly_key(point)
     return point.key
 
 
 def point_label(point: Period | QuarterlyPoint | WeeklyPoint | DailyPoint | NumberedPoint) -> str:
+    """Human label for any supported sequence point."""
     if isinstance(point, Period):
         return point.label
     return point.label
@@ -186,15 +188,15 @@ def point_from_filename(name: str) -> Period | QuarterlyPoint | WeeklyPoint | Da
 
     match = _QUARTERLY.search(name)
     if match:
-        point = _valid_quarter(int(match.group(1)), int(match.group(2)))
-        if point:
-            return point
+        qpoint = _valid_quarter(int(match.group(1)), int(match.group(2)))
+        if qpoint:
+            return qpoint
 
     match = _WEEKLY.search(name)
     if match:
-        point = _valid_week(int(match.group(1)), int(match.group(2)))
-        if point:
-            return point
+        wpoint = _valid_week(int(match.group(1)), int(match.group(2)))
+        if wpoint:
+            return wpoint
 
     match = _DAILY.search(name)
     if match:
@@ -217,6 +219,8 @@ def point_from_filename(name: str) -> Period | QuarterlyPoint | WeeklyPoint | Da
 
 
 class SeriesKind(str, Enum):
+    """Which filename shape a detected series follows."""
+
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
     WEEKLY = "weekly"
@@ -247,11 +251,11 @@ class DetectedSeries:
 
     @property
     def earliest(self) -> SequencePoint:
-        return self.points[0]
+        return cast(SequencePoint, self.points[0])
 
     @property
     def latest(self) -> SequencePoint:
-        return self.points[-1]
+        return cast(SequencePoint, self.points[-1])
 
 
 def _kind_of(point: object) -> SeriesKind | None:

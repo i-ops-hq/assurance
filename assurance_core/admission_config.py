@@ -24,9 +24,10 @@ Unknown keys and forbidden keys are rejected at **load** time.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
-from assurance_core.admission import AdmissionRule, Standing
+from assurance_core.admission import AdmissionRule, SourceFacts, Standing
 
 
 class AdmissionConfigError(ValueError):
@@ -111,20 +112,34 @@ def _check_keys(obj: dict[str, Any], *, allowed: frozenset[str], where: str) -> 
             )
 
 
-def _predicate_from_match(match: dict[str, Any], *, where: str):
-    checks: list = []
+def _predicate_from_match(
+    match: dict[str, Any], *, where: str
+) -> Callable[[SourceFacts], bool]:
+    checks: list[Callable[[SourceFacts], bool]] = []
 
     if "grant" in match:
         grant_id = _require_str(match["grant"], field=f"{where}.grant")
-        checks.append(lambda facts, gid=grant_id: facts.grant_id == gid)
+
+        def _match_grant(facts: SourceFacts, gid: str = grant_id) -> bool:
+            return facts.grant_id == gid
+
+        checks.append(_match_grant)
 
     if "grant_not" in match:
         grant_id = _require_str(match["grant_not"], field=f"{where}.grant_not")
-        checks.append(lambda facts, gid=grant_id: facts.grant_id != gid)
+
+        def _match_grant_not(facts: SourceFacts, gid: str = grant_id) -> bool:
+            return facts.grant_id != gid
+
+        checks.append(_match_grant_not)
 
     if "kind" in match:
         kind = _require_str(match["kind"], field=f"{where}.kind")
-        checks.append(lambda facts, k=kind: facts.kind == k)
+
+        def _match_kind(facts: SourceFacts, k: str = kind) -> bool:
+            return facts.kind == k
+
+        checks.append(_match_kind)
 
     if "older_than_days" in match:
         raw_days = match["older_than_days"]
@@ -133,7 +148,7 @@ def _predicate_from_match(match: dict[str, Any], *, where: str):
         cutoff = float(raw_days) * 86_400.0
         now = time.time()
 
-        def _older_than(facts, _cutoff=cutoff, _now=now) -> bool:
+        def _older_than(facts: SourceFacts, _cutoff: float = cutoff, _now: float = now) -> bool:
             if facts.mtime is None:
                 return False
             return (_now - facts.mtime) >= _cutoff
@@ -144,14 +159,17 @@ def _predicate_from_match(match: dict[str, Any], *, where: str):
         expected = match["tombstoned"]
         if not isinstance(expected, bool):
             raise AdmissionConfigError(f"{where}.tombstoned must be true or false")
-        checks.append(lambda facts, want=expected: facts.tombstoned is want)
+        def _match_tombstoned(facts: SourceFacts, want: bool = expected) -> bool:
+            return facts.tombstoned is want
+
+        checks.append(_match_tombstoned)
 
     if "superseded" in match:
         expected = match["superseded"]
         if not isinstance(expected, bool):
             raise AdmissionConfigError(f"{where}.superseded must be true or false")
 
-        def _superseded(facts, want=expected) -> bool:
+        def _superseded(facts: SourceFacts, want: bool = expected) -> bool:
             has_sibling = facts.newer_sibling is not None
             return has_sibling if want else not has_sibling
 
@@ -163,7 +181,10 @@ def _predicate_from_match(match: dict[str, Any], *, where: str):
             f"({', '.join(sorted(MATCH_KEYS))}) — a name alone is not a rule"
         )
 
-    def predicate(facts, _checks=tuple(checks)) -> bool:
+    def predicate(
+        facts: SourceFacts,
+        _checks: tuple[Callable[[SourceFacts], bool], ...] = tuple(checks),
+    ) -> bool:
         return all(check(facts) for check in _checks)
 
     return predicate

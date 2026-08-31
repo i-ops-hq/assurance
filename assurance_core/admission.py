@@ -26,6 +26,8 @@ from pathlib import Path
 
 
 class Standing(str, Enum):
+    """Whether a source may inform the answer."""
+
     ADMITTED = "admitted"
     REVIEW = "review"
     EXCLUDED = "excluded"
@@ -45,6 +47,8 @@ class SourceFacts:
 
 @dataclass(frozen=True)
 class Admission:
+    """One admission decision for one source."""
+
     standing: Standing
     reason: str
     rule: str
@@ -52,6 +56,8 @@ class Admission:
 
 @dataclass(frozen=True)
 class AdmissionRule:
+    """A named rule that maps provenance facts to a standing."""
+
     name: str
     standing: Standing
     reason: str

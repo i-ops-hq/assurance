@@ -13,9 +13,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 
 class Verdict(str, Enum):
+    """Whether a stored artifact still matches its source."""
+
     CURRENT = "current"
     CONTRADICTED = "contradicted"
     SOURCE_GONE = "source_gone"
@@ -27,6 +30,8 @@ _EPS = 0.005
 
 @dataclass(frozen=True)
 class Divergence:
+    """One numeric measure that no longer matches between artifact and source."""
+
     measure: str
     claimed: float
     current: float
@@ -38,6 +43,8 @@ class Divergence:
 
 @dataclass(frozen=True)
 class Finding:
+    """One staleness finding for a single artifact."""
+
     artifact_name: str
     artifact_path: str
     generated_at: str
@@ -80,7 +87,7 @@ class Finding:
         )
 
 
-def extract_measures(facts: dict) -> dict[str, float]:
+def extract_measures(facts: dict[str, Any]) -> dict[str, float]:
     """Pull comparable figures from a profile-shaped `facts` dict."""
     measures: dict[str, float] = {}
     if not isinstance(facts, dict):
@@ -130,8 +137,8 @@ def compare(
     generated_at: str,
     source_name: str,
     source_mtime: float | None,
-    recorded_facts: dict | None,
-    current_facts: dict | None,
+    recorded_facts: dict[str, Any] | None,
+    current_facts: dict[str, Any] | None,
     source_gone: bool = False,
     uncheckable_reason: str | None = None,
 ) -> Finding:

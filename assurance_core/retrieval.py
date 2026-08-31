@@ -197,4 +197,4 @@ def _matches(value: Any, wanted: Any) -> bool:
         return bool(wanted(value))
     if isinstance(wanted, (list, tuple, set, frozenset)):
         return value in wanted
-    return value == wanted
+    return bool(value == wanted)

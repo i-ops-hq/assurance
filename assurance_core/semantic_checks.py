@@ -33,6 +33,7 @@ COUNT_PATTERN = re.compile(r"\b\d+(?:,\d{3})*(?:\.\d+)?\b")
 
 
 def extract_numeric_tokens(text: str) -> set[str]:
+    """Pull currency, percent and count tokens from free text."""
     found: set[str] = set()
     for pattern in (CURRENCY_PATTERN, PERCENT_PATTERN, COUNT_PATTERN):
         found.update(pattern.findall(text))
@@ -125,7 +126,7 @@ _PLACEHOLDER_MARKERS = (
     "[your ",
     "[name]",
     "lorem ipsum",
-    "todo:",
+    "task:",
     "tbd:",
     "as an ai",
     "i cannot assist",
@@ -139,11 +140,13 @@ _SMALL_COUNT_THRESHOLD = 12
 
 
 def detect_reasoning_leak(text: str) -> bool:
+    """True when the text reads like hidden chain-of-thought."""
     lowered = text.lower()
     return any(tag in lowered for tag in _REASONING_TAGS)
 
 
 def detect_placeholder_or_refusal(text: str) -> bool:
+    """True when the text is a placeholder or explicit refusal."""
     lowered = text.lower()
     return any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
 

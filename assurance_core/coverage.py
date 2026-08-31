@@ -212,10 +212,14 @@ class Coverage:
             refs = dict(found)
         else:
             refs = {}
-            for item in found:
+            for found_item in found:
                 # A bare string names the key, not a path. Recording it as a path would invent
                 # provenance the caller never claimed.
-                ref = item if isinstance(item, EvidenceRef) else EvidenceRef(key=str(item), path="")
+                ref = (
+                    found_item
+                    if isinstance(found_item, EvidenceRef)
+                    else EvidenceRef(key=str(found_item), path="")
+                )
                 refs[ref.key] = ref
 
         accounted = set(refs) | set(gone) | set(ambiguous) | set(unreadable) | set(unauthorized)
