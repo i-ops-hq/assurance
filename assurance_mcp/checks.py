@@ -41,6 +41,7 @@ def _refused(message: str) -> dict[str, Any]:
 
 
 def list_dated_files(folder: str) -> dict[str, Any]:
+    """List dated or numbered files in a folder."""
     try:
         return _list_dated_files(folder)
     except _EXPLAINABLE as exc:
@@ -48,6 +49,7 @@ def list_dated_files(folder: str) -> dict[str, Any]:
 
 
 def check_coverage(folder: str, period_range: str | None = None) -> dict[str, Any]:
+    """Check folder coverage for dated or numbered files."""
     try:
         return _check_coverage(folder, period_range)
     except _EXPLAINABLE as exc:
@@ -61,6 +63,7 @@ def check_staleness(
     *,
     recorded_facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Check whether a document's recorded facts still match its source file."""
     try:
         return _check_staleness(folder, document, source, recorded_facts=recorded_facts)
     except _EXPLAINABLE as exc:

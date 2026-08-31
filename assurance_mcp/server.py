@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import importlib
+from typing import Any, cast
 
 from assurance_mcp import __version__
 from assurance_mcp.checks import (
@@ -13,10 +14,22 @@ from assurance_mcp.checks import (
     list_dated_files,
 )
 
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:  # mcp >= 2
-    from mcp.server.mcpserver import MCPServer as FastMCP  # type: ignore[no-redef]
+
+def _load_fastmcp() -> type[Any]:
+    """Load FastMCP across mcp 1.x (fastmcp) and 2.x (mcpserver) without static dual-import."""
+    for module, attr in (
+        ("mcp.server.fastmcp", "FastMCP"),
+        ("mcp.server.mcpserver", "MCPServer"),
+    ):
+        try:
+            mod = importlib.import_module(module)
+        except ImportError:
+            continue
+        return cast(type[Any], getattr(mod, attr))
+    raise ImportError("mcp SDK not found — install mcp>=1.0")
+
+
+FastMCP = _load_fastmcp()
 
 # The version reaches the client in the initialize handshake and is what Cursor shows next to the
 # server. It came back as an empty string until 0.2.3 — the handshake is the first thing a client
@@ -120,6 +133,7 @@ def check_retrieval_coverage_tool(
 
 
 def main() -> None:
+    """Run the MCP server entrypoint."""
     mcp.run()
 
 

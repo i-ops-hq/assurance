@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-mcp"
-version = "0.4.0"
+version = "0.4.1"
 description = "Read-only MCP server exposing assurance checks over a folder."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -34,7 +34,19 @@ Homepage = "https://i-ops.dev"
 Source = "https://github.com/i-ops-hq/assurance-mcp"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "mypy>=1.0", "types-openpyxl"]
+
+[tool.mypy]
+strict = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../assurance-core:$MYPY_CONFIG_FILE_DIR/../assurance-cli"
+
+[[tool.mypy.overrides]]
+module = "mcp.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "assurance_mcp.server"
+disable_error_code = ["untyped-decorator"]
 
 [project.scripts]
 assurance-mcp = "assurance_mcp.server:main"
