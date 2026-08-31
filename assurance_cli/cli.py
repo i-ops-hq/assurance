@@ -10,6 +10,7 @@ from typing import Any
 from assurance_cli.baseline import check_against_baseline, init_baseline
 from assurance_cli.gather import check_coverage
 from assurance_cli.paths import PathEscapeError
+from assurance_cli.pin import run_pin_action
 from assurance_cli.setdiff import KeySpecError, diff_sets, format_diff
 
 
@@ -63,6 +64,23 @@ def main(argv: list[str] | None = None) -> int:
     diff_parser.add_argument("--fail-on-gap", action="store_true",
                              help="Exit 1 when coverage is incomplete, for use as a CI gate")
 
+    pin_parser = sub.add_parser(
+        "pin",
+        help="Pin MCP tool definitions and detect supply-chain drift",
+        description=(
+            "Snapshot MCP tool definitions from your existing config and fail CI when a server "
+            "changes what it tells a model — same name, different description, no re-prompt "
+            "(CVE-2025-54136)."
+        ),
+    )
+    pin_group = pin_parser.add_mutually_exclusive_group(required=True)
+    pin_group.add_argument("--save", action="store_true",
+                           help="Snapshot every tool your MCP servers expose")
+    pin_group.add_argument("--check", action="store_true",
+                           help="Exit 1 if any definition changed since the snapshot")
+    pin_parser.add_argument("--config", metavar="PATH",
+                            help="Explicit MCP config instead of discovery")
+
     args = parser.parse_args(argv)
 
     try:
@@ -71,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
             return _emit(result, args, finding=not result.get("written") and not args.update)
         if args.command == "diff":
             return _run_diff(args)
+        if args.command == "pin":
+            return run_pin_action(save=args.save, check=args.check, config=args.config)
         return _run_check(args)
     except KeySpecError as exc:
         return _emit({"error": str(exc)}, args, code=2)

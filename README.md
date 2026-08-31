@@ -33,6 +33,32 @@ No account · no API key · no network call · **no model decides any of it**
 dated or numbered *tabular* files — if your files are `.md`, or named in a format it can't read, use
 `diff` and declare the set yourself.
 
+### `assurance pin` — did an MCP server change what it tells the model?
+
+**CVE-2025-54136 (CVSS 8.8):** approving a tool definition does not survive subsequent server-side
+changes. The server you approved in March can serve a different description in August — same client,
+same name, no re-prompt.
+
+```bash
+pip install 'assurance-cli[mcp]'
+
+assurance pin --save                 # snapshot every tool your MCP servers expose
+assurance pin --check                # exit 1 if any definition changed since the snapshot
+```
+
+Pins live in `.assurance/mcp-pins.json` — commit it like a lockfile and review changes in PRs.
+Stdio servers only in this release; HTTP/SSE transports are named and skipped.
+
+**CI gate** (no account, no service, no model):
+
+```yaml
+- run: pip install 'assurance-cli[mcp]'
+- run: assurance pin --check
+```
+
+Exit `1` means a definition moved and needs a human look. Exit `2` means the gate could not run
+(missing `mcp` extra, no config, no pin file yet).
+
 ### `assurance diff` — any two sets of keys
 
 ```bash
@@ -99,8 +125,8 @@ assurance check ~/thesis-data --against-baseline
 | | |
 |---|---|
 | `0` | it checked, and either found no gap or wasn't asked to fail on one |
-| `1` | a finding: a gap with `--fail-on-gap`, a stale baseline, or **nothing it could check** |
-| `2` | could not run: bad path, unreadable list, unparseable JSON, a table where keys were expected |
+| `1` | a finding: a gap with `--fail-on-gap`, a stale baseline, a changed MCP pin, or **nothing it could check** |
+| `2` | could not run: bad path, unreadable list, unparseable JSON, missing `mcp` extra, no MCP config |
 
 **"I couldn't check this" exits 1, not 0.** A folder whose filenames it can't parse must not look
 like a folder it checked and found whole.

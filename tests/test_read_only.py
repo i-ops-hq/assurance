@@ -1,4 +1,4 @@
-"""CLI write gate — baseline is the only permitted write."""
+"""CLI write gate — only baseline and pin may write files."""
 
 from __future__ import annotations
 
@@ -6,17 +6,17 @@ import ast
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parents[1] / "assurance_cli"
-BASELINE_MODULE = "baseline.py"
+WRITING_MODULES = frozenset({"baseline.py", "pin.py"})
 
 
-def test_only_baseline_writes():
+def test_only_baseline_and_pin_write():
     offenders: list[str] = []
     for path in sorted(PACKAGE.glob("*.py")):
-        if path.name == BASELINE_MODULE:
+        if path.name in WRITING_MODULES:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         offenders.extend(_forbidden_writes(path, tree))
-    assert not offenders, "unexpected writes outside baseline.py:\n" + "\n".join(offenders)
+    assert not offenders, "unexpected writes outside baseline.py and pin.py:\n" + "\n".join(offenders)
 
 
 def _forbidden_writes(path: Path, tree: ast.AST) -> list[str]:
