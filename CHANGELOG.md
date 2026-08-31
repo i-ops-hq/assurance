@@ -1,3 +1,11 @@
+# 0.11.0
+
+- **`report_period`** — cadence is observed, never assumed. `Period` gains a `Cadence` field
+  (`MONTH` / `QUARTER`); quarters are stored by first month so ordering is unchanged. New:
+  `detect_cadence`, `periods_between`, `irregular_refusal_sentence`, and quarterly filename forms
+  (`2026-Q1`, `2026Q1`, `Q1-2026`, `Q1 2026`). `months_between` remains as a deprecated wrapper.
+  Irregular spacing refuses to enumerate a denominator rather than inventing one.
+
 # 0.10.0
 
 - **`spc`** — drift detection over a binary outcome series with no labels, no judge and no

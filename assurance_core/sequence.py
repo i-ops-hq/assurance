@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol, cast
 
-from assurance_core.report_period import Period, months_between, parse_period
+from assurance_core.report_period import Cadence, Period, months_between, parse_period
 
 _MIN_YEAR = 1990
 _MAX_YEAR = 2100
@@ -137,6 +137,7 @@ def point_label(point: Period | QuarterlyPoint | WeeklyPoint | DailyPoint | Numb
 # --- filename parsers ----------------------------------------------------------------------------
 
 _QUARTERLY = re.compile(r"(?<!\d)(20\d{2})[-_ ]?Q([1-4])(?!\d)", re.IGNORECASE)
+_QUARTER_LABEL_FIRST = re.compile(r"(?<!\d)Q([1-4])[-_ ](\d{4})(?!\d)", re.IGNORECASE)
 _WEEKLY = re.compile(r"(?<!\d)(20\d{2})[-_ ]?W(\d{1,2})(?!\d)", re.IGNORECASE)
 _DAILY = re.compile(r"(?<!\d)(20\d{2})[-_/](\d{1,2})[-_/](\d{1,2})(?!\d)")
 # Separator is `-`, `_` or `.`, because `INV-0001`, `run_001` and `report.014` are all the same
@@ -182,27 +183,27 @@ def point_from_filename(name: str) -> Period | QuarterlyPoint | WeeklyPoint | Da
         if point:
             return point
 
-    monthly = parse_period(name)
-    if monthly is not None:
-        return monthly
-
     match = _QUARTERLY.search(name)
     if match:
         qpoint = _valid_quarter(int(match.group(1)), int(match.group(2)))
         if qpoint:
             return qpoint
 
+    match = _QUARTER_LABEL_FIRST.search(name)
+    if match:
+        qpoint = _valid_quarter(int(match.group(2)), int(match.group(1)))
+        if qpoint:
+            return qpoint
+
+    monthly = parse_period(name)
+    if monthly is not None and monthly.cadence is Cadence.MONTH:
+        return monthly
+
     match = _WEEKLY.search(name)
     if match:
         wpoint = _valid_week(int(match.group(1)), int(match.group(2)))
         if wpoint:
             return wpoint
-
-    match = _DAILY.search(name)
-    if match:
-        point = _valid_day(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-        if point:
-            return point
 
     match = _NUMBERED.search(name)
     if match:

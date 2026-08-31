@@ -9,12 +9,16 @@ week of February, so "this month's report" means last month — and in the secon
 might still mean January, if February's has not been produced. Guessing from `today` would be
 confidently wrong on both. So when the user does not name a period, the caller uses the most recent
 period that ACTUALLY EXISTS in the folder and says which one it picked. That is a fact we can show.
+
+**Cadence is observed, never assumed.** Monthly spacing and quarterly spacing are the only shapes
+derived here; anything else is irregular and must not receive a fabricated denominator.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 
 _MONTHS: dict[str, int] = {
     "jan": 1, "january": 1,
@@ -36,30 +40,49 @@ _MONTH_NAMES = (
     "July", "August", "September", "October", "November", "December",
 )
 
-# A year we would accept from a filename. Wide enough for archives, narrow enough that a document
-# number like "Report 1024" cannot be read as a year.
 _MIN_YEAR = 1990
 _MAX_YEAR = 2100
 
 
+class Cadence(str, Enum):
+    """How often periods in a series are spaced. Observed from filenames, never assumed."""
+
+    MONTH = "month"
+    QUARTER = "quarter"
+
+
 @dataclass(frozen=True, order=True)
 class Period:
-    """One reporting month. Ordered, so `max()` gives the most recent."""
+    """One reporting period. Ordered by `(year, month)`; quarter is stored by its first month."""
 
     year: int
     month: int
+    cadence: Cadence = field(default=Cadence.MONTH, compare=False)
 
     @property
     def label(self) -> str:
+        if self.cadence is Cadence.QUARTER:
+            return f"Q{(self.month - 1) // 3 + 1} {self.year}"
         return f"{_MONTH_NAMES[self.month - 1]} {self.year}"
+
+    @property
+    def key(self) -> str:
+        """Stable key for coverage records — quarter labels, not month numbers."""
+        if self.cadence is Cadence.QUARTER:
+            return f"{self.year}-Q{(self.month - 1) // 3 + 1}"
+        return f"{self.year}-{self.month:02d}"
 
     def __str__(self) -> str:  # noqa: D105
         return self.label
 
 
-def _valid(year: int, month: int) -> Period | None:
+def _valid(year: int, month: int, *, cadence: Cadence = Cadence.MONTH) -> Period | None:
+    if cadence is Cadence.QUARTER:
+        if 1 <= month <= 4 and _MIN_YEAR <= year <= _MAX_YEAR:
+            return Period(year=year, month=(month - 1) * 3 + 1, cadence=Cadence.QUARTER)
+        return None
     if 1 <= month <= 12 and _MIN_YEAR <= year <= _MAX_YEAR:
-        return Period(year=year, month=month)
+        return Period(year=year, month=month, cadence=Cadence.MONTH)
     return None
 
 
@@ -68,30 +91,33 @@ _NAMED = re.compile(
     r"\b(" + "|".join(sorted(_MONTHS, key=len, reverse=True)) + r")\.?\s*[-_ ]?\s*(\d{4})\b",
     re.IGNORECASE,
 )
-# The reverse, which filenames do: "2025 June report".
 _NAMED_REVERSED = re.compile(
     r"\b(\d{4})\s*[-_ ]?\s*(" + "|".join(sorted(_MONTHS, key=len, reverse=True)) + r")\.?\b",
     re.IGNORECASE,
 )
-# "2025-06", "2025_06", "2025/06". Year first is unambiguous.
-#
-# The trailing guard is `(?!\d)` and NOT `\b`, because `_` is a word character: against
-# `2025_06_client_summary.pdf` a `\b` after the month never fires and the whole filename parsed as
-# no period at all. Underscores are what these files are actually named with.
 _NUMERIC = re.compile(r"(?<!\d)(\d{4})[-_/](\d{1,2})(?!\d)")
-# "06-2025", "06/2025". Month first, and only accepted when the second group is a plausible year —
-# otherwise "10-12" (a day range, a version) would parse as October 12 AD.
 _NUMERIC_REVERSED = re.compile(r"(?<!\d)(\d{1,2})[-_/](\d{4})(?!\d)")
+_QUARTER_YEAR_FIRST = re.compile(r"(?<!\d)(\d{4})[-_ ]?Q([1-4])(?!\d)", re.IGNORECASE)
+_QUARTER_LABEL_FIRST = re.compile(r"(?<!\d)Q([1-4])[-_ ](\d{4})(?!\d)", re.IGNORECASE)
+
+
+def _parse_quarter(text: str) -> Period | None:
+    match = _QUARTER_YEAR_FIRST.search(text)
+    if match:
+        return _valid(int(match.group(1)), int(match.group(2)), cadence=Cadence.QUARTER)
+    match = _QUARTER_LABEL_FIRST.search(text)
+    if match:
+        return _valid(int(match.group(2)), int(match.group(1)), cadence=Cadence.QUARTER)
+    return None
 
 
 def parse_period(text: str) -> Period | None:
-    """The month and year the text names, or None when it names none.
-
-    None is the important half. "send the client reports" names no period, and inventing one from
-    `today` would attach a document the user did not ask for. The caller then falls back to what the
-    folder actually contains — see the module docstring.
-    """
+    """The month and year the text names, or None when it names none."""
     haystack = text or ""
+    quarter = _parse_quarter(haystack)
+    if quarter is not None:
+        return quarter
+
     for pattern, month_first in (
         (_NAMED, True),
         (_NAMED_REVERSED, False),
@@ -121,11 +147,10 @@ def parse_period(text: str) -> Period | None:
 
 
 def period_from_filename(name: str) -> Period | None:
-    """The period a report filename is for — `Jan 2026 report.pdf` → January 2026.
-
-    Same parser as the sentence, deliberately. Two parsers for the same idea is how the folder and
-    the request start disagreeing about which month a file is.
-    """
+    """The period a report filename is for — monthly and quarterly forms only when unambiguous."""
+    quarter = _parse_quarter(name)
+    if quarter is not None:
+        return quarter
     return parse_period(name)
 
 
@@ -134,10 +159,84 @@ def latest(periods: list[Period]) -> Period | None:
     return max(periods) if periods else None
 
 
-# --- ranges: which months a question actually covers ----------------------------------------------
-#
-# Everything below is leg 3 of the strategy docs — the expected set has to be
-# derived by CODE, or the coverage guarantee is only as good as the model that guessed the scope.
+def _month_index(period: Period) -> int:
+    return period.year * 12 + (period.month - 1)
+
+
+def detect_cadence(periods: list[Period]) -> Cadence | None:
+    """Infer a regular cadence from observed periods, or None when irregular.
+
+    Fewer than three distinct periods is not enough evidence for a cadence. Quarterly spacing must be
+    exact — every gap between consecutive present quarters is three months. Monthly spacing allows
+    holes of one missing month (a gap of two between filenames) because a missing report and an
+    irregular cadence look identical from the outside only when the jump is three months or more on
+    monthly-named files.
+
+    ``2025-Q1, Q2, Q4`` is either a quarterly series missing Q3 or an irregular series that is
+    complete; the safe reading is irregular — we refuse to enumerate a denominator and say so rather
+    than guessing which.
+    """
+    distinct = sorted(set(periods))
+    if len(distinct) < 3:
+        return None
+
+    cadences = {period.cadence for period in distinct}
+    if len(cadences) != 1:
+        return None
+
+    cadence = next(iter(cadences))
+    deltas = [
+        _month_index(distinct[index + 1]) - _month_index(distinct[index])
+        for index in range(len(distinct) - 1)
+    ]
+
+    if cadence is Cadence.QUARTER:
+        if not all(period.month in (1, 4, 7, 10) for period in distinct):
+            return None
+        if not all(delta in (3, 6) for delta in deltas):
+            return None
+        if len(distinct) == 3 and 6 in deltas:
+            return None
+        return Cadence.QUARTER
+
+    if all(delta in (1, 2) for delta in deltas):
+        return Cadence.MONTH
+    return None
+
+
+def periods_between(start: Period, end: Period, cadence: Cadence) -> list[Period]:
+    """Every period from `start` to `end` inclusive at the given cadence. Empty if reversed."""
+    if end < start:
+        return []
+    out: list[Period] = []
+    if cadence is Cadence.MONTH:
+        year, month = start.year, start.month
+        while (year, month) <= (end.year, end.month):
+            out.append(Period(year=year, month=month, cadence=Cadence.MONTH))
+            month += 1
+            if month > 12:
+                year, month = year + 1, 1
+        return out
+
+    year, month = start.year, ((start.month - 1) // 3) * 3 + 1
+    end_month = ((end.month - 1) // 3) * 3 + 1
+    while (year, month) <= (end.year, end_month):
+        out.append(Period(year=year, month=month, cadence=Cadence.QUARTER))
+        month += 3
+        if month > 12:
+            year, month = year + 1, 1
+    return out
+
+
+def months_between(start: Period, end: Period) -> list[Period]:
+    """Every month from `start` to `end` inclusive.
+
+    .. deprecated::
+        Prefer `periods_between` with an explicit `Cadence`. This wrapper remains so callers that
+        still mean monthly enumeration do not need to move in the same commit as a behaviour change.
+    """
+    return periods_between(start, end, Cadence.MONTH)
+
 
 _LAST_N = re.compile(
     r"\b(?:last|past|previous|trailing)\s+"
@@ -150,77 +249,58 @@ _WORD_NUMBERS = {
     "seven": 7, "eight": 8, "nine": 9, "ten": 10, "twelve": 12,
     "eighteen": 18, "twenty-four": 24,
 }
-# Both sides must LOOK like a period. The first version used `(.{3,24}?)` on each side, and the
-# non-greedy right-hand group stopped at "March" in "from January 2024 to March 2024" — `parse_period`
-# read that as no month at all, the range collapsed to a single month, and the coverage denominator
-# would have been 1 instead of 3. A loose capture on the thing that DEFINES the expected set is the
-# worst place to be approximate.
-_PERIOD_PHRASE = r"(?:[A-Za-z]{3,10}\.?\s+\d{4}|\d{4}[-_/]\d{1,2}|\d{1,2}[-_/]\d{4}|\d{4})"
+_PERIOD_PHRASE = r"(?:[A-Za-z]{3,10}\.?\s+\d{4}|\d{4}[-_/]\d{1,2}|\d{1,2}[-_/]\d{4}|\d{4}|Q[1-4][-_ ]?\d{4}|\d{4}[-_ ]?Q[1-4])"
 _BETWEEN = re.compile(
     rf"\b(?:from\s+)?({_PERIOD_PHRASE})\s+(?:to|through|thru|until|–|—|-)\s+({_PERIOD_PHRASE})\b",
     re.IGNORECASE,
 )
 _BARE_YEAR = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
-# Range separators beyond the words. `-` is already handled by `_BETWEEN`; these two are not, and
-# both are natural things to type.
 _SYMBOL_RANGE = re.compile(r"^\s*(.+?)\s*(?::|\.\.)\s*(.+?)\s*$")
 
 
-def _periods_mentioned(text: str) -> list["Period"]:
-    """Every distinct month named anywhere in the text, in order.
-
-    Used only to notice that a request names MORE THAN ONE, which means any single-month reading of
-    it is a guess. Deliberately not used to build a range: two months in a string do not tell you
-    the relation between them.
-    """
+def _periods_mentioned(text: str) -> list[Period]:
     seen: list[Period] = []
     for pattern in (_NAMED, _NAMED_REVERSED, _NUMERIC, _NUMERIC_REVERSED):
         for match in pattern.finditer(text):
             period = parse_period(match.group(0))
             if period is not None and period not in seen:
                 seen.append(period)
+    for match in _QUARTER_YEAR_FIRST.finditer(text):
+        period = _parse_quarter(match.group(0))
+        if period is not None and period not in seen:
+            seen.append(period)
+    for match in _QUARTER_LABEL_FIRST.finditer(text):
+        period = _parse_quarter(match.group(0))
+        if period is not None and period not in seen:
+            seen.append(period)
     return seen
 
 
-def months_between(start: Period, end: Period) -> list[Period]:
-    """Every month from `start` to `end` inclusive, in order. Empty if they are the wrong way round.
-
-    The denominator for a trend question. `Period` is `order=True`, so the arithmetic is just
-    counting — no calendar library, no clock, and no timezone to be wrong about.
-    """
-    if end < start:
-        return []
-    out: list[Period] = []
-    year, month = start.year, start.month
-    while (year, month) <= (end.year, end.month):
-        out.append(Period(year=year, month=month))
-        month += 1
-        if month > 12:
-            year, month = year + 1, 1
-    return out
-
-
-def _shift(period: Period, months_back: int) -> Period:
+def _shift(period: Period, months_back: int, *, cadence: Cadence) -> Period:
     total = period.year * 12 + (period.month - 1) - months_back
-    return Period(year=total // 12, month=(total % 12) + 1)
+    year = total // 12
+    month = (total % 12) + 1
+    if cadence is Cadence.QUARTER:
+        month = ((month - 1) // 3) * 3 + 1
+        return Period(year=year, month=month, cadence=Cadence.QUARTER)
+    return Period(year=year, month=month, cadence=Cadence.MONTH)
 
 
-def parse_period_range(text: str, available: list[Period]) -> tuple[Period, Period] | None:
-    """The months a question covers, or None when the words do not name a range.
+def parse_period_range(
+    text: str,
+    available: list[Period],
+    *,
+    cadence: Cadence | None = None,
+) -> tuple[Period, Period] | None:
+    """The periods a question covers, or None when the words do not name a range.
 
-    **Anchored to the evidence, never to the clock**, which is this module's founding rule extended
-    from one month to many. `parse_period` already argues it: in the second week of March, February's
-    report may simply not exist, so "the last two years" counted back from `today` reports a gap that
-    is really the calendar being ahead of the business. Counted back from the most recent period
-    actually present, it does not.
-
-    Returning None is a real answer — the caller falls back to "everything in the folder" and says
-    so, rather than inventing a window. A scope we guessed at would put the whole coverage claim on
-    a guess, which inverts the point of having one.
+    Anchored to the evidence, never to the clock. When `cadence` is `QUARTER`, "the last two years"
+    counts quarters back from the most recent period present, not twenty-four invented months.
     """
     if not available:
         return None
     anchor = max(available)
+    resolved = cadence or detect_cadence(available) or Cadence.MONTH
     body = text or ""
 
     match = _LAST_N.search(body)
@@ -228,19 +308,23 @@ def parse_period_range(text: str, available: list[Period]) -> tuple[Period, Peri
         raw, unit = match.group(1).lower(), match.group(2).lower()
         count = _WORD_NUMBERS.get(raw, 0) or (int(raw) if raw.isdigit() else 0)
         if count:
+            if resolved is Cadence.QUARTER and unit == "year":
+                return _shift(anchor, (count * 4 - 1) * 3, cadence=resolved), anchor
             span = count * 12 if unit == "year" else count
-            return _shift(anchor, span - 1), anchor
+            return _shift(anchor, span - 1, cadence=resolved), anchor
 
     between = _BETWEEN.search(body)
     if between:
         first, second = parse_period(between.group(1)), parse_period(between.group(2))
         if first and second:
             return (first, second) if first <= second else (second, first)
-        # "2024 to 2025" — whole years, which `parse_period` will not read on its own because a bare
-        # year names no month.
         left, right = _BARE_YEAR.search(between.group(1)), _BARE_YEAR.search(between.group(2))
         if left and right:
             a, b = sorted((int(left.group(1)), int(right.group(1))))
+            if resolved is Cadence.QUARTER:
+                return Period(year=a, month=1, cadence=Cadence.QUARTER), Period(
+                    year=b, month=10, cadence=Cadence.QUARTER
+                )
             return Period(year=a, month=1), Period(year=b, month=12)
 
     symbol = _SYMBOL_RANGE.match(body)
@@ -249,15 +333,6 @@ def parse_period_range(text: str, available: list[Period]) -> tuple[Period, Peri
         if first and second:
             return (first, second) if first <= second else (second, first)
 
-    # A range we could not read must NOT collapse to the first month in it. `parse_period` searches,
-    # so "2024-01:2024-06" found January and reported a scope of one month — 1 of 1, complete, exit
-    # 0 — for a request that named six. A denominator invented from a request we did not understand,
-    # then called complete. Found 2026-08-29 in an outside review.
-    #
-    # `:` and `..` are read as ranges below. This guard is for the ones nobody has typed yet: if the
-    # body names two different months and none of the forms above related them, we do not understand
-    # the request, and None is the honest answer — the caller falls back to the whole folder and
-    # says so.
     mentioned = _periods_mentioned(body)
     if len(mentioned) > 1:
         return None
@@ -269,6 +344,19 @@ def parse_period_range(text: str, available: list[Period]) -> tuple[Period, Peri
     years = _BARE_YEAR.findall(body)
     if len(years) == 1:
         year = int(years[0])
+        if resolved is Cadence.QUARTER:
+            return Period(year=year, month=1, cadence=Cadence.QUARTER), Period(
+                year=year, month=10, cadence=Cadence.QUARTER
+            )
         return Period(year=year, month=1), Period(year=year, month=12)
 
     return None
+
+
+def irregular_refusal_sentence(file_count: int) -> str:
+    """What to say when files exist but no cadence supports a denominator."""
+    noun = "file" if file_count == 1 else "files"
+    return (
+        f"{file_count} {noun}, no regular cadence, so I cannot say what is missing. "
+        "Here is what I read."
+    )
