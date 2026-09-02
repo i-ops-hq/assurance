@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from enum import Enum
 from typing import Protocol, cast
 
@@ -219,6 +220,19 @@ def point_from_filename(name: str) -> Period | QuarterlyPoint | WeeklyPoint | Da
     return None
 
 
+def weekly_point_from_day(point: DailyPoint) -> WeeklyPoint:
+    """The ISO week a calendar day falls in.
+
+    Public because a caller that INDEXED files before the series kind was known has to re-key them
+    afterwards. `detect_series` can now return a WEEKLY series from daily-shaped filenames, and a
+    caller still keying those files by day matches nothing — which is how `assurance check` briefly
+    reported "0 of 8 weeks" for a folder holding all eight.
+    """
+    stamp = date(point.year, point.month, point.day)
+    iso = stamp.isocalendar()
+    return WeeklyPoint(year=iso.year, week=iso.week)
+
+
 class SeriesKind(str, Enum):
     """Which filename shape a detected series follows."""
 
@@ -310,6 +324,45 @@ def detect_series(filenames: list[str]) -> DetectedSeries | None:
     unique = tuple(sorted(set(parsed)))
     if len(unique) < _MIN_FILES_TO_INFER:
         return None
+
+    # SPACING IS A PROPERTY OF THE SET, and until 2026-09-02 nothing here looked at it. Every step
+    # above classifies one filename at a time, so seven files spaced a week apart all parse as DAILY
+    # points, all agree on the kind, and the caller then enumerates every calendar day between the
+    # first and the last: `assurance check` reported **"5 of 36 days ... not in this folder:
+    # 2025-01-20, 2025-01-21 and 28 more"** for a clean weekly series, and **"1 of 36 days"** for
+    # nine irregular incident reports. A fabricated denominator, in shipped public software, from the
+    # tool whose entire purpose is refusing to fabricate one.
+    #
+    # Same architectural error `corpus_census` was built to fix, and the same fix: decide the shape
+    # from the whole set, not from each name.
+    if kind is SeriesKind.DAILY:
+        # Narrowed explicitly rather than relying on `kind`: the tuple is still typed as the union
+        # and `mypy --strict` — which the three public repos gate on — will not infer it from the
+        # enum check. The mismatch guard is real as well as a formality; a DAILY kind whose points
+        # are not all days means `_kind_of` and this branch disagree, and guessing is not an option.
+        days = [point for point in unique if isinstance(point, DailyPoint)]
+        if len(days) != len(unique):
+            return None
+        gaps = sorted(
+            (date(b.year, b.month, b.day) - date(a.year, a.month, a.day)).days
+            for a, b in zip(days, days[1:])
+        )
+        if not gaps:
+            return None
+        modal = max(set(gaps), key=gaps.count)
+        # A majority of the gaps must agree, or these are dated files rather than a series and no
+        # denominator is honest. The census draws the same line for the same reason.
+        if gaps.count(modal) * 2 <= len(gaps):
+            return None
+        if modal == 7:
+            weeks = tuple(sorted({weekly_point_from_day(p) for p in days}))
+            if len(weeks) < _MIN_FILES_TO_INFER:
+                return None
+            return DetectedSeries(kind=SeriesKind.WEEKLY, points=weeks, prefix="")
+        if modal != 1:
+            # Regularly spaced, but not daily and not weekly — a shape we do not model. Saying so is
+            # the honest answer; enumerating days would invent the ones in between.
+            return None
 
     prefix = next(iter(prefixes)) if prefixes else ""
     return DetectedSeries(kind=kind, points=unique, prefix=prefix)
