@@ -21,6 +21,7 @@ from assurance_core.sequence import (
     parse_point,
     point_from_filename,
     point_key,
+    weekly_point_from_day,
 )
 from assurance_core.staleness import Finding, Verdict, compare
 
@@ -99,6 +100,22 @@ def check_coverage(
                 Coverage(scope_label=f"items in {root.name}", expected=[], undetermined=_UNDETERMINED)
             ),
         }
+
+    # Files were indexed BEFORE the kind was known, so a weekly series detected from daily-shaped
+    # filenames leaves every file keyed by day and nothing matches — "0 of 8 weeks" for a folder
+    # holding all eight. Re-key under the resolved kind, which is the same thing the census does when
+    # it maps names under a resolved cadence rather than parsing each one on its own.
+    if kind is SeriesKind.WEEKLY:
+        regrouped: dict[str, list[Path]] = {}
+        for paths in by_key.values():
+            for path in paths:
+                point = point_from_filename(path.name)
+                if isinstance(point, DailyPoint):
+                    point = weekly_point_from_day(point)
+                if point is None:
+                    continue
+                regrouped.setdefault(point_key(point), []).append(path)
+        by_key = regrouped
 
     unit = _unit_for_kind(kind)
     derivation = ""

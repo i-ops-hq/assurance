@@ -1,3 +1,15 @@
+# 0.5.0
+
+- **`assurance check` no longer invents missing files.** A folder of weekly reports was answered with
+  *"5 of 36 days — not in this folder: 2025-01-20, 2025-01-21 and 28 more"*, and a folder of nine
+  irregular incident reports with *"1 of 36 days"*. Both denominators were fabricated, by the tool
+  whose whole purpose is refusing to fabricate one. Cadence is now resolved from the spacing across
+  the whole set: weekly files report **weeks**, and an irregular set reports **no series** rather
+  than a number.
+- Files are re-keyed under the resolved cadence, so a weekly series detected from daily-shaped
+  filenames still matches the files that produced it.
+- `--expect` is unchanged and remains available to assert a cadence rather than infer one.
+
 # 0.4.0
 
 - **`assurance drift`** — read a JSONL or CSV of runs, build a binary series, and report whether
