@@ -13,6 +13,21 @@ One command. One honest ratio. An exit code your pipeline can act on.
 pip install assurance-cli
 ```
 
+**Point it at a folder you already have.** No config, no corpus file, no setup:
+
+```bash
+assurance check ~/reports
+```
+```
+22 of 24 months from 2024-01 to 2025-12 in reports — not in this folder: March 2024, July 2025
+```
+
+It worked out that the folder is monthly, over what span, and which two are absent — from the
+filenames, before opening a single file. Weekly, quarterly and yearly corpora work the same way, and
+**a folder with no regular cadence is told so rather than given a denominator we made up.**
+
+Then the same question against a retrieval step, where the expected set is yours to declare:
+
 ```bash
 assurance diff --expected corpus.txt --found retrieved.json \
   --scope "documents the question spans" --where "the retrieved set" --fail-on-gap
@@ -27,7 +42,7 @@ allowed. It's reported, and it earns no credit.
 
 No account · no API key · no network call · **no model decides any of it**
 
-## Three commands
+## Five commands
 
 **`diff` is the general one.** `check` is the special case for a folder of
 dated or numbered *tabular* files — if your files are `.md`, or named in a format it can't read, use
