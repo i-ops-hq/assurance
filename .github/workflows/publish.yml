@@ -91,3 +91,55 @@ jobs:
         with:
           # Belt and braces against a race between the check above and the upload.
           skip-existing: true
+
+  # Listing on the MCP registry, by the same principle as the PyPI job above: **no credential is
+  # stored anywhere.** `mcp-publisher login github-oidc` proves this workflow's identity to the
+  # registry, and the registry checks that identity owns the `io.github.i-ops-hq` namespace the
+  # manifest claims. An interactive `login github` would work from a laptop and would mean a person
+  # holding a token; this way nobody does.
+  #
+  # Runs after PyPI on purpose. The manifest points at a pypi package/version, so listing a version
+  # the index does not serve yet would advertise something nobody can install — the same
+  # release-against-itself race that took assurance-cli's CI red on 2026-09-02, pointed outward.
+  registry:
+    needs: [build, publish]
+    if: needs.build.outputs.already-on-pypi != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write          # OIDC only; no repo write, no secrets
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: server.json must agree with the release
+        # The manifest is a mirror of pyproject, and on 2026-09-02 it was found a patch behind —
+        # 0.4.0 against a shipped 0.4.1. Listing a stale version is worse than not listing, because
+        # it is wrong in public and nothing upstream would have caught it.
+        run: |
+          MANIFEST=$(python3 -c "import json;print(json.load(open('server.json'))['version'])")
+          PACKAGE=$(python3 -c "import json;print(json.load(open('server.json'))['packages'][0]['version'])")
+          if [ "$MANIFEST" != "${{ needs.build.outputs.version }}" ] || [ "$PACKAGE" != "${{ needs.build.outputs.version }}" ]; then
+            echo "server.json says $MANIFEST / package $PACKAGE, release is ${{ needs.build.outputs.version }}"
+            exit 1
+          fi
+
+      - name: Wait for the version to be installable
+        # PyPI's index, JSON API, resolver and CDN do not agree instantly.
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -sf "https://pypi.org/pypi/assurance-mcp/${{ needs.build.outputs.version }}/json" > /dev/null; then
+              echo "assurance-mcp ${{ needs.build.outputs.version }} is on PyPI"; exit 0
+            fi
+            sleep 10
+          done
+          echo "timed out waiting for PyPI"; exit 1
+
+      - name: Install mcp-publisher
+        run: |
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" \
+            | tar xz mcp-publisher
+          ./mcp-publisher validate
+
+      - name: Publish to the MCP registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
