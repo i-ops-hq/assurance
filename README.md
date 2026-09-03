@@ -34,7 +34,6 @@ filenames alone. A folder with no regular cadence is **told so** rather than han
 | **`assurance-core`** | `pip install assurance-core` | the decision layer as a pure library — no I/O, no model, no framework. Coverage, corpus census, staleness, drift, tool pinning, the rule of two |
 | **`assurance-cli`** | `pip install assurance-cli` | five commands, each a CI gate with no model in it: `check`, `diff`, `pin`, `drift`, `init` |
 | **`assurance-mcp`** | `pip install assurance-mcp` | four MCP tools, read-only by construction, for Cursor / Claude Desktop / any MCP client |
-| **`assurance-authority`** | `pip install assurance-authority` | whether a task may proceed for the person who asked — and what happens when it may not |
 
 Each ships to PyPI independently and versions on its own — a release tag names its package
 (`cli-v0.5.1`), because a bare version number is ambiguous between three.
@@ -46,10 +45,8 @@ Each ships to PyPI independently and versions on its own — a release tag names
   [`report-coverage` skill](skills/report-coverage/SKILL.md).
 - **You are building the check into your own system.** `assurance-core`. It is deliberately
   dependency-free so it can sit inside anything.
-- **You are worried an agent becomes a way to read things people cannot read.**
-  `assurance-authority`. It makes one rule runnable against your own people: context acquisition
-  never raises the asker's authorisation, so a task they may not have **changes owner** rather than
-  the answer travelling back to them.
+- **You are worried an agent becomes a way to read things people cannot read.** That is a separate
+  project built on this one: **[assurance-authority](https://github.com/i-ops-hq/assurance-authority)**.
 
 ## The two commands people adopt first
 
