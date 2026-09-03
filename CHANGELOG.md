@@ -1,3 +1,12 @@
+# 0.13.0
+
+- **`retrieval`** — catalogue reconciliation before metadata is trusted. New:
+  `reconcile_catalogue`, `Reconciliation`, `CatalogueNotReconciled`. An untagged document is a hard,
+  visible error on its own — distinct from and prior to the completeness check — not something that
+  silently falls out of both the expected and retrieved sets. `scope_from_metadata` gains an opt-in
+  `required=` parameter; default `None` keeps today's behaviour byte for byte. Field presence rules
+  are explicit: absent, `None`, `""`, `[]`, `{}` are incomplete; `0` and `False` are present.
+
 # 0.12.0
 
 - **`corpus_census`** — new. The shape of a folder derived from **filenames alone**: how many files,

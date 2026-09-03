@@ -9,9 +9,12 @@ import pytest
 
 from assurance_core.coverage import Coverage
 from assurance_core.retrieval import (
+    CatalogueNotReconciled,
     ChunkWithoutDocument,
+    Reconciliation,
     Stakes,
     document_of,
+    reconcile_catalogue,
     response_for,
     retrieval_coverage,
     scope_from_metadata,
@@ -192,11 +195,81 @@ def test_the_query_finds_the_amendment_without_anyone_declaring_supersession() -
 
 
 def test_a_document_missing_the_field_does_not_match() -> None:
-    """The honest residual, made explicit. An untagged document falls out of the expected set, and
-    out of the retrieved set with it, so the check passes and nothing says otherwise."""
+    """On the default path (`required` omitted), an untagged document falls out of the expected set,
+    and out of the retrieved set with it, so the check passes and nothing says otherwise. Opt in to
+    `required=` when silence is the defect."""
     catalogue = dict(CATALOGUE, **{"acme/untagged.md": {"doc_type": "amendment"}})
 
     assert "acme/untagged.md" not in scope_from_metadata(catalogue, tenant="acme")
+
+
+# --- catalogue reconciliation (lulu_dev, r/Rag, 2026-08-30) --------------------------------------
+
+
+def test_reconcile_catalogue_names_every_untagged_document() -> None:
+    catalogue = dict(CATALOGUE, **{"acme/untagged.md": {"doc_type": "amendment"}})
+    result = reconcile_catalogue(catalogue, required=("tenant",))
+
+    assert result.checked == 5
+    assert result.incomplete == {"acme/untagged.md": ("tenant",)}
+    assert result.summary() == "1 of 5 documents have no tenant — review them"
+
+
+@pytest.mark.parametrize(
+    "metadata,expected_present",
+    [
+        ({}, False),
+        ({"tenant": None}, False),
+        ({"tenant": ""}, False),
+        ({"tenant": []}, False),
+        ({"tenant": {}}, False),
+        ({"tenant": 0}, True),
+        ({"tenant": False}, True),
+        ({"tenant": "acme"}, True),
+    ],
+)
+def test_field_presence_rules(metadata: dict, expected_present: bool) -> None:
+    result = reconcile_catalogue({"doc.md": metadata}, required=("tenant",))
+    assert result.clean is expected_present
+
+
+def test_scope_with_required_refuses_an_untagged_catalogue() -> None:
+    catalogue = dict(CATALOGUE, **{"acme/untagged.md": {"doc_type": "amendment"}})
+
+    with pytest.raises(CatalogueNotReconciled, match="have no tenant"):
+        scope_from_metadata(catalogue, required=("tenant",), tenant="acme")
+
+
+def test_scope_with_required_counterfactual_without_raise_is_silent(monkeypatch) -> None:
+    """Counterfactual: reconcile but do not refuse — the short list returns quietly."""
+    import assurance_core.retrieval as retrieval_mod
+
+    catalogue = dict(CATALOGUE, **{"acme/untagged.md": {"doc_type": "amendment"}})
+
+    def without_raise(catalogue, *, required=None, **filters):
+        if required is not None:
+            reconcile_catalogue(catalogue, required=required)
+        matched = []
+        for document, metadata in catalogue.items():
+            if all(
+                retrieval_mod._matches(metadata.get(field), wanted)
+                for field, wanted in filters.items()
+            ):
+                matched.append(document)
+        return sorted(matched)
+
+    monkeypatch.setattr(retrieval_mod, "scope_from_metadata", without_raise)
+
+    result = retrieval_mod.scope_from_metadata(catalogue, required=("tenant",), tenant="acme")
+    assert "acme/untagged.md" not in result
+    assert len(result) == 3
+
+
+def test_scope_with_required_returns_the_same_scope_when_clean() -> None:
+    assert scope_from_metadata(CATALOGUE, required=("tenant",), tenant="acme", doc_type=("msa", "amendment")) == [
+        "acme/amendment-3.md",
+        "acme/msa-2023.md",
+    ]
 
 
 # --- block or warn, which is policy and not arithmetic --------------------------------------------

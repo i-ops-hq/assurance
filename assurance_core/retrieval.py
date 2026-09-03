@@ -25,6 +25,7 @@ is often the more alarming line, so it is reported rather than dropped.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -40,6 +41,91 @@ case is friction with no honesty benefit."""
 
 class ChunkWithoutDocument(ValueError):
     """A chunk record carried nothing identifying the document it came from."""
+
+
+@dataclass(frozen=True)
+class Reconciliation:
+    """Whether every document in a catalogue carries the fields the caller declared required.
+
+    Checked independently and first — before any metadata filter builds an expected set. The argument
+    is lulu_dev's (u/lulu_dev, r/Rag, 2026-08-30): *"'Someone forgot to tag it' and 'correctly
+    untagged' produce identical silence."* This pass makes the difference visible.
+    """
+
+    checked: int
+    required: tuple[str, ...]
+    incomplete: dict[str, tuple[str, ...]]
+
+    @property
+    def clean(self) -> bool:
+        return not self.incomplete
+
+    def summary(self) -> str:
+        if self.clean:
+            return f"all {self.checked} documents carry {self._required_label()}"
+
+        count = len(self.incomplete)
+        if len(self.required) == 1:
+            return f"{count} of {self.checked} documents have no {self.required[0]} — review them"
+        return (
+            f"{count} of {self.checked} documents lack {self._required_label()} — review them"
+        )
+
+    def _required_label(self) -> str:
+        if len(self.required) == 1:
+            return self.required[0]
+        return ", ".join(self.required)
+
+
+class CatalogueNotReconciled(ValueError):
+    """The catalogue failed reconciliation before it could be trusted as a scope source.
+
+    Same reason and shape as `ChunkWithoutDocument`: a record that must not vanish. A document with
+    no tenant must not vanish either.
+    """
+
+    def __init__(self, reconciliation: Reconciliation) -> None:
+        self.reconciliation = reconciliation
+        super().__init__(reconciliation.summary())
+
+
+def _field_present(metadata: Mapping[str, Any], field: str) -> bool:
+    """Whether one metadata field counts as present for reconciliation.
+
+    | catalogue value | verdict |
+    |---|---|
+    | key absent | incomplete |
+    | `None` | incomplete |
+    | `""`, `[]`, `{}` | incomplete — an empty tenant tag is not a tenant |
+    | `0`, `False` | present — a real value |
+    """
+    if field not in metadata:
+        return False
+    value = metadata[field]
+    if value is None:
+        return False
+    if value == "" or value == [] or value == {}:
+        return False
+    return True
+
+
+def reconcile_catalogue(
+    catalogue: Mapping[str, Mapping[str, Any]],
+    *,
+    required: Iterable[str],
+) -> Reconciliation:
+    """Audit every document for the fields the caller declared — never inferred from the corpus."""
+    required_fields = tuple(dict.fromkeys(required))
+    incomplete: dict[str, tuple[str, ...]] = {}
+    for document, metadata in catalogue.items():
+        missing = tuple(field for field in required_fields if not _field_present(metadata, field))
+        if missing:
+            incomplete[document] = missing
+    return Reconciliation(
+        checked=len(catalogue),
+        required=required_fields,
+        incomplete=incomplete,
+    )
 
 
 def document_of(chunk: Any) -> str:
@@ -153,6 +239,8 @@ def response_for(coverage: Coverage, stakes: Stakes) -> str:
 
 def scope_from_metadata(
     catalogue: Mapping[str, Mapping[str, Any]],
+    *,
+    required: tuple[str, ...] | None = None,
     **filters: Any,
 ) -> list[str]:
     """The expected set as a **metadata query** over the corpus, rather than a list of declared pairs.
@@ -180,11 +268,29 @@ def scope_from_metadata(
     It does not replace declared relationships, which still capture WHY one document supersedes
     another. It just does not depend on them to notice that the retrieval was short.
 
-    The honest residual: this moves the trust to the metadata. A document with no tenant tag falls out
-    of the expected set and out of the retrieved set together, so the check passes and nothing says
-    otherwise. Every fix in this area relocates the trust rather than removing it, which is worth
-    knowing when you decide where to put yours.
+    When `required` is omitted, a document with no tenant tag falls out of the expected set and out of
+    the retrieved set together, so the check passes and nothing says otherwise — the documented
+    default, not an unfixed hole. When `required` is given, `reconcile_catalogue` runs first and
+    raises `CatalogueNotReconciled` naming every document and field that failed — lulu_dev's point
+    that the metadata layer must pass its own audit before it is trusted as the source of truth for
+    completeness downstream.
+
+    One sharp edge, because this is a published API: `required` is keyword-only and sits in front of
+    `**filters`, so a corpus whose metadata genuinely has a field called `required` cannot filter on
+    it here — the argument is taken as the reconciliation list instead. Use `reconcile_catalogue`
+    directly and filter separately if that ever collides.
+
+    The honest residual when `required` is used: you are now trusting that the reconciliation pass
+    covers the whole catalogue. That is a much smaller surface than "does the retrieved set match the
+    correct expected set", because "did every document get its required fields" is answerable
+    exhaustively and cheaply. Whether a tag is *correct* is a different and harder question; this
+    module does not claim that.
     """
+    if required is not None:
+        reconciliation = reconcile_catalogue(catalogue, required=required)
+        if not reconciliation.clean:
+            raise CatalogueNotReconciled(reconciliation)
+
     matched = []
     for document, metadata in catalogue.items():
         if all(_matches(metadata.get(field), wanted) for field, wanted in filters.items()):
