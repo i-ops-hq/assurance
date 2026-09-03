@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assurance-mcp"
+version = "0.4.1"
+description = "Read-only MCP server exposing assurance checks over a folder."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "I-Ops Operations Intelligence, LLC", email = "hello@i-ops.dev" }]
+requires-python = ">=3.10"
+dependencies = [
+  "assurance-core>=0.7",
+  "assurance-cli>=0.3.1",
+  "mcp>=1.0",
+]
+
+keywords = ["mcp", "model-context-protocol", "ai-agents", "governance", "auditing", "assurance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Homepage = "https://i-ops.dev"
+Source = "https://github.com/i-ops-hq/assurance-mcp"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "mypy>=1.0", "types-openpyxl"]
+
+[tool.mypy]
+strict = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../assurance-core:$MYPY_CONFIG_FILE_DIR/../assurance-cli"
+
+[[tool.mypy.overrides]]
+module = "mcp.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "assurance_mcp.server"
+disable_error_code = ["untyped-decorator"]
+
+[project.scripts]
+assurance-mcp = "assurance_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["assurance_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
