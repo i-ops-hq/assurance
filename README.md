@@ -25,8 +25,10 @@ assurance check ~/reports
 ```
 
 It worked out that the folder is monthly, over what span, and which two are absent — from the
-filenames, before opening a single file. Weekly, quarterly and yearly corpora work the same way, and
-**a folder with no regular cadence is told so rather than given a denominator we made up.**
+filenames, before opening a single file. It reads `.csv`, `.tsv` and `.xlsx`; anything else in the
+folder is counted and named rather than passed over in silence. Weekly, quarterly and yearly corpora
+work the same way, and **a folder with no regular cadence is told so rather than given a denominator
+we made up.**
 
 Then the same question against a retrieval step, where the expected set is yours to declare:
 

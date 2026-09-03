@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-cli"
-version = "0.5.0"
+version = "0.5.1"
 description = "CLI for folder assurance checks — coverage, staleness, and baselines."
 readme = "README.md"
 license = { text = "Apache-2.0" }

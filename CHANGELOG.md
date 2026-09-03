@@ -1,3 +1,15 @@
+# 0.5.1
+
+- **A folder `assurance check` never opened is no longer blamed for its naming.** A folder holding
+  `q1-2025.pdf` and `q2-2025.pdf` — an obvious quarterly sequence — was answered with *"Nothing has
+  a recognisable sequence in its name"*, which is false about the names and silent about the real
+  reason: only tabular files are opened. Three causes had been printing one identical sentence and
+  now each says what happened — nothing opened, nothing dated, or nothing there at all.
+- The message and `check --help` name the kinds that are read, derived from the same set the code
+  filters on rather than written out beside it.
+- The README says it too. This is the command the README leads with, so the sentence a stranger
+  sees on their own folder was the one thing they could not check for themselves.
+
 # 0.5.0
 
 - **`assurance check` no longer invents missing files.** A folder of weekly reports was answered with

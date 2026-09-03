@@ -177,3 +177,53 @@ def test_a_folder_where_everything_parses_reports_nothing_unread(monthly_folder:
 
     assert result["coverage"]["unmatched"] == []
     assert "could not be read" not in result["summary"]
+
+
+def test_a_folder_of_unopened_files_is_not_blamed_for_its_naming(tmp_path: Path) -> None:
+    """`q1-2025.pdf` and `q2-2025.pdf` are an obvious quarterly sequence.
+
+    Until 2026-09-03 this folder was told "Nothing has a recognisable sequence in its name", which
+    is false about the names and silent about the actual reason — the files were never opened. The
+    README leads with `assurance check`, so this sentence is the first thing a stranger sees.
+    """
+    (tmp_path / "q1-2025.pdf").write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "q2-2025.pdf").write_bytes(b"%PDF-1.4\n")
+
+    summary = check_coverage(str(tmp_path))["summary"]
+
+    assert "recognisable sequence" not in summary
+    assert "was opened" in summary
+    assert "q1-2025.pdf" in summary
+
+
+def test_the_message_names_the_kinds_it_reads_without_hand_writing_them(tmp_path: Path) -> None:
+    """Derived from TABULAR_SUFFIXES, so the sentence cannot drift from what the code opens.
+
+    A hand-written list beside code that already knows the answer is the most repeated defect in
+    this project — two OSS gates exist for it. This asserts the derivation, not the string.
+    """
+    from assurance_cli.profile import TABULAR_SUFFIXES
+
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+    summary = check_coverage(str(tmp_path))["summary"]
+
+    for suffix in TABULAR_SUFFIXES:
+        assert suffix in summary
+
+
+def test_an_empty_folder_says_it_is_empty(tmp_path: Path) -> None:
+    """Three causes used to print one sentence. Nothing to open is not the same as nothing dated."""
+    summary = check_coverage(str(tmp_path))["summary"]
+
+    assert "no files" in summary
+    assert "recognisable sequence" not in summary
+
+
+def test_tabular_files_that_do_not_parse_still_say_so(tmp_path: Path) -> None:
+    """The original sentence stays for the case it was always right about."""
+    (tmp_path / "notes.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    summary = check_coverage(str(tmp_path))["summary"]
+
+    assert "recognisable sequence" in summary
+    assert "notes.csv" in summary

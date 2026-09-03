@@ -8,7 +8,7 @@ import sys
 from typing import Any
 
 from assurance_cli.baseline import check_against_baseline, init_baseline
-from assurance_cli.gather import check_coverage
+from assurance_cli.gather import check_coverage, readable_kinds
 from assurance_cli.drift import run_drift
 from assurance_cli.paths import PathEscapeError
 from assurance_cli.pin import run_pin_action
@@ -35,7 +35,9 @@ def main(argv: list[str] | None = None) -> int:
         "check",
         help="Special case: a folder of DATED or NUMBERED files (tabular). For anything else use `diff`",
     )
-    check_parser.add_argument("folder", help="Folder to check")
+    check_parser.add_argument(
+        "folder", help=f"Folder to check. Only {readable_kinds()} files are opened"
+    )
     check_parser.add_argument("--expect", choices=["monthly", "quarterly", "weekly", "daily", "numbered"])
     check_parser.add_argument("--from", dest="from_point", metavar="FROM")
     check_parser.add_argument("--to", dest="to_point", metavar="TO")

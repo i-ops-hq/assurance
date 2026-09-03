@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from assurance_core.coverage import Coverage, EvidenceRef, Expectation
 from assurance_core.report_period import Period, parse_period_range
@@ -48,7 +48,7 @@ _KIND_FROM_NAME = {
 def list_dated_files(folder: str) -> dict[str, Any]:
     """List sequence points present in a folder from dated tabular filenames."""
     root = resolve_folder(folder)
-    by_key, unread = _indexed_files(root)
+    by_key = _indexed_files(root).found
     keys = sorted(by_key)
     return {
         "folder": str(root),
@@ -74,11 +74,12 @@ def check_coverage(
 ) -> dict[str, Any]:
     """Check whether every step in the span is present — cold start, no prior state."""
     root = resolve_folder(folder)
-    by_key, unread = _indexed_files(root)
+    indexed = _indexed_files(root)
+    by_key, unread = indexed.found, indexed.unread
     if not by_key:
         return {
             "folder": str(root),
-            "summary": f"Nothing in {root.name} has a recognisable sequence in its name.",
+            "summary": _nothing_indexed_summary(root, indexed),
             "complete": False,
             "derivation": "",
             "coverage": _coverage_to_dict(
@@ -248,21 +249,43 @@ def check_staleness(
     return _finding_to_dict(finding)
 
 
-def _indexed_files(root: Path) -> tuple[dict[str, list[Path]], list[str]]:
-    """The files that parse to a point, and the names of the tabular files that do not.
+class _Indexed(NamedTuple):
+    """What one pass over a folder saw, including the parts it could not use."""
 
-    That second list used to be `continue` and nothing else. It is the difference between two causes
+    found: dict[str, list[Path]]
+    unread: list[str]
+    skipped: list[str]
+    skipped_total: int
+
+
+def _indexed_files(root: Path) -> _Indexed:
+    """The files that parse to a point, the tabular files that do not, and the ones never opened.
+
+    `unread` used to be `continue` and nothing else. It is the difference between two causes
     that produce an identical `missing` line — never produced, or produced under a name the
     enumeration could not read — and it was being discarded at the one moment we had it. A folder of
     twelve files, eleven parsing as months and one called "March FINAL v2.csv", reported March as
     not in the folder and never mentioned the twelfth file anywhere.
+
+    `skipped` is that same lesson one line higher up, unlearned until 2026-09-03. A file whose
+    suffix is not tabular was dropped silently, so a folder holding `q1-2025.pdf` and `q2-2025.pdf`
+    — an obvious quarterly sequence — was told nothing in it had a recognisable sequence in its
+    name. The sentence blamed the naming for a limit on what this command opens, which is the one
+    thing a stranger running `assurance check` on their own folder cannot verify for themselves.
     """
     found: dict[str, list[Path]] = {}
     unread: list[str] = []
+    skipped: list[str] = []
+    skipped_total = 0
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in TABULAR_SUFFIXES:
+        if not path.is_file():
             continue
         if path.name == ".assurance.json":
+            continue
+        if path.suffix.lower() not in TABULAR_SUFFIXES:
+            skipped_total += 1
+            if len(skipped) < MAX_UNREAD:
+                skipped.append(path.name)
             continue
         try:
             resolve_inside(root, str(path.relative_to(root)))
@@ -274,7 +297,38 @@ def _indexed_files(root: Path) -> tuple[dict[str, list[Path]], list[str]]:
             continue
         key = point_key(point)
         found.setdefault(key, []).append(path)
-    return found, unread[:MAX_UNREAD]
+    return _Indexed(found, unread[:MAX_UNREAD], skipped, skipped_total)
+
+
+def readable_kinds() -> str:
+    """The suffixes this command opens, rendered from the set rather than typed out beside it.
+
+    A hand-written list next to code that already knows the answer is the most repeated defect in
+    this project; two OSS gates exist because of it. This one cannot drift from TABULAR_SUFFIXES.
+    """
+    kinds = sorted(TABULAR_SUFFIXES)
+    return f"{', '.join(kinds[:-1])} or {kinds[-1]}"
+
+
+def _file_count(n: int) -> str:
+    return "1 file" if n == 1 else f"{n} files"
+
+
+def _nothing_indexed_summary(root: Path, indexed: _Indexed) -> str:
+    """Why nothing was indexed. Three causes that used to print one identical sentence."""
+    if indexed.unread:
+        shown = ", ".join(indexed.unread[:3])
+        return (
+            f"Nothing in {root.name} has a recognisable sequence in its name — "
+            f"{_file_count(len(indexed.unread))} read but not dated, including {shown}."
+        )
+    if indexed.skipped_total:
+        shown = ", ".join(indexed.skipped[:3])
+        return (
+            f"Nothing in {root.name} was opened. assurance check reads {readable_kinds()}; "
+            f"{_file_count(indexed.skipped_total)} here have another extension, including {shown}."
+        )
+    return f"There are no files in {root.name} to check."
 
 
 def _label_for_key(key: str, filename: str) -> str:
