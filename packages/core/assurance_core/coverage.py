@@ -409,7 +409,7 @@ def _names(expectations: list[Expectation]) -> str:
 #
 # Chroma tested 18 frontier models and every one degrades as input length grows, well before the
 # window fills; an association benchmark put ten of twelve below half their short-context score by
-# 32K tokens. the strategy docs §3.
+# 32K tokens. The strategy docs §3.
 #
 # So this module is not a step towards feeding a model more. It is the record that lets the harness
 # feed a model LESS and still say what was left out — which is the only honest way to shrink an input

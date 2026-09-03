@@ -182,7 +182,7 @@ def resolve(
 
 
 # ---------------------------------------------------------------------------------------------------
-# What the three resolutions become. the context assurance doctrine §2 names both of these; they are the
+# What the three resolutions become. The context assurance doctrine §2 names both of these; they are the
 # difference between a rule that refuses and a product that gets the task done anyway.
 # ---------------------------------------------------------------------------------------------------
 
