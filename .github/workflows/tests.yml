@@ -19,11 +19,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install assurance-core (sibling checkout when present)
+      # The sibling this repo has always looked for, actually checked out. Without it the `if` below
+      # never fires, every job resolves assurance-core from PyPI, and a release that raises this
+      # package's floor in the same batch that ships that core version fails on itself: on
+      # 2026-09-02 the publish job and all eight test jobs died on `assurance-core>=0.12` seconds
+      # before 0.12.0 reached the index, and the public README badge read "tests failing" for an
+      # hour with nothing wrong in the code.
+      #
+      # Dot-prefixed on purpose: pytest's default norecursedirs skips `.*`, so the checkout cannot
+      # be collected as part of this package's suite.
+      #
+      # The trade-off, stated: CI now exercises the source pair rather than the published pair. What
+      # a user actually gets is a PyPI resolve, and that is verified by installing the released
+      # wheel into a clean environment after publishing.
+      - uses: actions/checkout@v4
+        with:
+          repository: i-ops-hq/assurance-core
+          path: .assurance-core
+      - name: Install assurance-core from the sibling checkout
         run: |
           python -m pip install --upgrade pip
-          if [ -d ../assurance-core ]; then
-            python -m pip install -e ../assurance-core
+          if [ -d .assurance-core ]; then
+            python -m pip install -e .assurance-core
           fi
           python -m pip install -e ".[dev]"
       - name: Tests
