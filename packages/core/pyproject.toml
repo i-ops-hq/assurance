@@ -26,7 +26,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://i-ops.dev"
-Source = "https://github.com/i-ops-hq/assurance-core"
+Source = "https://github.com/i-ops-hq/assurance"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "mypy>=1.0"]

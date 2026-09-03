@@ -1,9 +1,9 @@
 # assurance-cli
 
 [![PyPI](https://img.shields.io/pypi/v/assurance-cli)](https://pypi.org/project/assurance-cli/)
-[![Tests](https://github.com/i-ops-hq/assurance-cli/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance-cli/actions/workflows/tests.yml)
+[![Tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/pypi/pyversions/assurance-cli)](https://pypi.org/project/assurance-cli/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance-cli/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance/blob/main/packages/cli/LICENSE)
 
 ## Did the job cover everything it was supposed to cover?
 

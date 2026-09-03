@@ -1,9 +1,9 @@
 # assurance-core
 
 [![PyPI](https://img.shields.io/pypi/v/assurance-core)](https://pypi.org/project/assurance-core/)
-[![Tests](https://github.com/i-ops-hq/assurance-core/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance-core/actions/workflows/tests.yml)
+[![Tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/pypi/pyversions/assurance-core)](https://pypi.org/project/assurance-core/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance-core/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance/blob/main/packages/core/LICENSE)
 
 ## Is your failure rate drifting, or is this week just noise?
 
@@ -65,7 +65,7 @@ Keys are anything you can name, so the same three lines cover:
 | **Eval harnesses** | cases declared | cases actually run |
 | **Batch jobs** | records enumerated | records processed |
 
-Six runnable examples in [`examples/`](https://github.com/i-ops-hq/assurance-core/tree/main/examples),
+Six runnable examples in [`examples/`](https://github.com/i-ops-hq/assurance/tree/main/packages/core/examples),
 held green by CI.
 
 ## A gap is six different facts, not one
@@ -153,5 +153,5 @@ intersection. **If you build `Coverage(...)` directly, move to `Coverage.of(...)
 [assurance-mcp](https://pypi.org/project/assurance-mcp/) — same checks as MCP tools
 
 Upstream is [I-Ops](https://i-ops.dev); this repo is a publication, never a source.
-Apache-2.0 · [Contributing](https://github.com/i-ops-hq/assurance-core/blob/main/CONTRIBUTING.md) ·
-[Security](https://github.com/i-ops-hq/assurance-core/blob/main/SECURITY.md)
+Apache-2.0 · [Contributing](https://github.com/i-ops-hq/assurance/blob/main/packages/core/CONTRIBUTING.md) ·
+[Security](https://github.com/i-ops-hq/assurance/blob/main/packages/core/SECURITY.md)

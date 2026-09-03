@@ -29,7 +29,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://i-ops.dev"
-Source = "https://github.com/i-ops-hq/assurance-cli"
+Source = "https://github.com/i-ops-hq/assurance"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.27.0,<3"]
