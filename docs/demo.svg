@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="330" viewBox="0 0 860 330" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
+<title>assurance check — a folder you already have</title>
+<desc>Every line is the tool's real output, captured 2026-09-03 from assurance-cli 0.5.0.</desc>
+<style>
+  .t    { font-size:13.5px; fill:#c9d1d9; white-space:pre }
+  .p    { fill:#3fbf7d }
+  .c    { fill:#e6edf3; font-weight:600 }
+  .n    { fill:#6a9bff }
+  .m    { fill:#ff7a63 }
+  .d    { fill:#8b949e }
+  .row  { opacity:0; animation:in .01s linear forwards }
+  @keyframes in { to { opacity:1 } }
+  .r1{animation-delay:.4s}  .r2{animation-delay:1.5s} .r3{animation-delay:1.6s}
+  .r4{animation-delay:1.7s} .r5{animation-delay:2.9s} .r6{animation-delay:4.0s}
+  .r7{animation-delay:5.2s} .r8{animation-delay:6.3s} .r9{animation-delay:6.4s}
+  .r10{animation-delay:7.5s}
+  .cur { fill:#3fbf7d; animation:bl 1.05s step-end infinite 7.6s; opacity:0 }
+  @keyframes bl { 0%,50%{opacity:1} 51%,100%{opacity:0} }
+  @media (prefers-reduced-motion:reduce){
+    .row{opacity:1;animation:none} .cur{opacity:1;animation:none}
+  }
+</style>
+<rect width="860" height="330" rx="10" fill="#0d1117"/>
+<path d="M0 10a10 10 0 0 1 10-10h840a10 10 0 0 1 10 10v20H0z" fill="#161b22"/>
+<circle cx="19" cy="15" r="5.5" fill="#ff5f57"/><circle cx="38" cy="15" r="5.5" fill="#febc2e"/><circle cx="57" cy="15" r="5.5" fill="#28c840"/>
+<text x="430" y="19.5" class="t" fill="#8b949e" font-size="11.5" text-anchor="middle">assurance-cli 0.5.0</text>
+<g class="t">
+  <text class="row r1" x="20" y="60"><tspan class="p">$</tspan> <tspan class="c">assurance check ~/reports</tspan></text>
+  <text class="row r2" x="20" y="84"><tspan class="n">22 of 24 months</tspan> from 2024-01 to 2025-12 in reports — not in this</text>
+  <text class="row r3" x="20" y="102">folder: <tspan class="m">March 2024, July 2025</tspan> — <tspan class="d">Range inferred from</tspan></text>
+  <text class="row r4" x="20" y="120"><tspan class="d">filenames: earliest 2024-01, latest 2025-12.</tspan></text>
+  <text class="row r5" x="20" y="156"><tspan class="p">$</tspan> <tspan class="c">assurance check ~/reports --fail-on-gap</tspan> ; <tspan class="c">echo $?</tspan></text>
+  <text class="row r6" x="20" y="180"><tspan class="m">1</tspan>   <tspan class="d"># non-zero, so your pipeline can gate on it</tspan></text>
+  <text class="row r7" x="20" y="216"><tspan class="p">$</tspan> <tspan class="c">assurance check ~/incidents</tspan></text>
+  <text class="row r8" x="20" y="240">No dated or numbered series detected.</text>
+  <text class="row r9" x="20" y="258"><tspan class="d">no regular cadence, so no denominator was invented</tspan></text>
+  <text class="row r10" x="20" y="294"><tspan class="p">$</tspan> <tspan class="cur">&#9608;</tspan></text>
+</g>
+</svg>

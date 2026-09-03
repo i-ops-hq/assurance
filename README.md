@@ -13,6 +13,8 @@ One command. One honest ratio. An exit code your pipeline can act on.
 pip install assurance-cli
 ```
 
+<img src="docs/demo.svg" alt="assurance check on a folder of monthly reports: 22 of 24 months, March 2024 and July 2025 named as absent; --fail-on-gap exits 1; a folder with no regular cadence is refused rather than given a denominator" width="860">
+
 **Point it at a folder you already have.** No config, no corpus file, no setup:
 
 ```bash
