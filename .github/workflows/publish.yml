@@ -19,7 +19,7 @@ name: publish
 
 on:
   push:
-    tags: ["core-v*", "cli-v*", "mcp-v*"]
+    tags: ["core-v*", "cli-v*", "mcp-v*", "authority-v*"]
   workflow_dispatch:
 
 jobs:
@@ -41,8 +41,8 @@ jobs:
         run: |
           PKG="${GITHUB_REF_NAME%%-v*}"
           case "$PKG" in
-            core|cli|mcp) ;;
-            *) echo "::error::Tag $GITHUB_REF_NAME names no package. Use core-vX.Y.Z, cli-vX.Y.Z or mcp-vX.Y.Z."; exit 1 ;;
+            core|cli|mcp|authority) ;;
+            *) echo "::error::Tag $GITHUB_REF_NAME names no package. Use core-vX.Y.Z, cli-vX.Y.Z, mcp-vX.Y.Z or authority-vX.Y.Z."; exit 1 ;;
           esac
           echo "pkg=$PKG" >> "$GITHUB_OUTPUT"
           echo "dist=assurance-$PKG" >> "$GITHUB_OUTPUT"
@@ -88,7 +88,8 @@ jobs:
           python -m pip install -e packages/core
           python -m pip install -e "packages/cli[dev]"
           python -m pip install -e "packages/mcp[dev]"
-          python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests
+          python -m pip install -e "packages/authority[dev]"
+          python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests packages/authority/tests
 
       - uses: actions/upload-artifact@v4
         with:

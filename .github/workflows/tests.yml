@@ -32,9 +32,10 @@ jobs:
           python -m pip install -e packages/core
           python -m pip install -e "packages/cli[dev]"
           python -m pip install -e "packages/mcp[dev]"
+          python -m pip install -e "packages/authority[dev]"
 
       - name: Tests
-        run: python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests
+        run: python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests packages/authority/tests
 
       - name: The baseline file is the only thing the CLI may write
         # Runs with the suite above. It runs again, named, because "read-only except one file you
@@ -45,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        package: [core, cli, mcp]
+        package: [core, cli, mcp, authority]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

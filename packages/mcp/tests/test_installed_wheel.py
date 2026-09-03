@@ -30,8 +30,8 @@ def _build_wheel(outdir: Path, project: Path) -> Path:
 
 
 def _install_sibling_wheels(vpy: Path, tmp_path: Path) -> None:
-    core = ROOT.parent / "assurance-core"
-    cli = ROOT.parent / "assurance-cli"
+    core = ROOT.parent / "core"
+    cli = ROOT.parent / "cli"
     if core.is_dir():
         subprocess.run(
             [str(vpy), "-m", "pip", "install", "-q", str(_build_wheel(tmp_path / "core-dist", core))],
