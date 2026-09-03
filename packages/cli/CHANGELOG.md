@@ -1,3 +1,16 @@
+# 0.5.2
+
+- **A folder whose range was inferred is no longer called complete while a name in it went unread.**
+  Reported by an outside tester: Aug/Sep/Oct reports beside `Rapport Novembre 2024.csv` answered
+  *"3 of 3 months"*, `complete: true`, and `--fail-on-gap` exited **0** — while naming the November
+  file as unread in the same sentence. The range was inferred from the names that parsed, so the one
+  that did not may be exactly the period that would have extended it. Narrow on purpose: an
+  unmatched name alone still does not disqualify a folder, and passing `--from`/`--to` makes the
+  range yours again.
+- *"could not be read as any of them"* now names the unit — *"could not be read as one of the
+  months"*. `them` had no antecedent in a one-line summary.
+- The README says what to do about PEP 668 instead of assuming `pip install` works.
+
 # 0.5.1
 
 - **A folder `assurance check` never opened is no longer blamed for its naming.** A folder holding

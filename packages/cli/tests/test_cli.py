@@ -167,7 +167,8 @@ def test_a_file_named_outside_the_scheme_is_reported_beside_the_gap(tmp_path: Pa
     result = check_coverage(str(tmp_path))
 
     assert result["coverage"]["unmatched"] == ["March FINAL v2.csv"]
-    assert "could not be read as any of them" in result["summary"]
+    # Wording changed 2026-09-03: "as any of them" has no antecedent in a one-line summary.
+    assert "could not be read as one of the months" in result["summary"]
     assert "March FINAL v2.csv" in result["summary"]
 
 
@@ -227,3 +228,51 @@ def test_tabular_files_that_do_not_parse_still_say_so(tmp_path: Path) -> None:
 
     assert "recognisable sequence" in summary
     assert "notes.csv" in summary
+
+
+def test_an_inferred_range_with_an_unread_name_is_not_complete(tmp_path: Path) -> None:
+    """Reported by an outside tester on 2026-09-03, and it is the original defect's family.
+
+    Aug/Sep/Oct beside `Rapport Novembre 2024.csv` answered "3 of 3 months", `complete: true`, and
+    `--fail-on-gap` exited 0 — while naming the November file as unread in the same sentence. The
+    range was inferred from the names it could read, so the one it could not may be exactly the
+    period that would have extended it.
+    """
+    for month in ("08", "09", "10"):
+        (tmp_path / f"report-2024-{month}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (tmp_path / "Rapport Novembre 2024.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = check_coverage(str(tmp_path))
+
+    assert result["complete"] is False
+    assert "not established as complete" in result["summary"]
+
+
+def test_an_explicit_range_restores_standing(tmp_path: Path) -> None:
+    """The range is then the caller's, so an unmatched name no longer undermines it."""
+    for month in ("08", "09", "10"):
+        (tmp_path / f"report-2024-{month}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (tmp_path / "Rapport Novembre 2024.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = check_coverage(str(tmp_path), from_point="2024-08", to_point="2024-10")
+
+    assert result["complete"] is True
+
+
+def test_a_folder_where_everything_parses_is_still_complete(monthly_folder: Path) -> None:
+    """The narrowing must not cost the case the tool was always right about."""
+    result = check_coverage(str(monthly_folder))
+
+    assert "not established as complete" not in result["summary"]
+
+
+def test_the_unread_clause_names_what_it_could_not_match(tmp_path: Path) -> None:
+    """"could not be read as any of them" was reported as opaque: `them` has no antecedent."""
+    for month in ("08", "09", "10"):
+        (tmp_path / f"report-2024-{month}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (tmp_path / "notes.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    summary = check_coverage(str(tmp_path))["summary"]
+
+    assert "as one of the months" in summary
+    assert "as any of them" not in summary

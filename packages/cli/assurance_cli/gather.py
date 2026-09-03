@@ -87,6 +87,7 @@ def check_coverage(
             ),
         }
 
+    inferred_range = False
     filenames = [path.name for paths in by_key.values() for path in paths]
     detected = detect_series(filenames)
     kind = _resolve_kind(expect, detected)
@@ -142,6 +143,7 @@ def check_coverage(
             cast(SequencePoint, detected.earliest), cast(SequencePoint, detected.latest)
         )
         derivation = inference_derivation(detected)
+        inferred_range = True
         scope = (
             f"{unit} from {point_key(cast(SequencePoint, detected.earliest))} "
             f"to {point_key(cast(SequencePoint, detected.latest))} in {root.name}"
@@ -163,7 +165,15 @@ def check_coverage(
         truncated = f"stopped at {cap} {unit}"
         expected_keys = expected_keys[-cap:]
 
-    cov = Coverage(scope_label=scope, truncated=truncated, derivation=derivation, unmatched=unread)
+    # "could not be read as any of them" was reported as opaque on 2026-09-03: `them` has no
+    # antecedent in a one-line summary. The unit is known here, so say it.
+    cov = Coverage(
+        scope_label=scope,
+        truncated=truncated,
+        derivation=derivation,
+        unmatched=unread,
+        unmatched_label=f"could not be read as one of the {unit}",
+    )
     for key, label in expected_keys:
         expectation = Expectation(key=key, label=label, why=derivation or f"in {scope}")
         cov.expected.append(expectation)
@@ -184,10 +194,31 @@ def check_coverage(
 
         cov.found[key] = EvidenceRef(key=key, path=str(path), reader="assurance-cli")
 
+    # **An inferred range plus a name we could not read is not a complete folder.** Reported by an
+    # outside tester on 2026-09-03: a folder of Aug/Sep/Oct reports beside `Rapport Novembre
+    # 2024.csv` answered "3 of 3 months from 2024-08 to 2024-10", `complete: true`, and
+    # `--fail-on-gap` exited 0 — while naming the November file as unread in the same sentence. The
+    # range was inferred from the names it COULD read, so the one it could not may be exactly the
+    # period that would have extended it.
+    #
+    # Narrow on purpose. `unmatched` alone does not disqualify anything: a folder of monthly reports
+    # beside a `README.csv` is still complete, and a rule that said otherwise would call every real
+    # folder incomplete. It is the combination — a range we invented, and a name we cannot place
+    # against it — that we have no standing to call complete. Pass --from/--to and the range is
+    # yours, so an unmatched name no longer undermines it.
+    unsound_range = inferred_range and bool(unread)
+    summary = cov.summary()
+    if unsound_range and cov.complete:
+        summary += (
+            f" — but the range was inferred from the names that parsed, and "
+            f"{len(unread)} here did not, so this folder is not established as complete. "
+            "Pass --from / --to to set the range yourself."
+        )
+
     return {
         "folder": str(root),
-        "summary": cov.summary(),
-        "complete": cov.complete,
+        "summary": summary,
+        "complete": cov.complete and not unsound_range,
         "derivation": cov.derivation,
         "coverage": _coverage_to_dict(cov),
     }

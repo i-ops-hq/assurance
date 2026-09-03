@@ -12,6 +12,10 @@ One command. One honest ratio. An exit code your pipeline can act on.
 ```bash
 pip install assurance-cli
 ```
+> On a system Python you may hit `error: externally-managed-environment` (PEP 668). That is your
+> OS protecting its packages, not this failing:
+> `python3 -m venv .venv && .venv/bin/pip install assurance-cli`
+
 
 <img src="docs/demo.svg" alt="assurance check on a folder of monthly reports: 22 of 24 months, March 2024 and July 2025 named as absent; --fail-on-gap exits 1; a folder with no regular cadence is refused rather than given a denominator" width="860">
 
