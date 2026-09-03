@@ -1,28 +1,33 @@
 name: publish
 
 # Trusted Publishing (OIDC). No API token is stored anywhere — GitHub proves the workflow's identity
-# to PyPI directly. The publisher is registered per project at
-# https://pypi.org/manage/project/assurance-cli/settings/publishing/
-#   owner: i-ops-hq   repository: assurance-cli   workflow: publish.yml   environment: pypi
+# to PyPI directly. Registered per project at https://pypi.org/manage/project/<name>/settings/publishing/
+#   owner: i-ops-hq   repository: assurance   workflow: publish.yml   environment: pypi
 #
-# RELEASING: pyproject.toml is the version. The tag only triggers.
-#   1. bump `version` in pyproject.toml   2. commit   3. `git tag vX.Y.Z && git push --tags`
+# RELEASING: pyproject.toml is the version. The tag only triggers, and it names the package.
+#   1. bump `version` in packages/<pkg>/pyproject.toml   2. add the CHANGELOG heading
+#   3. commit                                            4. git tag <pkg>-vX.Y.Z && git push origin <pkg>-vX.Y.Z
 #
-# Two guards below, both of which exist because both failures actually happened on 2026-08-29:
+# Three packages share this repo, so a bare `v0.5.1` is ambiguous between them. The prefix is what
+# this workflow keys on to know what to build, and what the changelog gate checks each heading
+# against.
+#
+# Guards below, all of which exist because the failures actually happened:
 #   - a tag that disagrees with pyproject.toml rebuilt the OLD version and died on a PyPI 400
-#     ninety seconds later, with a red X on a release that never happened
-#   - re-running a workflow for a version already on PyPI failed the same way, so every repo
-#     carried failed deployments for packages that were live and fine
+#   - re-running a workflow for a version already on PyPI failed the same way, leaving failed
+#     deployments recorded for packages that were live and fine
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["core-v*", "cli-v*", "mcp-v*"]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
+      pkg: ${{ steps.target.outputs.pkg }}
+      dist: ${{ steps.target.outputs.dist }}
       version: ${{ steps.version.outputs.version }}
       already-on-pypi: ${{ steps.published.outputs.already }}
     steps:
@@ -31,14 +36,26 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: The tag must agree with pyproject.toml
+      - name: Which package does this tag release?
+        id: target
+        run: |
+          PKG="${GITHUB_REF_NAME%%-v*}"
+          case "$PKG" in
+            core|cli|mcp) ;;
+            *) echo "::error::Tag $GITHUB_REF_NAME names no package. Use core-vX.Y.Z, cli-vX.Y.Z or mcp-vX.Y.Z."; exit 1 ;;
+          esac
+          echo "pkg=$PKG" >> "$GITHUB_OUTPUT"
+          echo "dist=assurance-$PKG" >> "$GITHUB_OUTPUT"
+          echo "releasing assurance-$PKG from packages/$PKG"
+
+      - name: The tag must agree with that package's pyproject.toml
         id: version
         run: |
-          VERSION=$(python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          PKG="${{ steps.target.outputs.pkg }}"
+          VERSION=$(python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('packages/$PKG/pyproject.toml').read_text())['project']['version'])")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "pyproject.toml declares $VERSION"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            TAG="${GITHUB_REF_NAME#v}"
+            TAG="${GITHUB_REF_NAME#*-v}"
             if [ "$TAG" != "$VERSION" ]; then
               echo "::error::Tag $GITHUB_REF_NAME would publish $VERSION, not $TAG. The tag only triggers; pyproject.toml is the version. Bump the file, commit, delete the tag, then retag."
               exit 1
@@ -48,10 +65,10 @@ jobs:
       - name: Is this version already on PyPI?
         id: published
         run: |
-          CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/assurance-cli/${{ steps.version.outputs.version }}/json")
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/${{ steps.target.outputs.dist }}/${{ steps.version.outputs.version }}/json")
           if [ "$CODE" = "200" ]; then
             echo "already=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::assurance-cli ${{ steps.version.outputs.version }} is already on PyPI. Building and testing anyway; the upload will be skipped rather than failed."
+            echo "::notice::${{ steps.target.outputs.dist }} ${{ steps.version.outputs.version }} is already on PyPI. Building and testing anyway; the upload will be skipped rather than failed."
           else
             echo "already=false" >> "$GITHUB_OUTPUT"
           fi
@@ -59,38 +76,24 @@ jobs:
       - name: Build and check the distributions
         run: |
           python -m pip install --upgrade pip build twine
-          python -m build
-          python -m twine check dist/*
+          python -m build packages/${{ steps.target.outputs.pkg }}
+          python -m twine check packages/${{ steps.target.outputs.pkg }}/dist/*
 
-      # The sibling this repo has always looked for, actually checked out. Without it the `if` below
-      # never fires, every job resolves assurance-core from PyPI, and a release that raises this
-      # package's floor in the same batch that ships that core version fails on itself: on
-      # 2026-09-02 the publish job and all eight test jobs died on `assurance-core>=0.12` seconds
-      # before 0.12.0 reached the index, and the public README badge read "tests failing" for an
-      # hour with nothing wrong in the code.
-      #
-      # Dot-prefixed on purpose: pytest's default norecursedirs skips `.*`, so the checkout cannot
-      # be collected as part of this package's suite.
-      #
-      # The trade-off, stated: CI now exercises the source pair rather than the published pair. What
-      # a user actually gets is a PyPI resolve, and that is verified by installing the released
-      # wheel into a clean environment after publishing.
-      - uses: actions/checkout@v4
-        with:
-          repository: i-ops-hq/assurance-core
-          path: .assurance-core
+      # One repo, so the cross-package dependency is a directory. This step used to be a checkout of
+      # a sibling repository that had to exist; when it did not, the job resolved assurance-core
+      # from PyPI and a release raising the floor in the same batch that shipped that core version
+      # failed on itself. Installing from the tree makes `released-against-itself` impossible.
       - name: Tests must pass before anything is published
         run: |
-          if [ -d .assurance-core ]; then
-            python -m pip install -e .assurance-core
-          fi
-          python -m pip install -e ".[dev]"
-          python -m pytest -q
+          python -m pip install -e packages/core
+          python -m pip install -e "packages/cli[dev]"
+          python -m pip install -e "packages/mcp[dev]"
+          python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests
 
       - uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: dist/
+          path: packages/${{ steps.target.outputs.pkg }}/dist/
 
   publish:
     needs: build
@@ -111,3 +114,57 @@ jobs:
         with:
           # Belt and braces against a race between the check above and the upload.
           skip-existing: true
+
+  # Listing on the MCP registry, by the same principle as the PyPI job above: **no credential is
+  # stored anywhere.** `mcp-publisher login github-oidc` proves this workflow's identity to the
+  # registry, and the registry checks that identity owns the `io.github.i-ops-hq` namespace the
+  # manifest claims. An interactive `login github` would work from a laptop and would mean a person
+  # holding a token; this way nobody does.
+  #
+  # Runs after PyPI on purpose. The manifest points at a pypi package/version, so listing a version
+  # the index does not serve yet would advertise something nobody can install.
+  registry:
+    needs: [build, publish]
+    if: needs.build.outputs.pkg == 'mcp' && needs.build.outputs.already-on-pypi != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write          # OIDC only; no repo write, no secrets
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: server.json must agree with the release
+        # The manifest is a mirror of pyproject, and on 2026-09-02 it was found a patch behind —
+        # 0.4.0 against a shipped 0.4.1. Listing a stale version is worse than not listing, because
+        # it is wrong in public and nothing upstream would have caught it.
+        run: |
+          cd packages/mcp
+          MANIFEST=$(python3 -c "import json;print(json.load(open('server.json'))['version'])")
+          PACKAGE=$(python3 -c "import json;print(json.load(open('server.json'))['packages'][0]['version'])")
+          if [ "$MANIFEST" != "${{ needs.build.outputs.version }}" ] || [ "$PACKAGE" != "${{ needs.build.outputs.version }}" ]; then
+            echo "server.json says $MANIFEST / package $PACKAGE, release is ${{ needs.build.outputs.version }}"
+            exit 1
+          fi
+
+      - name: Wait for the version to be installable
+        # PyPI's index, JSON API, resolver and CDN do not agree instantly.
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -sf "https://pypi.org/pypi/assurance-mcp/${{ needs.build.outputs.version }}/json" > /dev/null; then
+              echo "assurance-mcp ${{ needs.build.outputs.version }} is on PyPI"; exit 0
+            fi
+            sleep 10
+          done
+          echo "timed out waiting for PyPI"; exit 1
+
+      - name: Install mcp-publisher
+        run: |
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" \
+            | tar xz mcp-publisher
+          mv mcp-publisher packages/mcp/
+          cd packages/mcp && ./mcp-publisher validate
+
+      - name: Publish to the MCP registry
+        run: |
+          cd packages/mcp
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
