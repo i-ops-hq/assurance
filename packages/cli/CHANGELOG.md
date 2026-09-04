@@ -1,3 +1,21 @@
+# 0.5.3
+
+- **A ratio nothing matched is refused rather than printed.** Found on real third-party data: a
+  folder of `Formula1_2022season_*.csv` files answered *"0 of 36 months from 2019-01 to 2024-01"*,
+  named thirty-three months as absent, and **exited 0** — while holding twenty-eight files it had
+  read without trouble. Each year parsed to January of that year, several files shared each January,
+  so every expectation in range was ambiguous and none was uniquely matched. When the range was
+  inferred *from* these filenames and then not one of them lines up with a period *in* it, the
+  inference contradicts itself and no denominator over it is honest.
+- `--from` / `--to` still answers. That makes the range the caller's question, and `0 of 12 months`
+  is a true and useful answer to one somebody actually asked.
+- The refusal exits **1** without needing `--fail-on-gap`, like every other refusal: a folder we
+  could not work out is a finding, not a success.
+
+**The cadence itself is still wrong for that folder** — six points at uniform twelve-month gaps
+resolve as monthly — and the fix for that is upstream in `assurance-core`. This release stops the
+invented ratio; it does not yet read a yearly corpus correctly.
+
 # 0.5.2
 
 - **A folder whose range was inferred is no longer called complete while a name in it went unread.**

@@ -276,3 +276,54 @@ def test_the_unread_clause_names_what_it_could_not_match(tmp_path: Path) -> None
 
     assert "as one of the months" in summary
     assert "as any of them" not in summary
+
+
+def _f1_shape(root: Path) -> None:
+    """Six years, several files each — the shape found on real data on 2026-09-03."""
+    for year in range(2019, 2025):
+        for part in ("drivers", "teams", "raceResults"):
+            (root / f"Formula1_{year}season_{part}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+
+def test_a_ratio_nothing_matched_is_refused(tmp_path: Path) -> None:
+    """Found on a Formula 1 dataset nobody made for this tool.
+
+    It answered "0 of 36 months from 2019-01 to 2024-01", named thirty-three months as absent, and
+    exited 0 — while holding twenty-eight files it had read without trouble. Each year parsed to
+    January of that year, several files shared each January, so every expectation in range was
+    ambiguous and none was uniquely matched. A range inferred from these filenames that then matches
+    none of them contradicts itself.
+    """
+    _f1_shape(tmp_path)
+
+    result = check_coverage(str(tmp_path))
+
+    assert result["complete"] is False
+    assert "Refused" in result["summary"]
+    assert "0 of" not in result["summary"]
+    assert result["coverage"]["undetermined"]
+
+
+def test_the_refusal_exits_one_without_asking_for_a_gate(tmp_path: Path) -> None:
+    """A folder we could not work out is a finding, not a success — no --fail-on-gap needed."""
+    _f1_shape(tmp_path)
+
+    assert main(["check", str(tmp_path)]) == 1
+
+
+def test_an_explicit_range_is_still_answered(tmp_path: Path) -> None:
+    """`--from`/`--to` makes the range the caller's question, and 0 of N answers it."""
+    _f1_shape(tmp_path)
+
+    result = check_coverage(str(tmp_path), from_point="2019-01", to_point="2019-06")
+
+    assert "Refused" not in result["summary"]
+    assert "0 of" in result["summary"]
+
+
+def test_a_normal_folder_with_a_gap_is_untouched(monthly_folder: Path) -> None:
+    """The narrowing must not cost the case the tool was always right about."""
+    result = check_coverage(str(monthly_folder))
+
+    assert "Refused" not in result["summary"]
+    assert result["coverage"]["read"] > 0

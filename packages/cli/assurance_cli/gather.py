@@ -194,6 +194,48 @@ def check_coverage(
 
         cov.found[key] = EvidenceRef(key=key, path=str(path), reader="assurance-cli")
 
+    # **A ratio nothing matched is not a ratio.** Found on real third-party data on 2026-09-03: a
+    # folder of `Formula1_2022season_drivers.csv` files answered "0 of 36 months from 2019-01 to
+    # 2024-01", listing thirty-three months as absent, while holding twenty-eight files it had read
+    # without trouble. Each year parsed to January of that year, several files shared each January,
+    # so every expectation in range was ambiguous and none was uniquely matched.
+    #
+    # The cadence itself is wrong there and the fix for that is upstream in `sequence.detect_series`.
+    # This guard is the CLI's own and stands on its own reasoning: when the range was inferred FROM
+    # these filenames and then not one of them matches a period IN it, the inference contradicts
+    # itself. A folder where one period holds many files is not a per-period series, and no
+    # denominator over it is honest — which is exactly what the corpus census exists to say.
+    #
+    # Only when the range was inferred. `--from`/`--to` makes the range the caller's question, and
+    # "0 of 12 months" is a true and useful answer to a question somebody actually asked.
+    if inferred_range and not cov.found:
+        shared = sorted(cov.ambiguous)
+        detail = (
+            f" {len(shared)} of those periods hold several files each"
+            f" ({', '.join(shared[:3])}{' and more' if len(shared) > 3 else ''}),"
+            " which is what a folder keyed by something other than "
+            f"{unit} looks like."
+            if shared
+            else ""
+        )
+        return {
+            "folder": str(root),
+            "summary": (
+                f"Refused: nothing in {root.name} matched a period uniquely. A range of "
+                f"{unit} from {expected_keys[0][0]} to {expected_keys[-1][0]} was inferred from "
+                f"these filenames, and then not one of them lined up with a period in it.{detail}"
+            ),
+            "complete": False,
+            "derivation": "",
+            "coverage": _coverage_to_dict(
+                Coverage(
+                    scope_label=f"items in {root.name}",
+                    expected=[],
+                    undetermined=_NOTHING_MATCHED,
+                )
+            ),
+        }
+
     # **An inferred range plus a name we could not read is not a complete folder.** Reported by an
     # outside tester on 2026-09-03: a folder of Aug/Sep/Oct reports beside `Rapport Novembre
     # 2024.csv` answered "3 of 3 months from 2024-08 to 2024-10", `complete: true`, and
@@ -390,6 +432,9 @@ def _unit_for_kind(kind: SeriesKind) -> str:
 
 
 _UNDETERMINED = "no dated or numbered series could be read from these filenames"
+_NOTHING_MATCHED = (
+    "the range was inferred from these filenames and then not one of them matched a period in it"
+)
 """Why nothing was checked. Carried INTO the coverage record, not just the wrapper around it.
 
 Until 0.2.2 these paths emitted an empty `Coverage`, whose `complete` is True by the arithmetic —
