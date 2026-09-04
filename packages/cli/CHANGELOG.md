@@ -1,3 +1,17 @@
+# 0.5.5
+
+- **A refusal now names the flags that would answer the folder.** *"No dated or numbered series
+  detected."* was a full stop. Asserting the shape often does work — and **neither flag works
+  alone**: without `--expect` the kind is `None` and the function returns before the range is ever
+  read; without a range there is nothing to enumerate. Nothing said so, and `--help` carries no text
+  on either flag. It now prints a command you can run, built from the points it actually parsed.
+- **The conditional in that message is load-bearing.** For a genuinely irregular set, asserting a
+  cadence produces the fabricated denominator this tool exists to refuse — legitimate when a caller
+  means it, a trap when they are following a suggestion. So it says *"if these really are a daily
+  series"*, and ends *"if they are not a series, this refusal is the answer."*
+- Found while reviewing the upstream spacing guard that produces this case. The guard is right; the
+  silence after it was ours.
+
 # 0.5.4
 
 - **A truncated count is labelled with the window it covers.** A folder of 59 monthly files spanning

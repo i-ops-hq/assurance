@@ -31,6 +31,13 @@ from assurance_cli.paths import PathEscapeError, resolve_folder, resolve_inside
 from assurance_cli.profile import TABULAR_SUFFIXES, profile_file
 
 MAX_PERIODS = 36
+_EXPECT_FOR_TYPE = {
+    Period: "monthly",
+    QuarterlyPoint: "quarterly",
+    WeeklyPoint: "weekly",
+    DailyPoint: "daily",
+    NumberedPoint: "numbered",
+}
 MAX_NUMBERED = 500
 # Enough to say "it is probably right there" without pasting a whole directory into one sentence.
 MAX_UNREAD = 20
@@ -95,7 +102,7 @@ def check_coverage(
     if kind is None:
         return {
             "folder": str(root),
-            "summary": "No dated or numbered series detected.",
+            "summary": _no_series_summary(root, by_key),
             "complete": False,
             "derivation": "",
             "coverage": _coverage_to_dict(
@@ -418,6 +425,46 @@ def _nothing_indexed_summary(root: Path, indexed: _Indexed) -> str:
             f"{_file_count(indexed.skipped_total)} here have another extension, including {shown}."
         )
     return f"There are no files in {root.name} to check."
+
+
+def _no_series_summary(root: Path, by_key: dict[str, list[Path]]) -> str:
+    """Why no series, and the one thing that would work.
+
+    "No dated or numbered series detected." was a full stop. A folder of three monthly files with
+    one month missing lands here — the spacing rule cannot call two gaps a cadence — and asserting
+    the shape DOES work: `--expect monthly --from 2025-01 --to 2025-04` answers "3 of 4 months,
+    missing March 2025". **Neither flag works alone**: without `--expect` the kind is None and this
+    branch returns before the range is ever read, and without a range there is nothing to enumerate.
+    Nothing said so, and `--help` carries no text on either flag.
+
+    Refusing is right; refusing without saying what would work is not. Found 2026-09-03 reviewing
+    the upstream guard that produces this case.
+    """
+    if not by_key:
+        return f"No dated or numbered series detected in {root.name}."
+    kinds = {
+        _EXPECT_FOR_TYPE.get(type(point_from_filename(paths[0].name)))
+        for paths in by_key.values()
+    }
+    named = sorted(k for k in kinds if k)
+    keys = sorted(by_key)
+    where = f"{len(by_key)} filenames parsed to a point in {root.name}"
+    if len(named) != 1:
+        return (
+            f"No dated or numbered series detected. {where}, but they do not agree on one shape"
+            f"{' (' + ', '.join(named) + ')' if named else ''}, so no cadence can be read from them."
+        )
+    # The conditional is load-bearing and must stay first. For a genuinely irregular set —
+    # incident reports, say — asserting `--expect daily` produces "1 of 36 days", which is the
+    # fabricated denominator this tool exists to refuse, arrived at by the caller's own instruction.
+    # That is legitimate when they mean it and a trap when they follow a suggestion. So the message
+    # says "if these really are", names what it would take, and does not recommend it.
+    return (
+        f"No dated or numbered series detected. {where}, and they look {named[0]}, but their "
+        f"spacing agrees on no cadence. **If these really are a {named[0]} series** you can say so "
+        f"— both flags are needed, neither works alone: --expect {named[0]} "
+        f"--from {keys[0]} --to {keys[-1]}. If they are not a series, this refusal is the answer."
+    )
 
 
 def _label_for_key(key: str, filename: str) -> str:

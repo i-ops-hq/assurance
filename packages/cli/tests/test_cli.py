@@ -376,3 +376,50 @@ def test_a_corpus_under_the_cap_is_untouched(monthly_folder: Path) -> None:
 
     assert "not counted" not in result["summary"]
     assert result["coverage"]["truncated"] == ""
+
+
+def test_a_refusal_names_the_flags_that_would_work(tmp_path: Path) -> None:
+    """Refusing is right. Refusing without saying what would work is not.
+
+    An irregular set is declined because its spacing agrees on no cadence — correctly. But asserting
+    the shape DOES answer it, and neither flag works alone: without --expect the kind is None and
+    this branch returns before the range is ever read; without a range there is nothing to
+    enumerate. Nothing said so, and --help carries no text on either flag.
+
+    Deliberately an irregular DAILY set rather than the three-monthly-files case that prompted this.
+    That one only refuses once the upstream MONTHLY spacing guard ships, and a test in this package
+    must not depend on an unreleased assurance-core.
+    """
+    for day in ("2025-01-08", "2025-01-09", "2025-01-23", "2025-02-02", "2025-03-14"):
+        (tmp_path / f"incident-{day}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    summary = check_coverage(str(tmp_path))["summary"]
+
+    assert "--expect daily" in summary
+    assert "--from 2025-01-08 --to 2025-03-14" in summary
+    assert "neither works alone" in summary
+    # The conditional must survive edits: suggesting a cadence for an irregular set is how a
+    # caller is talked into the denominator this tool exists to refuse.
+    assert "If these really are" in summary
+    assert "this refusal is the answer" in summary
+
+
+def test_the_suggested_flags_actually_answer_the_folder(tmp_path: Path) -> None:
+    """The suggestion is executable, not decorative — this runs what the message prints."""
+    for day in ("2025-01-08", "2025-01-09", "2025-01-23", "2025-02-02", "2025-03-14"):
+        (tmp_path / f"incident-{day}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = check_coverage(
+        str(tmp_path), expect="daily", from_point="2025-01-08", to_point="2025-03-14"
+    )
+
+    assert "1 of 36 days" in result["summary"]  # truncated to the cap, and labelled with it
+
+
+def test_an_empty_index_still_refuses_plainly(tmp_path: Path) -> None:
+    """Nothing parsed means there is no shape to suggest, so it must not invent one."""
+    (tmp_path / "notes.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    summary = check_coverage(str(tmp_path))["summary"]
+
+    assert "--expect" not in summary
