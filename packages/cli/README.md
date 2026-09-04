@@ -9,6 +9,59 @@
 
 One command. One honest ratio. An exit code your pipeline can act on.
 
+## Three folders, three answers
+
+Every block below is real output, run against real folders. Nothing here is illustrative.
+
+**Your agent summarised "the last two years of board reports." It says it read them all.**
+
+```
+$ assurance check ~/board
+22 of 24 months from 2024-01 to 2025-12 in board — not in this folder: March 2024, July 2025
+```
+
+It worked out the folder is monthly, over what span, and which two are absent — from the filenames,
+before opening a single file. Nobody had counted.
+
+**A folder that looks fine, and one file nobody could place.**
+
+```
+$ assurance check ~/exports
+5 of 6 weeks from 2025-W23 to 2025-W28 in exports — not in this folder: Week 26, 2025 —
+1 name here could not be read as one of the weeks: export FINAL v2.csv
+```
+
+Two different findings in one line, and they need different responses. Week 26 was never produced.
+`export FINAL v2.csv` **was** produced and is named in a way nothing can place — it may well be
+Week 26. A tool that reported only the gap would have sent you looking for a file you already have.
+
+**A dataset you downloaded. Is it complete?**
+
+```
+$ assurance check ~/Desktop/f1-predictor-2025/dataset
+Refused: nothing in dataset matched a period uniquely. A range of months from 2021-02 to
+2024-01 was inferred from these filenames, and then not one of them lined up with a period
+in it. 3 of those periods hold several files each (2022-01, 2023-01, 2024-01), which is what
+a folder keyed by something other than months looks like.                          [exit 1]
+```
+
+Twenty-eight files, all readable, and **the honest answer is that this is not a per-period folder at
+all** — it is one file per season per topic. Until 0.5.3 this printed *"0 of 36 months"* and named
+thirty-three absent months that never existed. That was the bug this project exists to not have, and
+it was found by pointing the tool at somebody's actual Desktop.
+
+## This is not for you if
+
+- **Your reports are PDFs or Word files.** It opens `.csv`, `.tsv` and `.xlsx`, and names what it
+  skipped rather than pretending it looked.
+- **Your folder holds many files per period.** One invoice per day is a series; forty tables per
+  season is a database export, and a per-period ratio is the wrong question about it.
+- **You want to know whether the contents are right.** `check` reads filenames to establish what
+  should exist; it opens a file only to confirm it is a readable table. Whether a file *changed*
+  since you last looked is `--against-baseline`, and whether a document's figures still match the
+  source they came from is `check_staleness_tool` in
+  [assurance-mcp](https://pypi.org/project/assurance-mcp/). Three different questions.
+
 ```bash
 pip install assurance-cli
 ```
