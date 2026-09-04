@@ -1,3 +1,13 @@
+# 0.5.6
+
+- **Requires `assurance-core>=0.13.1`**, which is where the cadence guard lives. Six month-points at
+  twelve-month gaps are no longer read as a monthly series, so the folder that produced *"0 of 36
+  months"* is declined at the cadence step rather than reaching this package's own guard.
+- The README's third example is updated to what the tool now actually prints for that folder. It was
+  correct for 0.5.3 against core 0.13.0 and would have gone stale the moment the floor rose — a
+  README quoting output the installed stack no longer produces is the same defect as a count under a
+  label that describes something wider.
+
 # 0.5.5
 
 - **A refusal now names the flags that would answer the folder.** *"No dated or numbered series

@@ -39,16 +39,24 @@ Week 26. A tool that reported only the gap would have sent you looking for a fil
 
 ```
 $ assurance check ~/Desktop/f1-predictor-2025/dataset
-Refused: nothing in dataset matched a period uniquely. A range of months from 2021-02 to
-2024-01 was inferred from these filenames, and then not one of them lined up with a period
-in it. 3 of those periods hold several files each (2022-01, 2023-01, 2024-01), which is what
-a folder keyed by something other than months looks like.                          [exit 1]
+No dated or numbered series detected. 6 filenames parsed to a point in dataset, and they look
+monthly, but their spacing agrees on no cadence. **If these really are a monthly series** you
+can say so — both flags are needed, neither works alone: --expect monthly --from 2019-01
+--to 2024-01. If they are not a series, this refusal is the answer.               [exit 1]
 ```
 
 Twenty-eight files, all readable, and **the honest answer is that this is not a per-period folder at
-all** — it is one file per season per topic. Until 0.5.3 this printed *"0 of 36 months"* and named
-thirty-three absent months that never existed. That was the bug this project exists to not have, and
-it was found by pointing the tool at somebody's actual Desktop.
+all** — it is one file per season per topic, named `Formula1_2022season_drivers.csv`, so six years
+sit at twelve-month gaps and nothing about that is monthly.
+
+**Until 0.13.1 this printed "0 of 36 months"** and named thirty-three absent months that never
+existed, while every one of its twenty-eight files had been read and then discarded as an ambiguous
+duplicate of some January. That was the bug this project exists not to have, and it was found by
+pointing the tool at somebody's actual Desktop rather than at a fixture.
+
+Note what the refusal does and does not do. It declines, and then it tells you the one thing that
+would answer the folder anyway — because a refusal whose recourse you cannot discover is a full
+stop, and `--expect` and `--from`/`--to` do not work alone.
 
 ## This is not for you if
 
