@@ -364,6 +364,47 @@ def detect_series(filenames: list[str]) -> DetectedSeries | None:
             # the honest answer; enumerating days would invent the ones in between.
             return None
 
+    if kind is SeriesKind.MONTHLY:
+        # THE SAME DEFECT AS THE DAILY BRANCH ABOVE, in the branch that was never written. The 0.12.0
+        # work made spacing a property of the set and was right to — but it guarded only DAILY, so
+        # weekly-shaped daily files were caught and yearly-shaped monthly files fell straight through
+        # to the `return` below.
+        #
+        # FOUND ON REAL THIRD-PARTY DATA, which is what makes it worth this comment: `assurance
+        # check` over a Formula 1 dataset nobody made for us. `Formula1_2022season_drivers.csv`
+        # parses to 2022-01, the six distinct keys are 2019-01 … 2024-01 at gaps of twelve months,
+        # `detect_series` returned MONTHLY, and the caller enumerated 36 months — so all 28 files
+        # were read, every one was discarded as an ambiguous duplicate of some January, and the tool
+        # whose purpose is refusing to fabricate a denominator reported **"0 of 36 months"**.
+        #
+        # A twelve-month rhythm is not monthly. `None` — "no dated or numbered series detected" — is
+        # the honest answer, and it also makes the year-token question moot: however `2022season`
+        # comes to be represented, a twelve-month modal gap fails this guard either way.
+        #
+        # **Deliberately NOT adding YEARLY.** `SeriesKind` has five members and year is not one;
+        # adding it drags in a unit mapping, an enumerator, `--expect yearly` and the CLI mirrors.
+        # That is a feature decision and must not ride on a bug fix.
+        #
+        # **And deliberately no 3 → QUARTERLY promotion**, though the DAILY branch does promote
+        # 7 → WEEKLY. Every 7-day gap really is a week, so that conversion is total. A 3-month gap is
+        # not a quarter: February, May and August are evenly spaced and align to no calendar quarter,
+        # so promoting would assert a shape the filenames do not carry.
+        months = [point for point in unique if isinstance(point, Period)]
+        if len(months) != len(unique):
+            return None
+        gaps = sorted(
+            (b.year - a.year) * 12 + (b.month - a.month) for a, b in zip(months, months[1:])
+        )
+        if not gaps:
+            return None
+        modal = max(set(gaps), key=gaps.count)
+        # A majority must agree, exactly as for days. A corpus with a month or two missing still
+        # passes — that hole is the finding, and enumerating it is the point of the module.
+        if gaps.count(modal) * 2 <= len(gaps):
+            return None
+        if modal != 1:
+            return None
+
     prefix = next(iter(prefixes)) if prefixes else ""
     return DetectedSeries(kind=kind, points=unique, prefix=prefix)
 

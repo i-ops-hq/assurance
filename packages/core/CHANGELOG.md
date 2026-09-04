@@ -1,3 +1,28 @@
+# 0.13.1
+
+- **A twelve-month rhythm is no longer read as a monthly series.** `detect_series` gained its
+  spacing check for `MONTHLY` — the 0.12.0 work made spacing a property of the set and was right to,
+  but it guarded only `DAILY`, so weekly-shaped daily files were caught and yearly-shaped monthly
+  files fell straight through. Found on real third-party data: a Formula 1 dataset whose filenames
+  carry a season year, six distinct keys at twelve-month gaps, answered **"0 of 36 months"** while
+  every one of its twenty-eight files had been read and then discarded as an ambiguous duplicate of
+  some January.
+- **No `YEARLY` kind was added.** `SeriesKind` has five members and year is not one; adding it would
+  drag in a unit mapping, an enumerator and the downstream mirrors, which is a feature decision and
+  must not ride on a bug fix. A twelve-month rhythm returns `None` — *no dated or numbered series
+  detected* — which is the honest answer and the same one the `DAILY` branch already gives for a
+  shape it does not model.
+- **No `3 → QUARTERLY` promotion either**, though `DAILY` promotes `7 → WEEKLY`. Every seven-day gap
+  really is a week, so that conversion is total. A three-month gap is not a quarter: February, May
+  and August are evenly spaced and align to no calendar quarter, so promoting would assert a shape
+  the filenames do not carry.
+- **Behaviour change worth knowing.** A monthly corpus of exactly three files with one gap — say
+  January, February, April — now returns `None`, because two gaps that disagree are not a majority.
+  Identical to how `DAILY` has behaved since 0.12.0. A fourth consecutive file resolves it again,
+  and a caller who knows the shape can assert it with `--expect` and an explicit range.
+- A corpus with a month or two missing is unaffected: that hole is the finding, and naming it is the
+  point of the module.
+
 # 0.13.0
 
 - **`retrieval`** — catalogue reconciliation before metadata is trusted. New:
