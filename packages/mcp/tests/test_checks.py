@@ -112,8 +112,20 @@ def test_a_file_where_a_folder_was_expected_says_so(tmp_path) -> None:
 
 def test_the_agent_is_told_which_names_could_not_be_read(tmp_path) -> None:
     """An agent asked to explain a gap can now distinguish "never produced" from "named
-    differently" without a second tool call, because the evidence is in the same record."""
-    for month in ("01", "02", "04"):
+    differently" without a second tool call, because the evidence is in the same record.
+
+    Four months rather than three, and the reason is worth keeping. This fixture was
+    2025-01/02/04 — gaps of [1, 2] — and assurance-core 0.13.1 declines that: two gaps that
+    disagree are not a majority, so it is not a monthly series and no denominator over it is
+    honest. That guard is correct and this test is not about it, so the fixture gains a fourth
+    consecutive month and goes back to testing what it means to test.
+
+    Note for anyone tempted to loosen the guard on this evidence: the very first corpus to hit
+    the new boundary was one of our own fixtures, written by someone reaching for the smallest
+    example of a gap. That is a fact about how people write examples, not about how they keep
+    reports.
+    """
+    for month in ("01", "02", "04", "05"):
         (tmp_path / f"2025-{month}-report.csv").write_text("a,b\n1,2\n", encoding="utf-8")
     (tmp_path / "March FINAL v2.csv").write_text("a,b\n1,2\n", encoding="utf-8")
 

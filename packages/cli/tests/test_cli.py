@@ -278,11 +278,20 @@ def test_the_unread_clause_names_what_it_could_not_match(tmp_path: Path) -> None
     assert "as any of them" not in summary
 
 
-def _f1_shape(root: Path) -> None:
-    """Six years, several files each — the shape found on real data on 2026-09-03."""
-    for year in range(2019, 2025):
-        for part in ("drivers", "teams", "raceResults"):
-            (root / f"Formula1_{year}season_{part}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+def _many_files_per_period(root: Path) -> None:
+    """A detected cadence where every period holds several files, so none is uniquely matched.
+
+    Was the Formula 1 shape — six season-years at twelve-month gaps — which is what found this
+    guard. assurance-core 0.13.1 now declines that corpus at the cadence step, one layer earlier,
+    so it no longer reaches here. The guard is unchanged and still right; only the fixture had to
+    move to a shape that still gets past cadence detection.
+
+    Deliberately spaced one month apart so it resolves MONTHLY under both the old core and the new
+    one — a test in this package must not depend on which assurance-core is installed.
+    """
+    for month in ("01", "02", "03"):
+        for part in ("drivers", "teams"):
+            (root / f"report-2025-{month}-{part}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
 
 
 def test_a_ratio_nothing_matched_is_refused(tmp_path: Path) -> None:
@@ -294,7 +303,7 @@ def test_a_ratio_nothing_matched_is_refused(tmp_path: Path) -> None:
     ambiguous and none was uniquely matched. A range inferred from these filenames that then matches
     none of them contradicts itself.
     """
-    _f1_shape(tmp_path)
+    _many_files_per_period(tmp_path)
 
     result = check_coverage(str(tmp_path))
 
@@ -306,14 +315,14 @@ def test_a_ratio_nothing_matched_is_refused(tmp_path: Path) -> None:
 
 def test_the_refusal_exits_one_without_asking_for_a_gate(tmp_path: Path) -> None:
     """A folder we could not work out is a finding, not a success — no --fail-on-gap needed."""
-    _f1_shape(tmp_path)
+    _many_files_per_period(tmp_path)
 
     assert main(["check", str(tmp_path)]) == 1
 
 
 def test_an_explicit_range_is_still_answered(tmp_path: Path) -> None:
     """`--from`/`--to` makes the range the caller's question, and 0 of N answers it."""
-    _f1_shape(tmp_path)
+    _many_files_per_period(tmp_path)
 
     result = check_coverage(str(tmp_path), from_point="2019-01", to_point="2019-06")
 
