@@ -162,8 +162,24 @@ def check_coverage(
     truncated = ""
     cap = MAX_NUMBERED if kind is SeriesKind.NUMBERED else MAX_PERIODS
     if len(expected_keys) > cap:
-        truncated = f"stopped at {cap} {unit}"
+        # **The label must describe what was counted, not what was found.** Reported by the other
+        # chat on 2026-09-03: a folder of 59 monthly files spanning 2020-01 to 2024-12 answered
+        # "35 of 36 months from 2020-01 to 2024-12". Both halves were true — the ratio covered the
+        # capped window, the span covered the corpus — and together they read as a 36-month corpus
+        # that is nearly whole, when it is a 60-month corpus with 24 months not counted at all.
+        #
+        # A number under a label that describes something wider is the same defect as a denominator
+        # we made up, arriving from the other side: the reader takes the label as the scope of the
+        # count. So the scope is rebuilt from the window actually examined, and the caveat names
+        # what fell outside it rather than only saying a cap was hit.
+        dropped = len(expected_keys) - cap
+        earliest_overall = expected_keys[0][0]
         expected_keys = expected_keys[-cap:]
+        truncated = (
+            f"stopped at {cap} {unit}: {dropped} earlier {unit} back to {earliest_overall} "
+            "were not counted"
+        )
+        scope = f"{unit} from {expected_keys[0][0]} to {expected_keys[-1][0]} in {root.name}"
 
     # "could not be read as any of them" was reported as opaque on 2026-09-03: `them` has no
     # antecedent in a one-line summary. The unit is known here, so say it.

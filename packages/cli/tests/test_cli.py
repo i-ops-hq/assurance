@@ -327,3 +327,52 @@ def test_a_normal_folder_with_a_gap_is_untouched(monthly_folder: Path) -> None:
 
     assert "Refused" not in result["summary"]
     assert result["coverage"]["read"] > 0
+
+
+def _sixty_months(root: Path) -> None:
+    for year in range(2020, 2025):
+        for month in range(1, 13):
+            if (year, month) == (2022, 5):
+                continue
+            (root / f"report-{year}-{month:02d}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+
+def test_a_truncated_count_is_labelled_with_the_window_it_covers(tmp_path: Path) -> None:
+    """Reported by the other chat on 2026-09-03.
+
+    59 files spanning 2020-01 to 2024-12 answered "35 of 36 months from 2020-01 to 2024-12". Both
+    halves were true — the ratio covered the capped window, the span covered the corpus — and
+    together they read as a 36-month corpus nearly whole, when it is a 60-month corpus with 24
+    months not counted at all. A reader takes the label as the scope of the count.
+    """
+    _sixty_months(tmp_path)
+
+    summary = check_coverage(str(tmp_path))["summary"]
+
+    assert "35 of 36 months from 2022-01 to 2024-12" in summary
+    assert "35 of 36 months from 2020-01 to 2024-12" not in summary
+
+
+def test_what_fell_outside_the_window_is_named(tmp_path: Path) -> None:
+    """"stopped at 36 months" says a cap was hit. It does not say what it cost."""
+    _sixty_months(tmp_path)
+
+    summary = check_coverage(str(tmp_path))["summary"]
+
+    assert "24 earlier months back to 2020-01 were not counted" in summary
+
+
+def test_the_full_span_is_still_in_the_derivation(tmp_path: Path) -> None:
+    """The inferred range is still what it was; only the label of the COUNT narrowed."""
+    _sixty_months(tmp_path)
+
+    result = check_coverage(str(tmp_path))
+
+    assert "earliest 2020-01, latest 2024-12" in result["derivation"]
+
+
+def test_a_corpus_under_the_cap_is_untouched(monthly_folder: Path) -> None:
+    result = check_coverage(str(monthly_folder))
+
+    assert "not counted" not in result["summary"]
+    assert result["coverage"]["truncated"] == ""

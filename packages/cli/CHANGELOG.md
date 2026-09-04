@@ -1,3 +1,15 @@
+# 0.5.4
+
+- **A truncated count is labelled with the window it covers.** A folder of 59 monthly files spanning
+  2020-01 to 2024-12 answered *"35 of 36 months from 2020-01 to 2024-12"*. Both halves were true —
+  the ratio covered the capped window, the span covered the corpus — and together they read as a
+  36-month corpus that is nearly whole, when it is a 60-month corpus with **24 months not counted at
+  all**. A reader takes the label as the scope of the count. It now reads *"35 of 36 months from
+  2022-01 to 2024-12 ... 24 earlier months back to 2020-01 were not counted"*.
+- The inferred range is unchanged and still in the derivation; only the label of the **count**
+  narrowed to what was actually examined.
+- Three scenarios in the README, each one real output from a real folder, plus what this is not for.
+
 # 0.5.3
 
 - **A ratio nothing matched is refused rather than printed.** Found on real third-party data: a
