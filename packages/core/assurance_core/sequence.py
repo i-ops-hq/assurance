@@ -335,6 +335,10 @@ def detect_series(filenames: list[str]) -> DetectedSeries | None:
     #
     # Same architectural error `corpus_census` was built to fix, and the same fix: decide the shape
     # from the whole set, not from each name.
+    #
+    # **There are two of these, one per kind that can be mistaken for a coarser one** — days that are
+    # really weeks, months that are really years. Add a branch, not a special case, if a third turns
+    # up. DAILY is first because it was found first, and this block explains both.
     if kind is SeriesKind.DAILY:
         # Narrowed explicitly rather than relying on `kind`: the tuple is still typed as the union
         # and `mypy --strict` — which the three public repos gate on — will not infer it from the
@@ -365,21 +369,15 @@ def detect_series(filenames: list[str]) -> DetectedSeries | None:
             return None
 
     if kind is SeriesKind.MONTHLY:
-        # THE SAME DEFECT AS THE DAILY BRANCH ABOVE, in the branch that was never written. The 0.12.0
-        # work made spacing a property of the set and was right to — but it guarded only DAILY, so
-        # weekly-shaped daily files were caught and yearly-shaped monthly files fell straight through
-        # to the `return` below.
+        # The same defect as the branch above, in the branch that was never written: 0.12.0 guarded
+        # only DAILY, so a twelve-month rhythm still resolved as monthly. The corpus it was found on
+        # and the numbers it produced are in
+        # `test_a_yearly_rhythm_in_month_named_files_is_not_a_monthly_series`, which is where a
+        # person changing this behaviour lands — the account lives there, once, rather than drifting
+        # between two homes.
         #
-        # FOUND ON REAL THIRD-PARTY DATA, which is what makes it worth this comment: `assurance
-        # check` over a Formula 1 dataset nobody made for us. `Formula1_2022season_drivers.csv`
-        # parses to 2022-01, the six distinct keys are 2019-01 … 2024-01 at gaps of twelve months,
-        # `detect_series` returned MONTHLY, and the caller enumerated 36 months — so all 28 files
-        # were read, every one was discarded as an ambiguous duplicate of some January, and the tool
-        # whose purpose is refusing to fabricate a denominator reported **"0 of 36 months"**.
-        #
-        # A twelve-month rhythm is not monthly. `None` — "no dated or numbered series detected" — is
-        # the honest answer, and it also makes the year-token question moot: however `2022season`
-        # comes to be represented, a twelve-month modal gap fails this guard either way.
+        # The rule: a modal gap of anything other than one month means this is not a monthly series,
+        # and `None` is the honest return.
         #
         # **Deliberately NOT adding YEARLY.** `SeriesKind` has five members and year is not one;
         # adding it drags in a unit mapping, an enumerator, `--expect yearly` and the CLI mirrors.
