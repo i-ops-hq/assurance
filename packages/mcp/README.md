@@ -1,3 +1,5 @@
+<!-- mcp-name: io.github.i-ops-hq/assurance-mcp -->
+
 # assurance-mcp
 
 [![PyPI](https://img.shields.io/pypi/v/assurance-mcp)](https://pypi.org/project/assurance-mcp/)

@@ -3,12 +3,12 @@
   "name": "io.github.i-ops-hq/assurance-mcp",
   "title": "Assurance",
   "description": "Checks what an agent did NOT read. Coverage over a retrieval step or a folder. No model.",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "assurance-mcp",
-      "version": "0.4.2",
+      "version": "0.4.3",
       "transport": {
         "type": "stdio"
       }

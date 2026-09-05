@@ -1,3 +1,11 @@
+# 0.4.3
+
+- **The MCP registry ownership token is in the README**, so this release can actually be listed.
+  The registry proves that whoever controls the PyPI package controls the server name by requiring
+  `mcp-name: io.github.i-ops-hq/assurance-mcp` to appear there, and it reads the README from the
+  published distribution — so 0.4.2 uploaded to PyPI cleanly and is unlistable forever. Nothing in
+  the release path had ever looked at the README; a gate does now.
+
 # 0.4.2
 
 - **Floors raised to the versions the tests actually run against** — `assurance-core` 0.13.1 and
