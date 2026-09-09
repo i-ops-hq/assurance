@@ -4,18 +4,45 @@
 [![assurance-core](https://img.shields.io/pypi/v/assurance-core?label=assurance-core)](https://pypi.org/project/assurance-core/)
 [![assurance-cli](https://img.shields.io/pypi/v/assurance-cli?label=assurance-cli)](https://pypi.org/project/assurance-cli/)
 [![assurance-mcp](https://img.shields.io/pypi/v/assurance-mcp?label=assurance-mcp)](https://pypi.org/project/assurance-mcp/)
+[![assurance-budget](https://img.shields.io/pypi/v/assurance-budget?label=assurance-budget)](https://pypi.org/project/assurance-budget/)
+[![assurance-authority](https://img.shields.io/pypi/v/assurance-authority?label=assurance-authority)](https://pypi.org/project/assurance-authority/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-## Did the job cover everything it was supposed to cover?
+## Software that reports success does not thereby prove it
 
-An agent, a script or a person tells you the work is done. **This decides whether that is true** —
-from declared expectations and observed evidence, by code, with no model anywhere in the answer.
+Every tool here answers one question about work that has already happened, and refuses to answer it
+when it cannot. Nothing consults a model. Every result is arithmetic you can recompute yourself.
 
-The one rule everything here follows: **a denominator we cannot establish is refused, never
-invented.** A tool that answers "0 of 36" for a folder it did not understand is worse than one that
-says it does not know, because you cannot argue with a number that was made up.
+Start with the sentence that shows what that means in practice:
 
-## Thirty seconds
+```
+$ pip install assurance-budget
+$ assurance-budget runs.jsonl
+
+0 of 3 runs hit a limit — 1 was going nowhere first
+
+  r-002
+      Stopped: 3 rounds repeating fetch(url=api/invoices) and failing the same way
+      (timeout) with nothing new read and no part of the goal closer. Continuing would
+      spend the rest of this run's budget on the same result.
+
+  Not tested by this log: iterations, retries, seconds. The log carries no events of
+  that kind, so this is silence rather than a pass.
+```
+
+Read the last line again. The run **passed** three of the four limits — and the tool says so is not
+the same as says nothing. Most software reports the absence of a failure as a success, which is how
+a check that never ran becomes a green tick. This one names what it could not test, in the same
+breath as what it could.
+
+That is the whole idea, and it is why these are separate from any product: **a claim you can check
+is worth more than a claim you have to trust.**
+
+## Three questions, three commands
+
+Each installs on its own. None needs the others, an account, a service, or a network.
+
+### Did the work cover what it was supposed to cover?
 
 ```bash
 pip install assurance-cli
@@ -24,31 +51,68 @@ assurance check ~/reports
 
 <img src="packages/cli/docs/demo.svg" alt="assurance check on a folder of monthly reports: 22 of 24 months, March 2024 and July 2025 named as absent; --fail-on-gap exits 1; a folder with no regular cadence is refused rather than given a denominator" width="860">
 
-No config, no corpus file, no setup. It works out the cadence, the span and what is absent from the
-filenames alone. A folder with no regular cadence is **told so** rather than handed a ratio.
+No config and no corpus file — it reads the cadence, the span and what is absent from the filenames.
+A folder with no regular cadence is **told so** rather than handed a ratio.
 
-## What is in here
+### Where did the run's budget go, and where did it go nowhere?
 
-| package | install | what it is |
-|---|---|---|
-| **`assurance-core`** | `pip install assurance-core` | the decision layer as a pure library — no I/O, no model, no framework. Coverage, corpus census, staleness, drift, tool pinning, the rule of two |
-| **`assurance-cli`** | `pip install assurance-cli` | five commands, each a CI gate with no model in it: `check`, `diff`, `pin`, `drift`, `init` |
-| **`assurance-mcp`** | `pip install assurance-mcp` | four MCP tools, read-only by construction, for Cursor / Claude Desktop / any MCP client |
+```bash
+pip install assurance-budget
+assurance-budget runs.jsonl --fail-on-exhausted
+```
 
-Each ships to PyPI independently and versions on its own — a release tag names its package
-(`cli-v0.5.1`), because a bare version number is ambiguous between three.
+The expensive runs are rarely the ones that crash. They are the ones that retried the same failing
+call fourteen times and finished with a plausible answer and a bill. Ceilings are enforced by code
+the caller cannot talk out of them.
 
-### Which one do you want?
+### May this task proceed, for the person who asked?
 
-- **You have a folder and a question.** `assurance-cli`. Nothing else needed.
-- **You have an agent that should check its own work.** `assurance-mcp`, or the
-  [`report-coverage` skill](skills/report-coverage/SKILL.md).
-- **You are building the check into your own system.** `assurance-core`. It is deliberately
-  dependency-free so it can sit inside anything.
-- **You are worried an agent becomes a way to read things people cannot read.** That is a separate
-  project built on this one: **[assurance-authority](https://github.com/i-ops-hq/assurance-authority)**.
+```bash
+pip install assurance-authority
+assurance-authority team.json
+```
 
-## The two commands people adopt first
+```
+1 of 3 tasks may proceed for the person who asked — 1 moved owner — 1 refused
+
+  team roster      intern-42    proceed
+  Q3 margin memo   intern-42    escalate_ownership -> CFO
+      Priya (intern) may not receive finance-confidential, and CFO may. The task moves to
+      CFO rather than the answer moving to Priya (intern).
+  payroll extract  agent-a      refuse
+      Drafting agent may not receive payroll, and nobody offered can. The task stops here.
+```
+
+The middle row is the product. The intern may not have the margin memo; the CFO may. So the **task**
+moves to the CFO — she is told it moved, and never told the figure. An agent fetching it as a service
+account and handing her the answer is a permission-laundering machine with your company's name on it.
+
+## The rule all three follow
+
+**A denominator we cannot establish is refused, never invented.** A tool that answers "0 of 36" for a
+folder it did not understand is worse than one that says it does not know, because you cannot argue
+with a number that was made up.
+
+## All five packages
+
+The three commands above are the way in. These are the parts they are made of, each installable on
+its own and versioned on its own — a release tag names its package (`cli-v0.5.1`), because a bare
+version number is ambiguous between five.
+
+| package | what it is |
+|---|---|
+| [`assurance-core`](packages/core) | the decision layer as a pure library — no I/O, no model, no framework. Coverage, corpus census, staleness, drift, tool pinning, the rule of two |
+| [`assurance-cli`](packages/cli) | five commands, each a CI gate: `check`, `diff`, `pin`, `drift`, `init` |
+| [`assurance-mcp`](packages/mcp) | four MCP tools, read-only by construction, for Cursor / Claude Desktop / any MCP client |
+| [`assurance-budget`](packages/budget) | where a run spent, and where it went nowhere. Ceilings a caller cannot raise |
+| [`assurance-authority`](packages/authority) | whether a task may proceed for the person who asked, and what happens when it may not |
+
+`budget` and `authority` had their own repositories until 2026-09-09. One package per repository
+meant a reader had to find four front doors and work out how they related before anything happened,
+which is the opposite of the point. Their history is on the archived remotes; their PyPI names never
+changed.
+
+Two more worth knowing about once you are past the first command:
 
 ```bash
 assurance pin --check      # fail the build when an MCP server changes a tool definition
@@ -57,17 +121,19 @@ assurance drift runs.jsonl # did the failure rate actually shift, or was the wee
 ```
 
 `drift` reports no labels, no judge and no benchmark — it says whether a change is distinguishable
-from noise, and it refuses when there is not enough history to say. Its
+from noise, and refuses when there is not enough history to say. Its
 [README](packages/cli/README.md) leads with the false-alarm rates of the textbook methods it
 rejected, because that is the part worth checking.
 
 ## Layout
 
 ```
-packages/core/     assurance-core   — generated; see below
-packages/cli/      assurance-cli
-packages/mcp/      assurance-mcp
-skills/            agent skills that use the tools above
+packages/core/       assurance-core        — generated; see below
+packages/cli/        assurance-cli
+packages/mcp/        assurance-mcp
+packages/budget/     assurance-budget
+packages/authority/  assurance-authority
+skills/              agent skills that use the tools above
 ```
 
 **`packages/core/` is generated and must not be hand-edited.** It is scrubbed out of a private
