@@ -8,7 +8,7 @@ name: publish
 #   1. bump `version` in packages/<pkg>/pyproject.toml   2. add the CHANGELOG heading
 #   3. commit                                            4. git tag <pkg>-vX.Y.Z && git push origin <pkg>-vX.Y.Z
 #
-# Three packages share this repo, so a bare `v0.5.1` is ambiguous between them. The prefix is what
+# Five packages share this repo, so a bare `v0.5.1` is ambiguous between them. The prefix is what
 # this workflow keys on to know what to build, and what the changelog gate checks each heading
 # against.
 #
@@ -19,7 +19,7 @@ name: publish
 
 on:
   push:
-    tags: ["core-v*", "cli-v*", "mcp-v*"]
+    tags: ["core-v*", "cli-v*", "mcp-v*", "budget-v*", "authority-v*"]
   workflow_dispatch:
 
 jobs:
@@ -41,8 +41,8 @@ jobs:
         run: |
           PKG="${GITHUB_REF_NAME%%-v*}"
           case "$PKG" in
-            core|cli|mcp) ;;
-            *) echo "::error::Tag $GITHUB_REF_NAME names no package. Use core-vX.Y.Z, cli-vX.Y.Z or mcp-vX.Y.Z."; exit 1 ;;
+            core|cli|mcp|budget|authority) ;;
+            *) echo "::error::Tag $GITHUB_REF_NAME names no package. Use core-vX.Y.Z, cli-vX.Y.Z, mcp-vX.Y.Z, budget-vX.Y.Z or authority-vX.Y.Z."; exit 1 ;;
           esac
           echo "pkg=$PKG" >> "$GITHUB_OUTPUT"
           echo "dist=assurance-$PKG" >> "$GITHUB_OUTPUT"
