@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,7 @@ def _profile_csv(path: Path, *, delimiter: str) -> dict[str, Any] | None:
 def _profile_xlsx(path: Path) -> dict[str, Any] | None:
     try:
         from openpyxl import load_workbook
+        from openpyxl.utils.exceptions import InvalidFileException
     except ImportError:
         return None
 
@@ -70,7 +72,16 @@ def _profile_xlsx(path: Path) -> dict[str, Any] | None:
             for row in rows_iter
         ]
         workbook.close()
-    except (OSError, ValueError):
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, InvalidFileException):
+        # A .xlsx is a zip archive, and a file named like one need not be. A CSV renamed by hand, a
+        # truncated download, an HTML error page saved with the wrong extension: openpyxl raises
+        # BadZipFile for those, InvalidFileException for a legacy .xls, and KeyError when the
+        # archive opens but has no `xl/workbook.xml`. None of them was caught, so `assurance check`
+        # died with a traceback mid-folder — with --json there was no JSON on stdout at all, and
+        # through the MCP tool an agent got "Error executing tool" and nothing else.
+        #
+        # Returning None is the caller's existing "could not be read as a table" path: the period is
+        # reported as unreadable, the rest of the folder is still checked, exit codes as usual.
         return None
 
     return _facts_from_rows(fieldnames, rows)

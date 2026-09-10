@@ -86,7 +86,30 @@ def check_against_baseline(folder: str) -> dict[str, Any]:
             "new": [],
         }
 
-    baseline = json.loads(path.read_text(encoding="utf-8"))
+    # Baselines are meant to be committed, so a merge-conflict marker left in one is an ordinary
+    # way to arrive here. A missing baseline was already reported cleanly; a malformed one raised
+    # JSONDecodeError out of the command. Reported as unreadable, with the coverage check still run
+    # and printed, which is the same shape as every other "this input is not usable" answer.
+    try:
+        baseline = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return {
+            "ok": False,
+            "summary": f"The baseline at {BASELINE_NAME} could not be read: {exc}",
+            "error": f"The baseline at {BASELINE_NAME} could not be read: {exc}",
+            "changed": [],
+            "vanished": [],
+            "new": [],
+        }
+    if not isinstance(baseline, dict):
+        return {
+            "ok": False,
+            "summary": f"The baseline at {BASELINE_NAME} is not an object. Run `assurance init` to rewrite it.",
+            "error": f"The baseline at {BASELINE_NAME} is not an object.",
+            "changed": [],
+            "vanished": [],
+            "new": [],
+        }
     recorded: dict[str, Any] = baseline.get("files") or {}
     findings: list[dict[str, Any]] = []
     changed: list[str] = []

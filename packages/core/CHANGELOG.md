@@ -1,3 +1,18 @@
+# 0.13.2
+
+- **`sequence`: an ISO year is 52 or 53 weeks, not always 53.** `_weeks_between` incremented the
+  week number and rolled over only past 53, so every year was enumerated as if it had 53. A weekly
+  series crossing the end of a 52-week year — 2021, 2022, 2024 — was told a *"Week 53"* that does
+  not exist was missing from a folder that was complete, and `--fail-on-gap` failed the build every
+  time. `_valid_week` accepted the same phantom week as a real point on the way in. Both now ask the
+  calendar: `date.fromisocalendar` to walk, `date(year, 12, 28).isocalendar()` for the week count.
+  Reported against the public mirror.
+- **The leap rule had both of its exceptions dropped.** `29 if year % 4 == 0 else 28` is right for
+  2000–2099 and wrong for 2100, which the module's own `_MAX_YEAR` admits. No filename could reach
+  it — the daily pattern matches `20\d{2}` — so this was a latent trap rather than a live bug, and
+  the supported range and the correctly computed range are now the same range. Day enumeration walks
+  real dates.
+
 # 0.13.1
 
 - **A twelve-month rhythm is no longer read as a monthly series.** `detect_series` gained its

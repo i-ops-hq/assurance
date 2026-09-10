@@ -1,3 +1,51 @@
+# 0.5.7
+
+Eight defects filed against 0.5.6 by an outside reader who ran the commands and read the source.
+Every one reproduced exactly as written. **Requires `assurance-core>=0.13.2`**, which is where the
+week-53 fix lives.
+
+- **A `.xlsx` that is not a zip archive died with a traceback.** `_profile_xlsx` caught `OSError`
+  and `ValueError`; openpyxl raises `zipfile.BadZipFile` for a CSV renamed by hand, a truncated
+  download, or an HTML error page saved with the wrong extension. With `--json` there was no JSON on
+  stdout at all, and through `assurance-mcp` an agent got *"Error executing tool"* and nothing else.
+  The period is now reported as unreadable and the rest of the folder is still checked.
+- **A malformed `.assurance.json` raised `JSONDecodeError` out of the command.** Baselines are meant
+  to be committed, so a merge-conflict marker in one is an ordinary way to arrive here. It is now
+  reported as unreadable with exit 2 — the exit table's "could not run", not a finding — and the
+  coverage check still runs and prints.
+- **`--from` later than `--to` reported the empty range as complete.** A `Coverage` with no
+  expectations is complete by the arithmetic: nothing was required, so nothing is missing. It
+  answered *"0 of 0"*, `complete: true`, and exit 0 even under `--fail-on-gap`. Refused now, rather
+  than sorted, because the two flags are two assertions and one of them is wrong.
+- **`diff` with an empty expected set did the same thing**, and is refused the same way: no
+  denominator is not a full one.
+- **`--expect` relabelled the unit instead of refusing.** Six monthly files answered `--expect
+  weekly` with *"5 of 6 weeks from 2024-01 to 2024-06"*, exit 0 — the range was still built from the
+  detected monthly points and only the noun changed. It is refused when it contradicts the
+  filenames. Weekly asserted over daily names is a real conversion and still works.
+- **One of `--from` / `--to` was accepted and then ignored.** Output was byte-identical to running
+  with no flags, derivation line and all, so somebody who knew the series should have run through
+  September was told *"5 of 6"* instead of *"5 of 9"*. The end that was given is now honoured and the
+  other inferred, with the derivation line saying which half came from where.
+- **Files the command never opened are named.** They have been counted since 0.4 and printed only
+  when *nothing* tabular was found, which is the one case where they are least surprising. It was
+  silent exactly where it mattered: a folder holding `2024-03.pdf` beside the CSVs was told March is
+  "not in this folder", and the file that would have answered for March went unmentioned. Now in the
+  summary and under `not_opened` in the JSON.
+- **macOS AppleDouble sidecars made the real file ambiguous.** macOS writes `._name` beside every
+  file it copies onto exFAT, FAT, SMB, or into a zip, and the sidecar carries the original filename
+  — so it parsed to the same period and reported *"more than one candidate for 2024-03"* with March
+  sitting there readable. Any folder that arrived as a zip from a Mac hit this for every file.
+  Hidden files are no longer candidates, and are counted under "not opened" rather than dropped.
+- **A mistyped path was read as a one-key inline list.** `--found ./retrieved.txt` with that file
+  absent gave *"0 of 3 items — not in the found set: doc-1, doc-2, doc-3"* and exit 0: a confident
+  ratio produced entirely by a typo. A spec that looks like a path and is not there is refused with
+  exit 2. Inline lists are untouched.
+- **The README claimed yearly corpora work.** They do not, deliberately: a bare year is the same
+  four digits a hundred other things are numbered with. The sentence now says so instead.
+- **`check --help` explains its flags**, including that `--expect` needs a range when no series is
+  detected at all.
+
 # 0.5.6
 
 - **Requires `assurance-core>=0.13.1`**, which is where the cadence guard lives. Six month-points at

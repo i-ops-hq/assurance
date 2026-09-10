@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-authority"
-version = "0.1.2"
+version = "0.1.3"
 description = "Decide whether a task may proceed for the person who asked — without lending them somebody else's clearance."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 dependencies = [
-  "assurance-core>=0.13.1",
+  "assurance-core>=0.13.2",
 ]
 keywords = ["ai-agents", "authorization", "governance", "permissions", "assurance", "least-privilege"]
 classifiers = [

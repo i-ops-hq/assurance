@@ -1,3 +1,9 @@
+# 0.1.3
+
+- **Requires `assurance-core>=0.13.2`.** No code change here. The floor moves because the tree these
+  tests run against is that version, and a declared floor that is lower than the one the tests
+  actually proved is a claim nothing checked.
+
 # 0.1.2
 
 - Floor raised to `assurance-core` 0.13.1, from a `>=0.13` that also admitted 0.13.0 — the last

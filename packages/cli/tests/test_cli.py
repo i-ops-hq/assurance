@@ -432,3 +432,139 @@ def test_an_empty_index_still_refuses_plainly(tmp_path: Path) -> None:
     summary = check_coverage(str(tmp_path))["summary"]
 
     assert "--expect" not in summary
+
+
+# ---------------------------------------------------------------------------------------------
+# Nine defects filed against 0.5.6 by an outside reader who ran the tool and read the source.
+# Every one reproduced exactly as written before any of this was changed.
+# ---------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def short_folder(tmp_path: Path) -> Path:
+    """Five monthly files with March missing — the shape most of the reports used."""
+    root = tmp_path / "reports"
+    root.mkdir()
+    for month in (1, 2, 4, 5, 6):
+        (root / f"2024-{month:02d}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    return root
+
+
+def test_an_xlsx_that_is_not_a_zip_is_unreadable_not_a_traceback(tmp_path: Path) -> None:
+    """A CSV renamed to .xlsx, a truncated download, an HTML error page saved wrong.
+
+    openpyxl raises zipfile.BadZipFile, which nothing caught, so the command died mid-folder. With
+    --json there was no JSON on stdout at all, and through the MCP server an agent got
+    "Error executing tool" and nothing else.
+    """
+    root = tmp_path / "bad"
+    root.mkdir()
+    for month in (1, 2, 3):
+        (root / f"2024-{month:02d}.xlsx").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = check_coverage(str(root))
+    assert "nothing readable in" in result["summary"]
+    assert result["complete"] is False
+    # The whole folder was still walked, rather than the first bad file ending the run.
+    assert set(result["coverage"]["unreadable"]) == {"2024-01", "2024-02", "2024-03"}
+
+
+def test_a_malformed_baseline_is_reported_and_the_coverage_check_still_runs(
+    short_folder: Path, capsys
+) -> None:
+    """Baselines are committed, so a merge-conflict marker in one is an ordinary way to get here."""
+    init_baseline(str(short_folder))
+    (short_folder / BASELINE_NAME).write_text("{ not json", encoding="utf-8")
+
+    result = check_against_baseline(str(short_folder))
+    assert result["ok"] is False
+    assert "could not be read" in result["summary"]
+
+    # Exit 2: the README's table puts unparseable JSON under "could not run", not under findings.
+    code = main(["check", str(short_folder), "--against-baseline"])
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "could not be read" in out
+    assert "months from" in out, "the coverage check still runs and prints"
+
+
+def test_from_after_to_is_refused_rather_than_reported_complete(short_folder: Path) -> None:
+    """An empty range is complete by the arithmetic: nothing required, so nothing missing.
+
+    It reported "0 of 0", complete: true, and exit 0 even under --fail-on-gap.
+    """
+    result = check_coverage(str(short_folder), from_point="2024-08", to_point="2024-01")
+    assert result["complete"] is False
+    assert "is after" in result["summary"]
+    assert main(["check", str(short_folder), "--from", "2024-08", "--to", "2024-01"]) == 2
+
+
+def test_an_expect_that_contradicts_the_filenames_is_refused_not_relabelled(
+    short_folder: Path,
+) -> None:
+    """Six months were reported as "6 weeks" and as "6 days" — the unit word changed, nothing else."""
+    for asserted, noun in (("weekly", "weeks"), ("daily", "days"), ("numbered", "runs")):
+        result = check_coverage(str(short_folder), expect=asserted)
+        assert result["complete"] is False, asserted
+        assert f"read as months, not {noun}" in result["summary"], asserted
+
+    # The kind that agrees still counts, and weekly-over-daily is still the one real conversion.
+    assert "months" in check_coverage(str(short_folder), expect="monthly")["summary"]
+
+
+def test_weekly_over_daily_filenames_still_re_keys(tmp_path: Path) -> None:
+    """The guard above must not break the conversion that does exist."""
+    root = tmp_path / "daily"
+    root.mkdir()
+    for day in range(1, 15):
+        (root / f"2024-01-{day:02d}.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    result = check_coverage(str(root), expect="weekly")
+    assert "weeks" in result["summary"]
+    assert "read as days, not weeks" not in result["summary"]
+
+
+def test_one_end_of_the_range_is_honoured_and_the_other_is_named_as_inferred(
+    short_folder: Path,
+) -> None:
+    """`--to 2024-09` used to be accepted, ignored, and answered "5 of 6 months" with exit 0."""
+    result = check_coverage(str(short_folder), to_point="2024-09")
+    assert result["summary"].startswith("5 of 9 months from 2024-01 to 2024-09")
+    assert "--from 2024-01 inferred from the filenames" in result["derivation"]
+
+    other = check_coverage(str(short_folder), from_point="2023-11")
+    assert other["summary"].startswith("5 of 8 months from 2023-11 to 2024-06")
+    assert "--to 2024-06 inferred from the filenames" in other["derivation"]
+
+
+def test_files_never_opened_are_named_in_the_summary_and_the_payload(short_folder: Path) -> None:
+    """The README promised these were "counted and named"; only the nothing-indexed path printed them.
+
+    It is silent exactly where it matters: a folder holding 2024-03.pdf beside the CSVs is told
+    March is "not in this folder", and the file that would have answered for March goes unmentioned.
+    """
+    for name in ("README.md", "notes.txt", "2024-03.pdf"):
+        (short_folder / name).write_text("x", encoding="utf-8")
+
+    result = check_coverage(str(short_folder))
+    assert result["not_opened"]["total"] == 3
+    assert "2024-03.pdf" in result["not_opened"]["names"]
+    assert "not opened" in result["summary"]
+
+
+def test_appledouble_sidecars_do_not_make_the_real_file_ambiguous(short_folder: Path) -> None:
+    """macOS writes ._name beside every file it copies onto exFAT, SMB, or into a zip.
+
+    The sidecar carries the original filename, so it parsed to the same period and made the real
+    file ambiguous: a folder that arrived as a zip from a Mac reported March as having more than
+    one candidate, with March sitting there readable.
+    """
+    (short_folder / "2024-03.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (short_folder / "._2024-03.csv").write_bytes(b"\x00\x05\x16\x07resource fork")
+    (short_folder / ".DS_Store").write_bytes(b"\x00\x00\x00\x01")
+    (short_folder / ".2024-04.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+    result = check_coverage(str(short_folder))
+    assert result["summary"].startswith("6 of 6 months")
+    assert result["coverage"]["ambiguous"] == {}
+    # Declined, not dropped: a file this command chose not to read is a fact about the answer.
+    assert result["not_opened"]["total"] == 3

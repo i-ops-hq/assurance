@@ -91,9 +91,13 @@ assurance check ~/reports
 
 It worked out that the folder is monthly, over what span, and which two are absent — from the
 filenames, before opening a single file. It reads `.csv`, `.tsv` and `.xlsx`; anything else in the
-folder is counted and named rather than passed over in silence. Weekly, quarterly and yearly corpora
+folder is counted and named rather than passed over in silence. Weekly, quarterly and daily corpora
 work the same way, and **a folder with no regular cadence is told so rather than given a denominator
 we made up.**
+
+There is no yearly cadence: `2019.csv, 2020.csv, 2021.csv` is refused rather than counted. A bare
+year is the same four digits a hundred other things are numbered with, and reading it as a cadence
+would invent a denominator on the strength of a coincidence.
 
 Then the same question against a retrieval step, where the expected set is yours to declare:
 
