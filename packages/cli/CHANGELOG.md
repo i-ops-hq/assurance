@@ -1,3 +1,23 @@
+# 0.5.8
+
+Found by installing the published 0.5.7 from PyPI and probing it the way an outside tester would,
+rather than by re-reading the diff that shipped it. All four are defects 0.5.7 introduced.
+
+- **A baseline whose `files` entry is not an object still raised.** 0.5.7 guarded the top level and
+  stopped there, so `{"files": "not a dict"}` parsed fine and then `.items()` on a string raised
+  `AttributeError` out of the command — the same traceback the guard was added to remove, one layer
+  down.
+- **The `--expect` refusal named a route that is closed.** It said to *"pass --from / --to in weekly
+  form"*, and following that exactly returned the same refusal, because the guard runs before the
+  range is ever read. It now offers only what works, and says why there is no conversion: a file
+  named for a month does not say which week it belongs to.
+- **A single key that looks like a path was refused with advice nobody could follow.** The message
+  said to *"pass an inline list as comma-separated keys"*, and for one key there is no comma to add
+  — while `--found src/a.py` is ordinary input, since the README lists changed files among the
+  things keys are. The message now names the exact string to type, `src/a.py,`, and a trailing comma
+  marks an inline list.
+- **"1 filenames parsed to a point."** Small, but it is the first sentence a stranger reads.
+
 # 0.5.7
 
 Eight defects filed against 0.5.6 by an outside reader who ran the commands and read the source.

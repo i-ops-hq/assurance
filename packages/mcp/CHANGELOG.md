@@ -1,3 +1,8 @@
+# 0.4.5
+
+- **Requires `assurance-cli>=0.5.8`.** No code change here; the floor moves so a fresh install of
+  this server gets the four message and traceback fixes found by probing the published 0.5.7.
+
 # 0.4.4
 
 - **Requires `assurance-cli>=0.5.7` and `assurance-core>=0.13.2`.** No code change here; the floors
