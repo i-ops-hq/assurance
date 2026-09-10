@@ -84,9 +84,14 @@ def _refuse_a_missing_path(spec: str, *, label: str) -> None:
     )
     if not looks_like_path:
         return
+    # The escape hatch is named, because for a SINGLE key the old advice could not be followed:
+    # "pass an inline list as comma-separated keys" has no comma to add. `src/a.py` is a perfectly
+    # ordinary key — the README lists changed files as one of the things keys are — and refusing it
+    # with instructions that do not apply is the shape of defect this guard was added to remove.
     raise KeySpecError(
         f"{label}: {spec} looks like a file path and there is no file there. "
-        "Check the path, or pass an inline list as comma-separated keys."
+        f"Check the path — or, if it really is a key, write it as `{spec},` "
+        "(a trailing comma marks an inline list)."
     )
 
 

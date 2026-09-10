@@ -568,3 +568,60 @@ def test_appledouble_sidecars_do_not_make_the_real_file_ambiguous(short_folder: 
     assert result["coverage"]["ambiguous"] == {}
     # Declined, not dropped: a file this command chose not to read is a fact about the answer.
     assert result["not_opened"]["total"] == 3
+
+
+# ---------------------------------------------------------------------------------------------
+# Found by installing the published 0.5.7 and probing it as an outsider would, rather than by
+# reading the diff that shipped it. All three are defects the 0.5.7 fixes introduced.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_baseline_whose_files_entry_is_not_an_object_is_reported_too(short_folder: Path) -> None:
+    """The 0.5.7 guard checked the top level and stopped there.
+
+    `{"files": "not a dict"}` is valid JSON, parses fine, and then `.items()` on a string raises
+    AttributeError out of the command — the same traceback the guard was added to remove, one
+    layer down.
+    """
+    init_baseline(str(short_folder))
+    (short_folder / BASELINE_NAME).write_text('{"files": "not a dict"}', encoding="utf-8")
+
+    result = check_against_baseline(str(short_folder))
+    assert result["ok"] is False
+    assert "not an object" in result["summary"]
+    assert main(["check", str(short_folder), "--against-baseline"]) == 2
+
+    # A baseline with no "files" key at all is an ordinary empty baseline, not an unreadable one:
+    # every file reads as new, which is a finding rather than a failure to run.
+    (short_folder / BASELINE_NAME).write_text("{}", encoding="utf-8")
+    empty = check_against_baseline(str(short_folder))
+    assert "error" not in empty
+    assert empty["summary"] == "5 new (not in baseline)"
+
+
+def test_the_expect_refusal_only_offers_a_route_that_works(short_folder: Path) -> None:
+    """The first draft of this sentence offered `--from / --to in weekly form`.
+
+    Following it exactly returned the same refusal, because the guard runs before the range is
+    ever read. A refusal that names a closed path is worse than one that names none, so the
+    sentence now offers only what works — and this test follows it.
+    """
+    refusal = check_coverage(str(short_folder), expect="weekly")["summary"]
+    assert "read as months, not weeks" in refusal
+
+    # Whatever the sentence tells you to do must actually work. It says: drop --expect.
+    assert "Drop --expect" in refusal
+    assert check_coverage(str(short_folder))["summary"].startswith("5 of 6 months")
+
+    # And it must not send anyone down the route that returns this same refusal.
+    followed = check_coverage(str(short_folder), expect="weekly", from_point="2024-W01", to_point="2024-W26")
+    assert followed["summary"] == refusal, "the flags change nothing here"
+    assert "--from" not in refusal, "so the sentence must not offer them"
+
+
+def test_a_folder_with_one_dated_file_says_file_not_filenames(tmp_path: Path) -> None:
+    """'1 filenames parsed to a point' — small, but it is the first sentence a stranger reads."""
+    root = tmp_path / "one"
+    root.mkdir()
+    (root / "2024-01.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    assert "1 file parsed to a point" in check_coverage(str(root))["summary"]

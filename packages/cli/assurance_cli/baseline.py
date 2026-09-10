@@ -110,7 +110,21 @@ def check_against_baseline(folder: str) -> dict[str, Any]:
             "vanished": [],
             "new": [],
         }
-    recorded: dict[str, Any] = baseline.get("files") or {}
+    # Checked as well as the top level, because guarding only the outer object left the same
+    # traceback one layer down: `{"files": "not a dict"}` is valid JSON, parses fine, and then
+    # `.items()` on a string raises AttributeError out of the command. Found by probing the
+    # published 0.5.7 rather than by reading the diff that introduced the outer guard.
+    recorded_raw = baseline.get("files")
+    if recorded_raw is not None and not isinstance(recorded_raw, dict):
+        return {
+            "ok": False,
+            "summary": f"The baseline at {BASELINE_NAME} has a 'files' entry that is not an object.",
+            "error": f"The baseline at {BASELINE_NAME} has a 'files' entry that is not an object.",
+            "changed": [],
+            "vanished": [],
+            "new": [],
+        }
+    recorded: dict[str, Any] = recorded_raw or {}
     findings: list[dict[str, Any]] = []
     changed: list[str] = []
     vanished: list[str] = []

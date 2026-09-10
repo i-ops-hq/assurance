@@ -320,3 +320,19 @@ def test_an_empty_expected_set_is_a_refusal_not_a_complete_diff() -> None:
     real = diff_sets_from_lists(["doc-1", "doc-2", "doc-3"], ["doc-1", "doc-2"])
     assert real["complete"] is False
     assert not real.get("undetermined")
+
+
+def test_the_path_refusal_names_an_escape_hatch_that_works_for_a_single_key(tmp_path: Path) -> None:
+    """The 0.5.7 message said "pass an inline list as comma-separated keys".
+
+    For ONE key there is no comma to add, and the README lists changed files among the things keys
+    are — so `--found src/a.py` is ordinary input that was refused with advice nobody could follow.
+    """
+    with pytest.raises(KeySpecError) as caught:
+        read_keys("src/a.py", label="--found")
+    message = str(caught.value)
+    assert "`src/a.py,`" in message, "the message names the exact string to type"
+
+    # And typing it does what the message promises.
+    assert read_keys("src/a.py,", label="--found") == ["src/a.py"]
+    assert read_keys("./retrieved.txt,", label="--found") == ["./retrieved.txt"]

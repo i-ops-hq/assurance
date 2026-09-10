@@ -119,10 +119,15 @@ def check_coverage(
     ):
         return _error_result(
             root,
+            # Only what actually works. The first draft of this sentence offered
+            # "--from / --to in weekly form", and following it exactly returned this same
+            # refusal — the guard runs before the range is ever read. A refusal that names a
+            # closed path is worse than one that names none.
             f"These names read as {_unit_for_kind(detected.kind)}, not {_unit_for_kind(kind)}. "
-            f"Drop --expect to count them as {_unit_for_kind(detected.kind)}, or pass "
-            f"--from / --to in {expect.lower()} form to say which {_unit_for_kind(kind)[:-1]} "
-            "each file belongs to.",
+            f"Drop --expect to count them as {_unit_for_kind(detected.kind)}. There is no "
+            f"conversion from {_unit_for_kind(detected.kind)} to {_unit_for_kind(kind)}: a file "
+            f"named for {'a ' + _unit_for_kind(detected.kind)[:-1]} does not say which "
+            f"{_unit_for_kind(kind)[:-1]} it belongs to.",
         )
 
     if kind is None:
@@ -576,7 +581,7 @@ def _no_series_summary(root: Path, by_key: dict[str, list[Path]]) -> str:
     }
     named = sorted(k for k in kinds if k)
     keys = sorted(by_key)
-    where = f"{len(by_key)} filenames parsed to a point in {root.name}"
+    where = f"{_file_count(len(by_key))} parsed to a point in {root.name}"
     if len(named) != 1:
         return (
             f"No dated or numbered series detected. {where}, but they do not agree on one shape"
