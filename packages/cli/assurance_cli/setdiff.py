@@ -52,8 +52,42 @@ def read_keys(spec: str | None, *, label: str) -> list[str]:
             text = candidate.read_text(encoding="utf-8-sig")
 
     if text is None:
+        _refuse_a_missing_path(spec, label=label)
         return _dedupe(part.strip() for part in spec.split(","))
     return _dedupe(_parse(text, label=label))
+
+
+# What an inline key list almost never contains, and a filename almost always does.
+_LIST_SUFFIXES = (".txt", ".json", ".jsonl", ".csv", ".tsv", ".ndjson", ".list")
+
+
+def _refuse_a_missing_path(spec: str, *, label: str) -> None:
+    """A spec that reads as a path and is not there is a typo, not a one-key list.
+
+    Nothing distinguished the two, so `--found ./retrieved.txt` with that file absent was read as a
+    list containing the single key `./retrieved.txt`. The answer was "0 of 3 items — not in the
+    found set: doc-1, doc-2, doc-3" and exit 0: a confident ratio produced entirely by a typo. Under
+    --fail-on-gap the build failed for a reason the sentence did not state.
+
+    Only shapes an inline list realistically never has: a path separator, a leading `.` or `~`, or a
+    list-file extension. `doc-1,doc-2` is untouched, and a single inline key still works — it just
+    cannot look like a filename.
+    """
+    raw = str(spec).strip()
+    if not raw or "," in raw:
+        return
+    looks_like_path = (
+        "/" in raw
+        or "\\" in raw
+        or raw.startswith((".", "~"))
+        or raw.lower().endswith(_LIST_SUFFIXES)
+    )
+    if not looks_like_path:
+        return
+    raise KeySpecError(
+        f"{label}: {spec} looks like a file path and there is no file there. "
+        "Check the path, or pass an inline list as comma-separated keys."
+    )
 
 
 def _parse(text: str, *, label: str) -> list[str]:
@@ -154,6 +188,9 @@ def _identifier(entry: dict[str, Any]) -> str | None:
     return None
 
 
+_NOTHING_EXPECTED = "the expected set is empty, so there is no denominator to check against"
+
+
 def _dedupe(values: Any) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -182,6 +219,21 @@ def diff_sets_from_lists(
     """
     expected_keys = _dedupe(expected)
     found_keys = _dedupe(found)
+
+    # **Nothing expected is a denominator that was never established.** An empty expected set gave
+    # `complete: true` and exit 0, because a Coverage with no expectations is complete by the
+    # arithmetic: nothing was required, so nothing is missing. The same shape `check` refuses on an
+    # empty range, and the same one the README says is refused rather than answered.
+    if not expected_keys:
+        empty = Coverage(
+            scope_label=scope or "items",
+            expected=[],
+            derivation=derivation,
+            undetermined=_NOTHING_EXPECTED,
+        )
+        payload = empty.to_dict()
+        payload["unexpected"] = sorted(found_keys)
+        return payload
 
     coverage = Coverage.of(
         expected=expected_keys,

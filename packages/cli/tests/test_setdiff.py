@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from assurance_cli.cli import main
-from assurance_cli.setdiff import KeySpecError, diff_sets, read_keys
+from assurance_cli.setdiff import KeySpecError, diff_sets, diff_sets_from_lists, read_keys
 
 
 # --- reading a key set from what people actually have ----------------------------------------------
@@ -281,3 +281,42 @@ def test_a_chunk_with_no_identifying_field_still_refuses(tmp_path: Path) -> None
 
     with pytest.raises(KeySpecError, match="none of"):
         read_keys(str(listing), label="--found")
+
+
+def test_a_mistyped_path_is_refused_rather_than_read_as_a_one_key_list(tmp_path: Path) -> None:
+    """`--found ./retrieved.txt` with that file absent became a list holding one key.
+
+    The answer was "0 of 3 items — not in the found set: doc-1, doc-2, doc-3" with exit 0: a
+    confident ratio produced entirely by a typo. Under --fail-on-gap the build failed for a reason
+    the sentence did not state.
+    """
+    expected = tmp_path / "expected.txt"
+    expected.write_text("doc-1\ndoc-2\ndoc-3\n", encoding="utf-8")
+
+    for typo in ("./retrieved.txt", str(tmp_path / "gone.txt"), "retrieved.json", "~/list.txt"):
+        with pytest.raises(KeySpecError) as caught:
+            read_keys(typo, label="--found")
+        assert "looks like a file path" in str(caught.value), typo
+
+    # Inline lists are untouched, including a single key that does not look like a filename.
+    assert read_keys("doc-1,doc-2", label="--found") == ["doc-1", "doc-2"]
+    assert read_keys("doc-1", label="--found") == ["doc-1"]
+    # And a path that IS there still reads as a file.
+    assert read_keys(str(expected), label="--expected") == ["doc-1", "doc-2", "doc-3"]
+
+
+def test_an_empty_expected_set_is_a_refusal_not_a_complete_diff() -> None:
+    """A Coverage with no expectations is complete by the arithmetic — nothing was required.
+
+    So an empty expected list answered `complete: true` with exit 0, which is the "denominator we
+    could not establish" the README says is refused rather than answered.
+    """
+    payload = diff_sets_from_lists([], ["doc-1", "doc-2"])
+    assert payload["complete"] is False
+    assert payload["undetermined"]
+    assert payload["unexpected"] == ["doc-1", "doc-2"]
+
+    # A real diff is unaffected.
+    real = diff_sets_from_lists(["doc-1", "doc-2", "doc-3"], ["doc-1", "doc-2"])
+    assert real["complete"] is False
+    assert not real.get("undetermined")

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from enum import Enum
 from typing import Protocol, cast
 
@@ -156,8 +156,20 @@ def _valid_quarter(year: int, quarter: int) -> QuarterlyPoint | None:
     return None
 
 
+def _iso_weeks_in_year(year: int) -> int:
+    """52 or 53, from the calendar rather than from a guess.
+
+    An ISO year has 53 weeks only when it starts on a Thursday, or is a leap year starting on a
+    Wednesday — about 71 years a century. December 28th is always in the last ISO week of its own
+    year, which is the standard one-line way to ask.
+    """
+    return date(year, 12, 28).isocalendar()[1]
+
+
 def _valid_week(year: int, week: int) -> WeeklyPoint | None:
-    if _MIN_YEAR <= year <= _MAX_YEAR and 1 <= week <= 53:
+    # `week <= 53` accepted Week 53 of a 52-week year as a real point, so a folder could both be
+    # told it was missing a week that does not exist and be allowed to contain one.
+    if _MIN_YEAR <= year <= _MAX_YEAR and 1 <= week <= _iso_weeks_in_year(year):
         return WeeklyPoint(year=year, week=week)
     return None
 
@@ -165,9 +177,12 @@ def _valid_week(year: int, week: int) -> WeeklyPoint | None:
 def _valid_day(year: int, month: int, day: int) -> DailyPoint | None:
     if not (_MIN_YEAR <= year <= _MAX_YEAR and 1 <= month <= 12 and 1 <= day <= 31):
         return None
-    # Reject impossible month/day pairs without importing datetime.
-    days_in_month = (31, 29 if year % 4 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-    if day > days_in_month[month - 1]:
+    # The hand-rolled table used `year % 4 == 0`, which is the leap rule minus its two exceptions.
+    # _MAX_YEAR is 2100: divisible by 4, divisible by 100, not by 400, and not a leap year. The
+    # calendar knows all of this already.
+    try:
+        date(year, month, day)
+    except ValueError:
         return None
     return DailyPoint(year=year, month=month, day=day)
 
@@ -423,15 +438,22 @@ def _quarters_between(start: QuarterlyPoint, end: QuarterlyPoint) -> list[Quarte
 
 
 def _weeks_between(start: WeeklyPoint, end: WeeklyPoint) -> list[WeeklyPoint]:
+    """Every ISO week from start to end inclusive.
+
+    This used to increment the week number and roll over only past 53, which enumerates every year
+    as if it had 53 weeks. A weekly series crossing the end of a 52-week year — 2021, 2022, 2024 —
+    was told "Week 53, 2021" was missing from a folder that was complete, and `--fail-on-gap` failed
+    the build every time. Walking real dates a week at a time cannot invent a week.
+    """
     if end < start:
         return []
     out: list[WeeklyPoint] = []
-    year, week = start.year, start.week
-    while (year, week) <= (end.year, end.week):
-        out.append(WeeklyPoint(year=year, week=week))
-        week += 1
-        if week > 53:
-            year, week = year + 1, 1
+    cursor = date.fromisocalendar(start.year, start.week, 1)
+    last = date.fromisocalendar(end.year, end.week, 1)
+    while cursor <= last:
+        iso = cursor.isocalendar()
+        out.append(WeeklyPoint(year=iso[0], week=iso[1]))
+        cursor += timedelta(weeks=1)
     return out
 
 
@@ -439,16 +461,11 @@ def _days_between(start: DailyPoint, end: DailyPoint) -> list[DailyPoint]:
     if end < start:
         return []
     out: list[DailyPoint] = []
-    year, month, day = start.year, start.month, start.day
-    while (year, month, day) <= (end.year, end.month, end.day):
-        out.append(DailyPoint(year=year, month=month, day=day))
-        day += 1
-        days_in_month = (31, 29 if year % 4 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-        if day > days_in_month[month - 1]:
-            day = 1
-            month += 1
-            if month > 12:
-                year, month = year + 1, 1
+    cursor = date(start.year, start.month, start.day)
+    last = date(end.year, end.month, end.day)
+    while cursor <= last:
+        out.append(DailyPoint(year=cursor.year, month=cursor.month, day=cursor.day))
+        cursor += timedelta(days=1)
     return out
 
 

@@ -1,3 +1,11 @@
+# 0.4.4
+
+- **Requires `assurance-cli>=0.5.7` and `assurance-core>=0.13.2`.** No code change here; the floors
+  move because two of the defects fixed there were reported *through this server*. A folder holding
+  a `.xlsx` that is not a zip archive made `check_coverage_tool` return `is_error=true` with the
+  text *"Error executing tool check_coverage_tool"* and nothing an agent could act on, and a weekly
+  folder crossing the end of a 52-week year was told a week that does not exist was missing.
+
 # 0.4.3
 
 - **The MCP registry ownership token is in the README**, so this release can actually be listed.

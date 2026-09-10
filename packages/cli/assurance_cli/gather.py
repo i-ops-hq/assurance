@@ -92,12 +92,38 @@ def check_coverage(
             "coverage": _coverage_to_dict(
                 Coverage(scope_label=f"items in {root.name}", expected=[], undetermined=_UNDETERMINED)
             ),
+            "not_opened": _not_opened(indexed),
         }
 
     inferred_range = False
     filenames = [path.name for paths in by_key.values() for path in paths]
     detected = detect_series(filenames)
     kind = _resolve_kind(expect, detected)
+
+    # **`--expect` names the kind; it does not rename the count.** Reported against 0.5.6: a folder
+    # of six monthly files answered `--expect weekly` with "5 of 6 weeks from 2024-01 to 2024-06",
+    # exit 0. `_resolve_kind` returned the asserted kind, the range was still built from the
+    # detected monthly points, `enumerate_between` still enumerated months, and only the unit word
+    # changed. The number and the noun described different things — the same label/count mismatch
+    # 0.5.4 fixed from the other direction.
+    #
+    # Weekly asserted over daily filenames is the one real conversion and is kept: those names are
+    # re-keyed to the week they fall in, a few lines below. Every other disagreement is refused,
+    # because there is no conversion to perform and relabelling is not one.
+    if (
+        expect
+        and kind is not None
+        and detected is not None
+        and kind is not detected.kind
+        and not (kind is SeriesKind.WEEKLY and detected.kind is SeriesKind.DAILY)
+    ):
+        return _error_result(
+            root,
+            f"These names read as {_unit_for_kind(detected.kind)}, not {_unit_for_kind(kind)}. "
+            f"Drop --expect to count them as {_unit_for_kind(detected.kind)}, or pass "
+            f"--from / --to in {expect.lower()} form to say which {_unit_for_kind(kind)[:-1]} "
+            "each file belongs to.",
+        )
 
     if kind is None:
         return {
@@ -108,6 +134,7 @@ def check_coverage(
             "coverage": _coverage_to_dict(
                 Coverage(scope_label=f"items in {root.name}", expected=[], undetermined=_UNDETERMINED)
             ),
+            "not_opened": _not_opened(indexed),
         }
 
     # Files were indexed BEFORE the kind was known, so a weekly series detected from daily-shaped
@@ -129,13 +156,67 @@ def check_coverage(
     unit = _unit_for_kind(kind)
     derivation = ""
 
-    if from_point and to_point:
-        start = parse_point(from_point, kind)
-        end = parse_point(to_point, kind)
-        if start is None or end is None:
+    if from_point or to_point:
+        # **One end is a question too.** Until 0.5.6 both flags were read only inside
+        # `if from_point and to_point`, so `--to 2024-09` on a folder ending in June was accepted,
+        # ignored, and answered "5 of 6 months" with exit 0 — byte-identical to running with no
+        # flags, derivation line and all. Somebody who knows the series should have run through
+        # September was told the folder was as long as it looks.
+        #
+        # The end that was given is honoured and the other is inferred, which is what the flag was
+        # for. The derivation line says which half came from where, because a range that is half
+        # asserted and half guessed is not the same claim as either.
+        half_inferred = ""
+        start = parse_point(from_point, kind) if from_point else None
+        end = parse_point(to_point, kind) if to_point else None
+        if (from_point and start is None) or (to_point and end is None):
             return _error_result(root, "Could not parse --from / --to for the detected series kind.")
+        # Two separate narrowings rather than one combined branch: exactly one of them can be None
+        # here — both None would not have entered this branch, and an unparseable one already
+        # returned — and written this way a reader (and a type checker) can see each is filled.
+        no_series = (
+            "--from and --to each need the other end. There is no series in these "
+            "filenames to infer it from, so pass both."
+        )
+        if start is None:
+            inferred_start = _detected_edge(detected, kind, earliest=True)
+            if inferred_start is None:
+                return _error_result(root, no_series)
+            start = inferred_start
+            half_inferred = "from"
+        if end is None:
+            inferred_end = _detected_edge(detected, kind, earliest=False)
+            if inferred_end is None:
+                return _error_result(root, no_series)
+            end = inferred_end
+            half_inferred = "to"
+
+        # **An empty range is not a complete one.** `--from 2024-08 --to 2024-01` enumerated
+        # nothing, and a Coverage with no expectations is complete by the arithmetic: nothing was
+        # required, so nothing is missing. It reported "0 of 0", `complete: true`, and exit 0 even
+        # under --fail-on-gap. The positional form already sorts its ends; the flags silently did
+        # not. Refused rather than sorted, because the flags are two separate assertions and one of
+        # them is wrong.
+        # Asked as "did this enumerate to nothing" rather than "is end < start". Two points of the
+        # same kind enumerate to nothing only when the ends are the wrong way round, and phrasing it
+        # this way needs no comparison across a union whose members are not mutually orderable.
         expected_keys = enumerate_between(start, end)
-        derivation = explicit_derivation(kind, point_key(start), point_key(end))
+        if not expected_keys:
+            return _error_result(
+                root, f"--from {point_key(start)} is after --to {point_key(end)}."
+            )
+        if half_inferred == "from":
+            derivation = (
+                f"Range set by --to {point_key(end)} ({kind.value}), with --from {point_key(start)} "
+                "inferred from the filenames."
+            )
+        elif half_inferred == "to":
+            derivation = (
+                f"Range set by --from {point_key(start)} ({kind.value}), with --to {point_key(end)} "
+                "inferred from the filenames."
+            )
+        else:
+            derivation = explicit_derivation(kind, point_key(start), point_key(end))
         scope = f"{unit} from {point_key(start)} to {point_key(end)} in {root.name}"
     elif period_range and kind is SeriesKind.MONTHLY:
         available = sorted(p for p in (point_from_filename(n) for n in filenames) if isinstance(p, Period))
@@ -164,6 +245,7 @@ def check_coverage(
             "coverage": _coverage_to_dict(
                 Coverage(scope_label=f"items in {root.name}", expected=[], undetermined=_UNDETERMINED)
             ),
+            "not_opened": _not_opened(indexed),
         }
 
     truncated = ""
@@ -231,7 +313,12 @@ def check_coverage(
     #
     # Only when the range was inferred. `--from`/`--to` makes the range the caller's question, and
     # "0 of 12 months" is a true and useful answer to a question somebody actually asked.
-    if inferred_range and not cov.found:
+    # `not cov.unreadable` added in 0.5.7: a folder of three .xlsx files that are not zip archives
+    # matched all three periods and then failed to open any of them, which landed here and was
+    # explained as "not one of them lined up with a period" — the opposite of what happened. This
+    # guard is about a folder keyed by something other than the unit; unreadable files are their own
+    # answer and the summary already names them.
+    if inferred_range and not cov.found and not cov.unreadable:
         shared = sorted(cov.ambiguous)
         detail = (
             f" {len(shared)} of those periods hold several files each"
@@ -282,10 +369,11 @@ def check_coverage(
 
     return {
         "folder": str(root),
-        "summary": summary,
+        "summary": summary + _not_opened_clause(indexed),
         "complete": cov.complete and not unsound_range,
         "derivation": cov.derivation,
         "coverage": _coverage_to_dict(cov),
+        "not_opened": _not_opened(indexed),
     }
 
 
@@ -378,6 +466,18 @@ def _indexed_files(root: Path) -> _Indexed:
             continue
         if path.name == ".assurance.json":
             continue
+        # **A hidden file is not a candidate.** macOS writes an AppleDouble sidecar (`._name`) beside
+        # every file it copies onto exFAT, FAT, SMB or into a zip. The sidecar carries the original
+        # filename, so it parses to the same period as the real file and makes it ambiguous: a
+        # folder that arrived as a zip from a Mac reported "4 of 5 months — more than one candidate
+        # for 2024-03" with March sitting there, readable. `.DS_Store` and an editor's `.2024-04.csv`
+        # temp copy are the same shape. They are counted as not-opened rather than dropped in
+        # silence, because a file this command declined to read is a fact about the answer.
+        if path.name.startswith("."):
+            skipped_total += 1
+            if len(skipped) < MAX_UNREAD:
+                skipped.append(path.name)
+            continue
         if path.suffix.lower() not in TABULAR_SUFFIXES:
             skipped_total += 1
             if len(skipped) < MAX_UNREAD:
@@ -408,6 +508,34 @@ def readable_kinds() -> str:
 
 def _file_count(n: int) -> str:
     return "1 file" if n == 1 else f"{n} files"
+
+
+def _not_opened(indexed: _Indexed) -> dict[str, Any]:
+    """The files this command never opened, as a field a caller can read.
+
+    `_indexed_files` has collected these since 0.4, and only `_nothing_indexed_summary` printed
+    them — so they appeared only when NOTHING tabular was found, which is the one case where they
+    are least surprising. In every other folder they were counted and then dropped, while the README
+    promised anything else in the folder is "counted and named rather than passed over in silence".
+
+    It matters most exactly where it was silent: a folder holding `2024-03.pdf` beside the CSVs is
+    told March is "not in this folder", and the file that would have answered for March is the one
+    nobody mentioned.
+    """
+    return {"total": indexed.skipped_total, "names": list(indexed.skipped)}
+
+
+def _not_opened_clause(indexed: _Indexed) -> str:
+    if not indexed.skipped_total:
+        return ""
+    shown = ", ".join(indexed.skipped[:3])
+    more = " and more" if indexed.skipped_total > 3 else ""
+    # Not "because of the extension": a `._2024-03.csv` sidecar IS a .csv and was skipped for being
+    # hidden. The clause names both reasons rather than asserting the one that is usually true.
+    return (
+        f" — {_file_count(indexed.skipped_total)} not opened ({shown}{more}); "
+        f"assurance check reads {readable_kinds()} and skips hidden files"
+    )
 
 
 def _nothing_indexed_summary(root: Path, indexed: _Indexed) -> str:
@@ -474,6 +602,27 @@ def _label_for_key(key: str, filename: str) -> str:
     if isinstance(point, Period):
         return str(point.label)
     return str(point.label)
+
+
+def _detected_edge(
+    detected: DetectedSeries | None, kind: SeriesKind, *, earliest: bool
+) -> SequencePoint | None:
+    """The end of the range the filenames imply, in the kind actually being counted.
+
+    Only for filling the half of `--from`/`--to` the caller left out. Returns None when there is
+    nothing to infer from, so the caller can say so instead of inventing an edge.
+    """
+    if detected is None:
+        return None
+    point = detected.earliest if earliest else detected.latest
+    if point is None:
+        return None
+    # The one supported re-key: weekly asserted over daily filenames.
+    if kind is SeriesKind.WEEKLY and isinstance(point, DailyPoint):
+        return cast(SequencePoint, weekly_point_from_day(point))
+    if kind is not detected.kind:
+        return None
+    return cast(SequencePoint, point)
 
 
 def _resolve_kind(expect: str | None, detected: DetectedSeries | None) -> SeriesKind | None:

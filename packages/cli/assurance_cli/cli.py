@@ -7,7 +7,7 @@ import json
 import sys
 from typing import Any
 
-from assurance_cli.baseline import check_against_baseline, init_baseline
+from assurance_cli.baseline import BASELINE_NAME, check_against_baseline, init_baseline
 from assurance_cli.gather import check_coverage, readable_kinds
 from assurance_cli.drift import run_drift
 from assurance_cli.paths import PathEscapeError
@@ -38,12 +38,31 @@ def main(argv: list[str] | None = None) -> int:
     check_parser.add_argument(
         "folder", help=f"Folder to check. Only {readable_kinds()} files are opened"
     )
-    check_parser.add_argument("--expect", choices=["monthly", "quarterly", "weekly", "daily", "numbered"])
-    check_parser.add_argument("--from", dest="from_point", metavar="FROM")
-    check_parser.add_argument("--to", dest="to_point", metavar="TO")
-    check_parser.add_argument("--against-baseline", action="store_true")
-    check_parser.add_argument("--json", action="store_true", dest="as_json")
-    check_parser.add_argument("--fail-on-gap", action="store_true")
+    # Every one of these was `add_argument` and nothing else, so `--help` listed five flags and
+    # explained none of them — including the two that only work as a pair.
+    check_parser.add_argument(
+        "--expect",
+        choices=["monthly", "quarterly", "weekly", "daily", "numbered"],
+        help="Assert the cadence when the filenames alone do not settle it. Refused if it "
+        "contradicts them. Needs --from and --to when no series is detected at all",
+    )
+    check_parser.add_argument(
+        "--from", dest="from_point", metavar="FROM",
+        help="Start of the range, e.g. 2024-01. The other end is inferred from the filenames if "
+        "--to is left out, and the derivation line says which half was inferred",
+    )
+    check_parser.add_argument(
+        "--to", dest="to_point", metavar="TO",
+        help="End of the range, e.g. 2024-12. See --from",
+    )
+    check_parser.add_argument(
+        "--against-baseline", action="store_true",
+        help=f"Also compare the files to the {BASELINE_NAME} written by `assurance init`",
+    )
+    check_parser.add_argument("--json", action="store_true", dest="as_json",
+                              help="Machine-readable output on stdout")
+    check_parser.add_argument("--fail-on-gap", action="store_true",
+                              help="Exit 1 when coverage is incomplete, for use as a CI gate")
     check_parser.add_argument("period_range", nargs="?", help="Optional period range (monthly)")
 
     diff_parser = sub.add_parser(
@@ -151,6 +170,12 @@ def _run_diff(args: argparse.Namespace) -> int:
         print(format_diff(payload))
     # A gap is a finding, not an error — the command succeeded at telling you about it. Callers who
     # want it to stop a pipeline say so, the same way `check` does.
+    #
+    # "I could not work out what to check" is different, and does not wait to be asked: an empty
+    # expected set is no denominator at all, and exiting 0 there would make it indistinguishable
+    # from a diff that ran and found everything.
+    if payload.get("undetermined"):
+        return 1
     return 1 if (args.fail_on_gap and not payload.get("complete", False)) else 0
 
 
@@ -174,6 +199,10 @@ def _run_check(args: argparse.Namespace) -> int:
     if coverage.get("error"):
         return _emit(output, args, code=2)
 
+    # A baseline that cannot be PARSED is "could not run", which the exit table puts at 2, not a
+    # finding at 1. A baseline that parsed and disagrees with the folder is the finding.
+    if output.get("baseline", {}).get("error"):
+        return _emit(output, args, code=2)
     if args.against_baseline and not output.get("baseline", {}).get("ok", True):
         findings = True
     if not coverage.get("complete", False) and args.fail_on_gap:
