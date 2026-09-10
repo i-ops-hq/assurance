@@ -1,3 +1,10 @@
+# 0.4.6
+
+- **Requires `assurance-cli>=0.5.9`.** No code change here. `check_coverage_tool` returns the new
+  `name_vs_content` field with it, so an agent reading a folder is told when a filename and the rows
+  inside it disagree — the case where the coverage number is right about the names and wrong about
+  the data.
+
 # 0.4.5
 
 - **Requires `assurance-cli>=0.5.8`.** No code change here; the floor moves so a fresh install of

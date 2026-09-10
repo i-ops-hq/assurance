@@ -14,6 +14,23 @@ BASELINE_NAME = ".assurance.json"
 BASELINE_VERSION = 1
 
 
+
+def durable_profile(profile: Any) -> Any:
+    """The part of a profile worth committing, used when writing AND when comparing.
+
+    The date tally `check` reads to test a filename against its rows is evidence for one run, not a
+    durable fact. It is a count per distinct date per column, so five years of daily rows turned a
+    baseline from a few hundred bytes into 57kB of dates, in a file whose whole point is that it
+    lives in your repository. `staleness.extract_measures` never reads it either.
+
+    Both sides go through here, because dropping it on write alone made every unchanged file
+    compare unequal to its own record and report as changed.
+    """
+    if not isinstance(profile, dict):
+        return profile
+    return {k: v for k, v in profile.items() if k != "dates"}
+
+
 def init_baseline(folder: str, *, update: bool = False) -> dict[str, Any]:
     """Write `.assurance.json` with hashes, sizes, mtimes, and computed totals."""
     root = resolve_folder(folder)
@@ -40,7 +57,7 @@ def init_baseline(folder: str, *, update: bool = False) -> dict[str, Any]:
         except Exception:
             continue
         stat = file_path.stat()
-        profile = profile_file(file_path)
+        profile = durable_profile(profile_file(file_path))
         entries[rel] = {
             "sha256": file_sha256(file_path),
             "size": stat.st_size,
@@ -138,7 +155,7 @@ def check_against_baseline(folder: str) -> dict[str, Any]:
             continue
         stat = file_path.stat()
         current_hash = file_sha256(file_path)
-        current_profile = profile_file(file_path)
+        current_profile = durable_profile(profile_file(file_path))
         if (
             current_hash != entry.get("sha256")
             or stat.st_size != entry.get("size")

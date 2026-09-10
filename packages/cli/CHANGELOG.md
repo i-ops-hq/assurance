@@ -1,3 +1,46 @@
+# 0.5.9
+
+**The filename is a claim about the file, and until now nothing tested it.**
+
+`check` already opened every file and read every row into memory. It kept the row count and the
+numeric totals and threw the dates away. So two folders got confidently wrong answers:
+
+- A folder where January and February had been merged into one file reported *"not in this folder:
+  February 2024"*, and `--fail-on-gap` exited 1. The build failed over a month that was present.
+- A file named `2024-03.csv` holding February rows reported *"3 of 3 months"*, complete, exit 0. A
+  month that was genuinely absent passed.
+
+The read was already paid for. `check` now compares the periods in a file's own rows against the
+period its name claims, and says when they disagree.
+
+**This release warns; it does not renumber.** Counts, `complete` and exit codes are exactly what
+they were, so a folder that answered one way yesterday answers the same way today with more said
+about it. Whether content should decide the denominator is the next question, and it should be
+answered by looking at what these warnings turn up on real folders rather than by guessing now.
+
+Three things it refuses to do, because a careless version of this manufactures a new class of
+confident wrong answer:
+
+- **It does not guess an ambiguous date.** `05/01/2024` is the 5th of January to half the world and
+  the 1st of May to the other half. Columns written that way are reported as unreadable.
+- **It does not pick between date columns that disagree.** `created_at` and `report_date` are both
+  dates and they are not both the period. When they land in the same period either will do; when
+  they do not, the clash is named.
+- **It does not warn on a stray row.** A January report generated on the 1st of February carries one
+  February timestamp. A period must hold at least 5% of a file's dated rows to be reported, the
+  threshold is stated in the output, and every warning carries its own row counts.
+
+When a claim cannot be tested at all — no column reads as dates — the output says so rather than
+letting silence read as agreement.
+
+Also: the date tally is stripped from `.assurance.json`. It is a count per distinct date per column,
+and five years of daily rows took a baseline from a few hundred bytes to 57kB, in a file whose whole
+point is that it lives in your repository. Both the write and the comparison go through the same
+filter, because dropping it on write alone made every unchanged file compare unequal to its own
+record.
+
+New JSON field: `coverage.name_vs_content`.
+
 # 0.5.8
 
 Found by installing the published 0.5.7 from PyPI and probing it the way an outside tester would,

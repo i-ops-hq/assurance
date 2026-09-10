@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-mcp"
-version = "0.4.5"
+version = "0.4.6"
 description = "Read-only MCP server exposing assurance checks over a folder."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -12,7 +12,7 @@ authors = [{ name = "I-Ops Operations Intelligence, LLC", email = "hello@i-ops.d
 requires-python = ">=3.10"
 dependencies = [
   "assurance-core>=0.13.2",
-  "assurance-cli>=0.5.8",
+  "assurance-cli>=0.5.9",
   "mcp>=1.0",
 ]
 

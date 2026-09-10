@@ -95,6 +95,18 @@ folder is counted and named rather than passed over in silence. Weekly, quarterl
 work the same way, and **a folder with no regular cadence is told so rather than given a denominator
 we made up.**
 
+It also checks the filename against the file. A name like `2024-03.csv` is a *claim* about what is
+inside, and the rows are read anyway, so the claim is tested: a file holding rows from a month its
+name does not mention is reported, and so is a file holding none of the month it is named for. That
+catches the two cases filenames alone cannot — two months merged into one file, and a file saved
+under the wrong name. The counts stay filename-derived; this is a warning beside them, not a
+different number.
+
+It will not guess to do it. An ambiguous `05/01/2024` is left unread rather than resolved by a coin
+flip, two date columns that disagree about the period are named rather than chosen between, and one
+stray row from the next month is not a finding. When a claim cannot be tested, the output says so
+instead of letting silence read as agreement.
+
 There is no yearly cadence: `2019.csv, 2020.csv, 2021.csv` is refused rather than counted. A bare
 year is the same four digits a hundred other things are numbered with, and reading it as a cadence
 would invent a denominator on the strength of a coincidence.
