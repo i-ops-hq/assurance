@@ -625,3 +625,160 @@ def test_a_folder_with_one_dated_file_says_file_not_filenames(tmp_path: Path) ->
     root.mkdir()
     (root / "2024-01.csv").write_text("a,b\n1,2\n", encoding="utf-8")
     assert "1 file parsed to a point" in check_coverage(str(root))["summary"]
+
+
+# ---------------------------------------------------------------------------------------------
+# The filename is a claim about the file. Until 0.5.9 nothing tested it, so a folder where two
+# months had been merged into one file failed a build over a month that was present, and a file
+# named for March holding February rows reported "3 of 3 months, complete".
+#
+# This release WARNS. The counts stay filename-derived on purpose, so a folder that answered one
+# way yesterday answers the same way today with more said about it.
+# ---------------------------------------------------------------------------------------------
+
+
+def _dated(root: Path, name: str, *rows: str) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / name).write_text("date,amount\n" + "".join(f"{r},10\n" for r in rows), encoding="utf-8")
+
+
+def test_a_merged_file_is_named_as_holding_the_month_reported_missing(tmp_path: Path) -> None:
+    """January and February merged into the January file. Nothing is actually absent."""
+    root = tmp_path / "merged"
+    _dated(root, "2024-01.csv", "2024-01-05", "2024-01-19", "2024-02-03", "2024-02-21")
+    for month in ("03", "04", "05"):
+        _dated(root, f"2024-{month}.csv", f"2024-{month}-07")
+
+    result = check_coverage(str(root), expect="monthly", from_point="2024-01", to_point="2024-05")
+    # The count is unchanged, which is this release's contract.
+    assert result["summary"].startswith("4 of 5 months")
+    # And the reader is told where February actually is, in the same sentence.
+    assert "2024-01.csv also holds 2024-02" in result["summary"]
+
+    found = {c["file"]: c for c in result["name_vs_content"]}
+    assert found["2024-01.csv"]["also_holds"] == {"2024-02": 2}
+    assert found["2024-01.csv"]["rows_in_claimed_period"] == 2
+
+
+def test_a_file_holding_none_of_the_month_it_is_named_for_says_so(tmp_path: Path) -> None:
+    """The quiet direction: the count says complete and a month is genuinely absent."""
+    root = tmp_path / "mislabelled"
+    _dated(root, "2024-01.csv", "2024-01-05")
+    _dated(root, "2024-02.csv", "2024-02-05")
+    _dated(root, "2024-03.csv", "2024-02-11", "2024-02-19")
+
+    result = check_coverage(str(root))
+    assert result["summary"].startswith("3 of 3 months")
+    assert "2024-03.csv holds no 2024-03 rows at all" in result["summary"]
+    only = result["name_vs_content"][0]
+    assert only["rows_in_claimed_period"] == 0
+    assert only["kind"] == "content is not the period the name claims"
+
+
+def test_one_stray_row_from_the_next_month_is_not_a_warning(tmp_path: Path) -> None:
+    """A January report generated on the 1st of February carries one February timestamp.
+
+    Warning on that would bury the real merges under noise, so a period must hold at least a stated
+    share of the file's dated rows to be reported.
+    """
+    root = tmp_path / "noise"
+    _dated(root, "2024-01.csv", *(["2024-01-15"] * 200), "2024-02-01")
+    _dated(root, "2024-02.csv", "2024-02-07")
+    _dated(root, "2024-03.csv", "2024-03-07")
+
+    result = check_coverage(str(root))
+    assert result["name_vs_content"] == []
+    assert "disagree" not in result["summary"]
+
+
+def test_when_the_claim_cannot_be_tested_it_says_so_rather_than_passing_it(tmp_path: Path) -> None:
+    """Two ways a file gives no answer, and neither may be reported as agreement."""
+    plain = tmp_path / "nodate"
+    plain.mkdir()
+    for month in ("01", "02", "03"):
+        (plain / f"2024-{month}.csv").write_text("sku,amount\nA1,10\n", encoding="utf-8")
+    result = check_coverage(str(plain))
+    assert "content not checked in 3 files (no column in it reads as dates)" in result["summary"]
+    assert all(c["checked"] is False for c in result["name_vs_content"])
+
+    # Two date columns that disagree about the period: which one IS the period is a question about
+    # the caller's data, so it is named rather than picked.
+    clash = tmp_path / "clash"
+    clash.mkdir()
+    for month in ("01", "02", "03"):
+        (clash / f"2024-{month}.csv").write_text(
+            f"report_date,ingested_at,amount\n2024-{month}-05,2024-06-01,10\n", encoding="utf-8"
+        )
+    both = check_coverage(str(clash))
+    assert "date columns disagree about the period" in both["summary"]
+
+    # Columns that agree under the kind are not an ambiguity at all.
+    agree = tmp_path / "agree"
+    agree.mkdir()
+    for month in ("01", "02", "03"):
+        (agree / f"2024-{month}.csv").write_text(
+            f"report_date,created_at,amount\n2024-{month}-05,2024-{month}-06,10\n", encoding="utf-8"
+        )
+    assert check_coverage(str(agree))["name_vs_content"] == []
+
+
+def test_a_day_first_date_is_not_guessed_at(tmp_path: Path) -> None:
+    """`05/01/2024` is the 5th of January to half the world and the 1st of May to the other half.
+
+    A warning built on a coin flip is worse than no warning, so that shape is not a date column.
+    """
+    # Chosen so the two readings disagree and the guess would be visible: in a file named for MAY,
+    # `05/01/2024` is the 1st of May month-first (agrees with the name) and the 5th of January
+    # day-first (flatly contradicts it). Either guess produces a confident sentence; refusing to
+    # read the column produces an honest one.
+    root = tmp_path / "ambiguous"
+    root.mkdir()
+    for month in ("04", "05", "06"):
+        (root / f"2024-{month}.csv").write_text(
+            f"date,amount\n05/{month}/2024,10\n", encoding="utf-8"
+        )
+    result = check_coverage(str(root))
+    checks = result["name_vs_content"]
+    assert len(checks) == 3, "every file reports that its claim could not be tested"
+    assert all(c["checked"] is False for c in checks)
+    assert "no column in it reads as dates" in result["summary"]
+    assert "holds no" not in result["summary"], "a day-first guess would have said this"
+
+
+def test_the_counts_and_exit_codes_are_untouched_by_the_new_warning(short_folder: Path) -> None:
+    """The contract of this release: more is said, nothing is renumbered."""
+    for month in (1, 2, 4, 5, 6):
+        (short_folder / f"2024-{month:02d}.csv").write_text(
+            f"date,amount\n2024-{month:02d}-05,10\n", encoding="utf-8"
+        )
+    result = check_coverage(str(short_folder))
+    assert result["summary"].startswith("5 of 6 months")
+    assert result["complete"] is False
+    assert main(["check", str(short_folder)]) == 0
+
+
+def test_the_date_tally_never_reaches_the_committed_baseline(tmp_path: Path) -> None:
+    """`.assurance.json` lives in your repository, so what goes in it has to earn its place.
+
+    The tally is a count per distinct date per column. Five years of daily rows took a baseline
+    from a few hundred bytes to 57kB of dates. Dropping it on write alone was worse than keeping
+    it: every unchanged file then compared unequal to its own record and reported as changed, so
+    both sides go through the same filter.
+    """
+    import datetime
+
+    root = tmp_path / "daily"
+    root.mkdir()
+    start = datetime.date(2020, 1, 1)
+    (root / "2024-01.csv").write_text(
+        "\n".join(["date,amount"] + [f"{start + datetime.timedelta(days=i)},10" for i in range(1825)]),
+        encoding="utf-8",
+    )
+
+    init_baseline(str(root))
+    written = (root / BASELINE_NAME).read_text(encoding="utf-8")
+    assert "dates" not in written
+    assert len(written) < 5000, f"baseline is {len(written)} bytes"
+
+    # And an untouched folder still compares clean.
+    assert check_against_baseline(str(root))["ok"] is True

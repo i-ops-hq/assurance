@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -277,6 +278,7 @@ def check_coverage(
 
     # "could not be read as any of them" was reported as opaque on 2026-09-03: `them` has no
     # antecedent in a one-line summary. The unit is known here, so say it.
+    name_checks: list[dict[str, Any]] = []
     cov = Coverage(
         scope_label=scope,
         truncated=truncated,
@@ -303,6 +305,9 @@ def check_coverage(
             continue
 
         cov.found[key] = EvidenceRef(key=key, path=str(path), reader="assurance-cli")
+        verdict = _name_against_content(key, path, facts, kind)
+        if verdict is not None:
+            name_checks.append(verdict)
 
     # **A ratio nothing matched is not a ratio.** Found on real third-party data on 2026-09-03: a
     # folder of `Formula1_2022season_drivers.csv` files answered "0 of 36 months from 2019-01 to
@@ -374,11 +379,16 @@ def check_coverage(
 
     return {
         "folder": str(root),
-        "summary": summary + _not_opened_clause(indexed),
+        "summary": summary + _not_opened_clause(indexed) + _content_clause(name_checks),
         "complete": cov.complete and not unsound_range,
         "derivation": cov.derivation,
         "coverage": _coverage_to_dict(cov),
         "not_opened": _not_opened(indexed),
+        # The filename claim, tested against the rows. Reported beside the count and never folded
+        # into it: this release warns, it does not move the denominator. A reader who sees February
+        # named as missing AND named as present inside the January file has what they need to
+        # decide, which a silently changed number would not have given them.
+        "name_vs_content": name_checks,
     }
 
 
@@ -445,6 +455,132 @@ class _Indexed(NamedTuple):
     unread: list[str]
     skipped: list[str]
     skipped_total: int
+
+
+# --- does the file contain what its name claims? ----------------------------------------------
+
+
+def _period_key_for_date(when: date, kind: SeriesKind) -> str | None:
+    """The period key a calendar date falls in, under the kind being counted.
+
+    None for NUMBERED, where a run number is not a date and no honest mapping exists.
+    """
+    if kind is SeriesKind.MONTHLY:
+        return point_key(Period(year=when.year, month=when.month))
+    if kind is SeriesKind.QUARTERLY:
+        return point_key(QuarterlyPoint(year=when.year, quarter=(when.month - 1) // 3 + 1))
+    if kind is SeriesKind.WEEKLY:
+        iso = when.isocalendar()
+        return point_key(WeeklyPoint(year=iso[0], week=iso[1]))
+    if kind is SeriesKind.DAILY:
+        return point_key(DailyPoint(year=when.year, month=when.month, day=when.day))
+    return None
+
+
+#: An out-of-name period is reported when it holds at least this share of a file's dated rows. A
+#: January report generated on the 1st of February carries one February timestamp, and warning on
+#: that would bury the real merges. The number is stated in the output so a reader can disagree
+#: with it, and every warning carries its own row counts so the threshold is not load-bearing.
+CONTENT_SHARE_TO_REPORT = 0.05
+
+
+def _content_periods(facts: dict[str, Any], kind: SeriesKind) -> tuple[dict[str, int], str]:
+    """Period keys the file's own rows fall in, and why they could not be read when they could not.
+
+    Every column that reads as dates is considered. When several do and they agree on the periods
+    — `created_at` a day after `report_date`, both landing in the same month — either will do. When
+    they disagree, which one IS the period is a question about the caller's data that this command
+    cannot answer, so it says so instead of picking.
+    """
+    dates = (facts or {}).get("dates") or {}
+    columns = dates.get("columns") or {}
+    if not columns:
+        return {}, "no column in it reads as dates"
+
+    per_column: dict[str, dict[str, int]] = {}
+    for column, counted in columns.items():
+        tally: dict[str, int] = {}
+        for iso, n in counted.items():
+            try:
+                when = date.fromisoformat(iso)
+            except ValueError:
+                continue
+            key = _period_key_for_date(when, kind)
+            if key is None:
+                return {}, "a run number is not a date"
+            tally[key] = tally.get(key, 0) + int(n)
+        if tally:
+            per_column[column] = tally
+
+    if not per_column:
+        return {}, "no column in it reads as dates"
+    shapes = {frozenset(t) for t in per_column.values()}
+    if len(shapes) > 1:
+        names = ", ".join(sorted(per_column))
+        return {}, f"its date columns disagree about the period ({names})"
+    return next(iter(per_column.values())), ""
+
+
+def _name_against_content(
+    key: str, path: Path, facts: dict[str, Any], kind: SeriesKind
+) -> dict[str, Any] | None:
+    """One file's filename claim, tested against the rows just read from it."""
+    tally, why_not = _content_periods(facts, kind)
+    if not tally:
+        return {"file": path.name, "claims": key, "checked": False, "why": why_not}
+
+    total = sum(tally.values())
+    named = tally.get(key, 0)
+    elsewhere = {k: n for k, n in tally.items() if k != key and n >= max(1, total * CONTENT_SHARE_TO_REPORT)}
+    if not elsewhere and named:
+        return None
+    return {
+        "file": path.name,
+        "claims": key,
+        "checked": True,
+        "rows_dated": total,
+        "rows_in_claimed_period": named,
+        "also_holds": dict(sorted(elsewhere.items())),
+        "kind": "content is not the period the name claims" if not named else "content reaches past the name",
+    }
+
+
+
+def _content_clause(checks: list[dict[str, Any]]) -> str:
+    """The filename claims that did not survive contact with the file."""
+    if not checks:
+        return ""
+    disagreed = [c for c in checks if c.get("checked")]
+    unchecked = [c for c in checks if not c.get("checked")]
+    parts: list[str] = []
+    for c in disagreed[:3]:
+        also = ", ".join(f"{k} ({n} rows)" for k, n in (c.get("also_holds") or {}).items())
+        if not c.get("rows_in_claimed_period"):
+            parts.append(
+                f"{c['file']} holds no {c['claims']} rows at all — its {c['rows_dated']} dated "
+                f"rows are {also or 'elsewhere'}"
+            )
+        else:
+            parts.append(
+                f"{c['file']} also holds {also}, beside "
+                f"{c['rows_in_claimed_period']} for {c['claims']}"
+            )
+    if len(disagreed) > 3:
+        parts.append(f"and {len(disagreed) - 3} more")
+    out = ""
+    if parts:
+        out += (
+            " — the filenames and the rows inside them disagree: "
+            + "; ".join(parts)
+            + f". Counted from the names regardless, so these figures are unchanged; a period "
+            f"holding under {int(CONTENT_SHARE_TO_REPORT * 100)}% of a file's dated rows is not reported"
+        )
+    if unchecked:
+        why = unchecked[0].get("why") or "it could not be read as dates"
+        out += (
+            f" — content not checked in {_file_count(len(unchecked))} ({why})"
+        )
+    return out
 
 
 def _indexed_files(root: Path) -> _Indexed:
