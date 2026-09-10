@@ -530,9 +530,11 @@ def _not_opened_clause(indexed: _Indexed) -> str:
         return ""
     shown = ", ".join(indexed.skipped[:3])
     more = " and more" if indexed.skipped_total > 3 else ""
+    # Not "because of the extension": a `._2024-03.csv` sidecar IS a .csv and was skipped for being
+    # hidden. The clause names both reasons rather than asserting the one that is usually true.
     return (
         f" — {_file_count(indexed.skipped_total)} not opened ({shown}{more}); "
-        f"assurance check reads {readable_kinds()}"
+        f"assurance check reads {readable_kinds()} and skips hidden files"
     )
 
 
