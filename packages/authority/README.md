@@ -1,8 +1,8 @@
 # assurance-authority
 
-[![tests](https://github.com/i-ops-hq/assurance-authority/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance-authority/actions/workflows/tests.yml)
+[![tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
 [![PyPI](https://img.shields.io/pypi/v/assurance-authority)](https://pypi.org/project/assurance-authority/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance-authority/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance/blob/main/LICENSE)
 
 ## An agent must not become a way to read things you cannot read
 

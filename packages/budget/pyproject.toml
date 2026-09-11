@@ -31,7 +31,7 @@ dev = ["pytest>=8.0", "mypy>=1.0"]
 assurance-budget = "assurance_budget.cli:main"
 
 [project.urls]
-Source = "https://github.com/i-ops-hq/assurance-budget"
+Source = "https://github.com/i-ops-hq/assurance"
 
 [tool.setuptools.packages.find]
 include = ["assurance_budget*"]

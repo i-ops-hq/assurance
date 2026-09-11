@@ -1,14 +1,15 @@
 # assurance-deps
 
-**`pip install` is permission to execute arbitrary code on your machine, and almost nothing looks at
-that code first.** This looks at it.
+**`pip install` and `npm install` are permission to execute arbitrary code on your machine, and
+almost nothing looks at that code first.** This looks at it.
 
 ```
 $ assurance deps requirements.txt
 
-requirements.txt — 12 requirements, 9 read
+requirements.txt — 12 requirements, 9 read in full
+Counted over the 12 requirements in requirements.txt.
 
-Could not be examined (3):
+Could not be examined at all (3):
   · torch                  no archive for it under /srv/app and the network was never opened
   · internal-utils         a local path (../internal-utils), which is a working tree rather than an archive
   · pyyaml                 a git URL, so there is no archive on this machine to read
@@ -30,6 +31,33 @@ This says what an install will run, not whether running it is acceptable — tha
 Nothing here was executed, no advisory database was consulted, and the network was never opened.
 ```
 
+## npm, where it matters most
+
+`preinstall`, `install` and `postinstall` are arbitrary shell that `npm install` runs on your
+machine, and `npx` runs a package before anyone has looked at anything at all.
+
+```
+$ assurance deps package.json
+
+package.json — 28 packages, 3 read in full
+Counted over the 28 packages the lockfile resolves to.
+
+25 known from the lockfile only — it records whether each has an install script, not what the script does:
+  · none of them declares one
+
+Of the 3 read, 1 executes code when installed:
+  · esbuild 0.28.2   node install.js
+
+Against package-lock.json: the same set of names, so the lock is not stale.
+```
+
+**The lockfile is the best evidence there is, and it needs no archives.** npm records
+`hasInstallScript` for every package in the resolved tree, so "what will run code" is answerable for
+the whole transitive tree offline. `node_modules` then supplies the script bodies for whatever is
+installed, and the two are counted apart — knowing a package *has* an install script is not the same
+as having read it. `prepare` is on the list too, which is the one people forget: it runs on `npm ci`
+and on every git dependency.
+
 ## The part that is not a feature
 
 **It reports what it could NOT check, first, and at the same weight as what it did.**
@@ -48,6 +76,9 @@ Four checks, all of them offline, none of them consulting a model or a database.
 | native payloads | whether a compiled binary ships inside — `.so`, `.dylib`, `.dll`, `.node`, `.pyd` |
 | non-registry sources | git URLs, direct archive URLs and local paths, where a version number is not a version |
 | transitive delta | what a committed lockfile holds that the manifest never asked for |
+
+Python reads `requirements.txt` plus any archives you have downloaded. npm reads `package.json`,
+`package-lock.json` and `node_modules`.
 
 It also names `.pth` files, which the interpreter executes on every start, long after any
 install-time check has finished.
@@ -93,7 +124,7 @@ assert [r.name for r in report.off_index] == ["thing"]
 assert "not pinned to a commit" in report.off_index[0].note
 
 text = format_report(report)
-assert "Could not be examined (2)" in text
+assert "Could not be examined at all (2)" in text
 assert "This is silence, not a pass." in text
 
 payload = report_to_dict(report)
@@ -132,8 +163,8 @@ which is how a gate becomes a line in a CI file everybody has learned to ignore.
 
 ## Scope
 
-Python and offline. npm is next, and it is where the pain is loudest. Registry checks (publisher
-changes, release age, name distance against popular packages) need a network and are not here.
-Running an install under observation is a different promise and is not implied by this one.
+Python and npm, both offline. Registry checks — publisher changes, release age, name distance
+against popular packages — need a network and are not here. Running an install under observation is
+a different promise and is not implied by this one.
 
 Apache-2.0. Part of [assurance](https://github.com/i-ops-hq/assurance).
