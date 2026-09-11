@@ -3,6 +3,8 @@
 - **Requires `assurance-core>=0.13.2`.** No code change here. The floor moves because the tree these
   tests run against is that version, and a declared floor that is lower than the one the tests
   actually proved is a claim nothing checked.
+- Links and badges point at `i-ops-hq/assurance`. The standalone repo is private now, and a live
+  package whose Source link 404s is the shape of thing `assurance-deps` reports.
 
 # 0.1.2
 
