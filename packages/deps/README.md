@@ -136,6 +136,20 @@ assert payload["claims"] == {
 }
 ```
 
+## The attack these four checks cannot see
+
+Offline is a real constraint and not only a virtue. AI coding tools recommend package names that do
+not exist, the same invented name tends to recur across runs rather than being random, and an
+attacker only has to register one and wait. **A package arriving that way is new by definition.**
+
+Publish date is the signal, and reading it needs a registry, which needs a network, which this does
+not open. So a name that appeared last week and one that has been on the index for a decade are
+indistinguishable here. The report says so in its own closing lines rather than leaving you to
+notice.
+
+None of the four checks is a substitute. A fabricated package that simply exfiltrates on import,
+with no install hook and no compiled payload, passes all of them.
+
 ## What it will not say
 
 - **Not "safe".** It reports what a package will execute. Whether that is acceptable is your call,

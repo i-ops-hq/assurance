@@ -164,3 +164,20 @@ def test_the_counting_sentences_agree_with_their_verbs(tmp_path: Path) -> None:
     (tmp_path / "requirements.txt").write_text("absent==1.0\n", encoding="utf-8")
     text = format_report(scan_manifest(tmp_path / "requirements.txt"))
     assert "1 requirement, 0 read" in text
+
+
+def test_the_report_names_the_attack_it_structurally_cannot_see(tmp_path: Path) -> None:
+    """A blind spot one level above the coverage line, and it must not quietly disappear.
+
+    The four checks are offline, and a slopsquatted package — an invented name somebody registered
+    after an AI recommended it — is new by definition. Publish date is the signal for that and
+    needs a registry. Saying "the network was never opened" states a fact and leaves the reader to
+    draw the consequence; the consequence is the part that matters.
+    """
+    (tmp_path / "requirements.txt").write_text("alpha==1.0\n", encoding="utf-8")
+    text = format_report(scan_manifest(tmp_path / "requirements.txt"))
+    assert "Not looked for: how new any of this is" in text
+    assert "publish date" in text
+    # Still an observation about this tool's coverage, never advice about a package.
+    for advice in ("you should", "we recommend", "do not install", "remove "):
+        assert advice not in text.lower()
