@@ -34,12 +34,31 @@ def format_report(report: Report) -> str:
     if not total:
         return f"{report.manifest.name} lists no requirements.\n"
 
-    lines.append(f"{report.manifest.name} — {_plural(total, 'requirement', 'requirements')}, {examined} read")
+    unit = report.unit
+    lines.append(f"{report.manifest.name} — {_plural(total, unit, unit + 's')}, {examined} read in full")
+    if report.scope_note:
+        lines.append(f"Counted over {report.scope_note}.")
     lines.append("")
+
+    # A lockfile flag answers "does this run code" and nothing else. Counting it as read would be
+    # claiming coverage of contents nobody opened.
+    if report.partial:
+        with_scripts = [e for e in report.partial if e.runs_at_install]
+        lines.append(
+            f"{len(report.partial)} known from the lockfile only — it records whether each has an "
+            "install script, not what the script does:"
+        )
+        for known in with_scripts[:_SHOWN]:
+            lines.append(f"  · {known.name} {known.version}".rstrip() + "   declares an install script")
+        if not with_scripts:
+            lines.append("  · none of them declares one")
+        elif len(with_scripts) > _SHOWN:
+            lines.append(f"  · and {len(with_scripts) - _SHOWN} more that declare one")
+        lines.append("")
 
     # --- what could not be checked, first and at the same weight as what was ---
     if report.unexamined:
-        lines.append(f"Could not be examined ({len(report.unexamined)}):")
+        lines.append(f"Could not be examined at all ({len(report.unexamined)}):")
         for gap in report.unexamined[:_SHOWN]:
             lines.append(f"  · {gap.name:<22} {gap.why}")
         if len(report.unexamined) > _SHOWN:
@@ -148,6 +167,10 @@ def report_to_dict(report: Report) -> dict[str, Any]:
         "read": report.examined,
         "complete": report.complete,
         "unexamined": [{"name": u.name, "why": u.why} for u in report.unexamined],
+        "lockfile_only": [
+            {"name": e.name, "version": e.version, "declares_install_script": e.runs_at_install}
+            for e in report.partial
+        ],
         "runs_at_install": [
             {
                 "name": e.name,

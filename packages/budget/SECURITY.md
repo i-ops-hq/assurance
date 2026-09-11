@@ -2,7 +2,7 @@
 
 ## Reporting
 
-Open a [security advisory](https://github.com/i-ops-hq/assurance-budget/security/advisories/new).
+Open a [security advisory](https://github.com/i-ops-hq/assurance/security/advisories/new).
 Please do not open a public issue for a vulnerability.
 
 ## What this package does and does not do

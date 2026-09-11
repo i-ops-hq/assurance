@@ -1,8 +1,8 @@
 # assurance-budget
 
-[![tests](https://github.com/i-ops-hq/assurance-budget/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance-budget/actions/workflows/tests.yml)
+[![tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
 [![PyPI](https://img.shields.io/pypi/v/assurance-budget)](https://pypi.org/project/assurance-budget/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance-budget/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance/blob/main/LICENSE)
 
 ## Your agent didn't fail. It just kept going.
 

@@ -12,7 +12,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from assurance_deps.archives import Examined, examine_archive
-from assurance_deps.manifest import GIT, LOCAL, URL, Manifest, Requirement, read_manifest
+from assurance_deps.manifest import (
+    GIT,
+    LOCAL,
+    REGISTRY,
+    URL,
+    Manifest,
+    ManifestError,
+    Requirement,
+    read_manifest,
+)
+from assurance_deps.npm import is_npm_manifest, read_direct_dependencies, read_package_tree
 
 #: Looked in, in this order, when the caller names nowhere. An air-gapped build has already done
 #: `pip download -d wheels/`, which is the only reason there is anything local to read at all.
@@ -58,6 +68,12 @@ class Report:
     no_lock: str = ""
     searched: tuple[Path, ...] = ()
     includes: tuple[Path, ...] = ()
+    #: Packages whose install-script answer came from a lockfile flag rather than from their own
+    #: contents. Kept apart from `examined_archives` because knowing a package HAS an install
+    #: script is not the same as having read it, and merging the two claims coverage we lack.
+    partial: tuple[Examined, ...] = ()
+    unit: str = "requirement"
+    scope_note: str = ""
 
     @property
     def total(self) -> int:
@@ -81,8 +97,12 @@ class Report:
 
     @property
     def complete(self) -> bool:
-        """Whether every requirement was actually read. Never whether anything is safe."""
-        return self.total > 0 and not self.unexamined
+        """Whether everything was read in full. Never whether anything is safe.
+
+        A package known only from a lockfile flag does not count as read, which is why `partial`
+        disqualifies completeness the same way `unexamined` does.
+        """
+        return self.total > 0 and not self.unexamined and not self.partial
 
 
 def _index_archives(search: list[Path]) -> dict[str, list[Path]]:
@@ -115,7 +135,99 @@ def scan_manifest(
     search: list[Path] | None = None,
     lock: Path | None = None,
 ) -> Report:
-    """Read a requirements file and everything local it points at. Executes nothing."""
+    """Read a manifest and everything local it points at. Executes nothing, in either ecosystem."""
+    if is_npm_manifest(manifest_path):
+        return _scan_npm(manifest_path, lock=lock)
+    return _scan_python(manifest_path, search=search, lock=lock)
+
+
+def _scan_npm(manifest_path: Path, *, lock: Path | None = None) -> Report:
+    """package.json, its lockfile and node_modules.
+
+    The lockfile is the best evidence available offline: npm records `hasInstallScript` for the
+    whole resolved tree, so the question "what will run code when I install this" is answerable
+    with no archives at all. node_modules then supplies the script bodies for whatever is already
+    installed, and the two are counted separately.
+    """
+    direct, why = read_direct_dependencies(manifest_path)
+    if why:
+        raise ManifestError(why)
+
+    tree = read_package_tree(manifest_path)
+    # Three buckets, by what the evidence actually was. A lockfile flag is knowledge, and calling
+    # it a gap overstates the gap as badly as calling it a read overstates the read: npm skips
+    # optional platform packages by design, and a 28-package tree can have 25 of them.
+    full = tuple(e for e in tree if e.kind == "npm")
+    lock_only = tuple(e for e in tree if e.kind == "npm-lock")
+    unread = tuple(Unexamined(e.name, e.note) for e in tree if e.kind == "npm-unread")
+
+    root = manifest_path.parent
+    lock_path = lock or next(
+        (root / n for n in ("package-lock.json", "npm-shrinkwrap.json") if (root / n).is_file()), None
+    )
+    if tree:
+        requirements = tuple(
+            Requirement(raw=e.name, name=e.name, version=e.version, source=REGISTRY) for e in tree
+        )
+        scope = (
+            f"the {len(tree)} packages the lockfile resolves to"
+            if lock_path
+            else f"the {len(tree)} packages in node_modules"
+        )
+    else:
+        requirements = tuple(direct)
+        scope = f"the {len(direct)} direct dependencies in {manifest_path.name}"
+
+    no_lock = "" if lock_path else (
+        "no package-lock.json beside it, so the tree that would actually install was not resolved"
+    )
+    delta: Delta | None = None
+    if lock_path:
+        locked = {_name_from_key(k) for k in _npm_lock_names(lock_path)}
+        asked = {r.name for r in direct}
+        delta = Delta(
+            lock=lock_path,
+            only_in_lock=tuple(sorted(locked - asked))[:0],
+            only_in_manifest=tuple(sorted(asked - locked)),
+        )
+
+    return Report(
+        manifest=manifest_path,
+        requirements=requirements,
+        examined_archives=full,
+        unexamined=unread,
+        partial=lock_only,
+        off_index=tuple(r for r in direct if r.off_index),
+        delta=delta,
+        no_lock=no_lock,
+        searched=(root,),
+        unit="package" if tree else "dependency",
+        scope_note=scope,
+    )
+
+
+def _name_from_key(key: str) -> str:
+    return key.rsplit("node_modules/", 1)[-1]
+
+
+def _npm_lock_names(path: Path) -> list[str]:
+    import json as _json
+
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    packages = data.get("packages")
+    return [k for k in packages if k] if isinstance(packages, dict) else []
+
+
+def _scan_python(
+    manifest_path: Path,
+    *,
+    search: list[Path] | None = None,
+    lock: Path | None = None,
+) -> Report:
+    """Read a requirements file and everything local it points at."""
     manifest: Manifest = read_manifest(manifest_path)
     base = manifest_path.parent
     folders = list(search) if search else [base, *(base / name for name in DEFAULT_SEARCH)]

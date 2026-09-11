@@ -31,7 +31,7 @@ dev = ["pytest>=8.0", "mypy>=1.0"]
 assurance-authority = "assurance_authority.cli:main"
 
 [project.urls]
-Source = "https://github.com/i-ops-hq/assurance-authority"
+Source = "https://github.com/i-ops-hq/assurance"
 
 [tool.setuptools.packages.find]
 include = ["assurance_authority*"]
