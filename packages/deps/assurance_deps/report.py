@@ -22,6 +22,22 @@ from assurance_deps.scan import Report
 _SHOWN = 8
 
 
+def wrap(text: str, width: int = 88) -> str:
+    """Soft-wrapped so a paragraph is readable in a terminal rather than one long line."""
+    words = text.split()
+    lines: list[str] = []
+    line = ""
+    for word in words:
+        if line and len(line) + 1 + len(word) > width:
+            lines.append(line)
+            line = word
+        else:
+            line = f"{line} {word}" if line else word
+    if line:
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _plural(n: int, one: str, many: str) -> str:
     return f"{n} {one}" if n == 1 else f"{n} {many}"
 
@@ -155,6 +171,20 @@ def format_report(report: Report) -> str:
         "This says what an install will run, not whether running it is acceptable — that is your "
         "call. Nothing here was executed, no advisory database was consulted, and the network was "
         "never opened."
+    )
+    # The blind spot one level up from the coverage line: not a package these checks could not
+    # read, but a whole class of attack they structurally cannot see. Saying "the network was never
+    # opened" states a fact and leaves the reader to draw the consequence, and the consequence is
+    # the part that matters.
+    lines.append("")
+    lines.append(
+        wrap(
+            "Not looked for: how new any of this is. A package name an AI invented and somebody "
+            "then registered is new by definition, and nothing here reads a publish date — so a "
+            "name that appeared last week and one that has been on the index for a decade look "
+            "identical to these four checks.",
+            88,
+        )
     )
     return "\n".join(lines) + "\n"
 

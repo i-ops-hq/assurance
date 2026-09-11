@@ -1,3 +1,25 @@
+# 0.2.1
+
+**Says what these four checks structurally cannot see.** They are offline, and offline is a real
+constraint and not only a virtue.
+
+AI coding tools recommend package names that do not exist, the same invented name tends to recur
+across runs rather than being random, and an attacker only has to register one and wait — the victim
+is then pointed at it by their own assistant. **A package arriving that way is new by definition.**
+Publish date is the signal, reading it needs a registry, and this never opens the network. So a name
+that appeared last week and one that has been on the index for a decade are identical to these four
+checks, and a fabricated package that simply exfiltrates on import — no install hook, no compiled
+payload — passes all of them.
+
+The report said *"the network was never opened"*, which states a fact and leaves the reader to draw
+the consequence. The consequence is the part that matters, so it is stated. **This is the coverage
+line one level up**: not a package these checks could not read, but a class of attack they cannot
+see, and the blind spot belongs to the design rather than to a single run.
+
+Still an observation about this tool's own coverage, never advice about a package. Whether to open
+the network for a release-age check is undecided, and a half-built one would be worse than the
+sentence.
+
 # 0.2.0
 
 **The npm half.** `assurance deps package.json` reads `package.json`, the lockfile and
