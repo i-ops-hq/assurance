@@ -1,8 +1,23 @@
 # 0.1.3
 
-- **Requires `assurance-core>=0.13.2`.** No code change here. The floor moves because the tree these
-  tests run against is that version, and a declared floor that is lower than the one the tests
-  actually proved is a claim nothing checked.
+- **`--example` runs the whole thing with no file at all.** This package needed a declaration of
+  your own principals hand-authored before anything happened, which is `INBOUND_LEDGER` row 2 stated
+  precisely: *the open repo has no reason to be installed*. `assurance check` reads a folder you
+  already have and `assurance deps` reads a manifest you already have; this one had nothing to point
+  at. Having nothing to point a tool at is a worse first run than a wrong answer, because a wrong
+  answer at least shows you what the tool does.
+- **`--example --write team.json`** saves the declaration that produced that output so it can become
+  yours, and refuses to overwrite a file already there — by the second run that file is the reader's
+  and a starter template that eats it is worse than none.
+- The example produces all three outcomes on purpose. One where everything proceeds would teach that
+  this is an access-control library, and the middle outcome is the entire point.
+- **The table's columns are derived rather than hardcoded.** The initiator column was a fixed 12,
+  which every id in the README happened to fit and `drafting-agent` does not. Same shape as the
+  hand-copied counts this project already gates, one column over. Trailing whitespace gone with it.
+- Links and badges point at `i-ops-hq/assurance`. The standalone repo is private now, and a live
+  package whose Source link 404s is the shape of thing `assurance-deps` reports.
+- **Requires `assurance-core>=0.13.2`**, which is the version this tree tests against. A declared
+  floor lower than the one the tests proved is a claim nothing checked.
 
 # 0.1.2
 

@@ -18,20 +18,36 @@ Only the last two are acceptable, and the rule that separates them is one functi
 
 This package makes that rule runnable against your own people and your own tasks.
 
-## What it looks like on a real team
+## Try it before you write anything
+
+You need a declaration of your own principals before this can say anything about your team, and
+having nothing to point a tool at is a worse first run than a wrong answer. So there is one that
+needs no file:
+
+```bash
+pip install assurance-authority
+assurance-authority --example
+```
 
 Real output, one declaration, three outcomes — and the middle one is the whole product.
 
 ```
-$ assurance-authority team.json
 1 of 3 tasks may proceed for the person who asked — 1 moved owner — 1 refused
 
-  team roster      intern-42    proceed
-  Q3 margin memo   intern-42    escalate_ownership -> CFO
-      Priya (intern) may not receive finance-confidential, and CFO may. The task moves to
-      CFO rather than the answer moving to Priya (intern).
-  payroll extract  agent-a      refuse
+  team roster      priya           proceed
+  Q3 margin memo   priya           escalate_ownership  -> CFO
+      Priya (intern) may not receive finance-confidential, and CFO may. The task moves to CFO
+      rather than the answer moving to Priya (intern).
+  payroll extract  drafting-agent  refuse
       Drafting agent may not receive payroll, and nobody offered can. The task stops here.
+```
+
+Then make it yours. This writes the declaration that produced the output above, and refuses to
+overwrite anything already there:
+
+```bash
+assurance-authority --example --write team.json
+assurance-authority team.json
 ```
 
 **The intern asks for a margin memo.** She may not have it; the CFO may. So the *task* moves to the
