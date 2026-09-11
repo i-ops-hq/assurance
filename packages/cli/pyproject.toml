@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-cli"
-version = "0.5.9"
+version = "0.5.10"
 description = "CLI for folder assurance checks — coverage, staleness, and baselines."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -34,9 +34,16 @@ Source = "https://github.com/i-ops-hq/assurance"
 [project.optional-dependencies]
 mcp = ["mcp>=1.27.0,<3"]
 dev = ["pytest>=8.0", "mypy>=1.0", "types-openpyxl"]
+deps = ["assurance-deps>=0.1.0"]
 
 [tool.mypy]
 strict = true
+
+# assurance-deps is an optional extra, so it is legitimately absent from a default install and
+# mypy is told so rather than the import being silenced at the call site.
+[[tool.mypy.overrides]]
+module = ["assurance_deps.*"]
+ignore_missing_imports = true
 mypy_path = "$MYPY_CONFIG_FILE_DIR/../assurance-core"
 
 [[tool.mypy.overrides]]

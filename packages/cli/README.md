@@ -127,11 +127,15 @@ allowed. It's reported, and it earns no credit.
 
 No account · no API key · no network call · **no model decides any of it**
 
-## Five commands
+## Six commands
 
 **`diff` is the general one.** `check` is the special case for a folder of
 dated or numbered *tabular* files — if your files are `.md`, or named in a format it can't read, use
 `diff` and declare the set yourself.
+
+**`deps` answers a different question** — what a `pip install` is about to execute, read without
+executing it. It ships separately because most people want the coverage commands and not the
+dependency gate: `pip install 'assurance-cli[deps]'`, then `assurance deps requirements.txt`.
 
 ### `assurance pin` — did an MCP server change what it tells the model?
 
