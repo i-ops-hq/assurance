@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assurance-deps"
+version = "0.1.0"
+description = "What a Python install is about to execute, read without executing it — and what could not be read."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["supply-chain", "dependencies", "security", "pip", "assurance", "sbom"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+  "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "mypy>=1.0"]
+
+[project.scripts]
+assurance-deps = "assurance_deps.cli:main"
+
+[project.urls]
+Source = "https://github.com/i-ops-hq/assurance"
+
+[tool.setuptools.packages.find]
+include = ["assurance_deps*"]
+
+[tool.setuptools.package-data]
+assurance_deps = ["py.typed"]
+
+[tool.mypy]
+strict = true

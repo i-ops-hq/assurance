@@ -1,3 +1,14 @@
+# 0.5.10
+
+- **`assurance deps` is a sixth command**, a door onto the new `assurance-deps` package: what a
+  Python install is about to execute, read without executing it. It ships separately because most
+  people want the coverage commands and not the dependency gate —
+  `pip install 'assurance-cli[deps]'` — and an install that never asked for it keeps working.
+- The whole tail is forwarded rather than re-declared, so there is no second copy of those flags
+  here to drift from the ones that own them. It is short-circuited before argparse, because
+  argparse claims `--help` for the top-level parser whatever a `REMAINDER` positional says, and
+  `assurance deps --help` printed the wrong usage and then called the flag unrecognised.
+
 # 0.5.9
 
 **The filename is a claim about the file, and until now nothing tested it.**

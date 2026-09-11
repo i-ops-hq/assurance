@@ -8,3 +8,4 @@ build/
 
 # Written by `assurance pin --save`; never this repo's own, and tests must not create it.
 .assurance/
+.mypy_cache/

@@ -1,3 +1,8 @@
+# 0.4.7
+
+- **Requires `assurance-cli>=0.5.10`.** No code change here; the floor moves because that is the
+  version this tree tests against, and it is where `assurance deps` appears.
+
 # 0.4.6
 
 - **Requires `assurance-cli>=0.5.9`.** No code change here. `check_coverage_tool` returns the new

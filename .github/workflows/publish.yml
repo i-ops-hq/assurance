@@ -19,7 +19,7 @@ name: publish
 
 on:
   push:
-    tags: ["core-v*", "cli-v*", "mcp-v*", "budget-v*", "authority-v*"]
+    tags: ["core-v*", "cli-v*", "mcp-v*", "budget-v*", "authority-v*", "deps-v*"]
   workflow_dispatch:
 
 jobs:
@@ -41,8 +41,8 @@ jobs:
         run: |
           PKG="${GITHUB_REF_NAME%%-v*}"
           case "$PKG" in
-            core|cli|mcp|budget|authority) ;;
-            *) echo "::error::Tag $GITHUB_REF_NAME names no package. Use core-vX.Y.Z, cli-vX.Y.Z, mcp-vX.Y.Z, budget-vX.Y.Z or authority-vX.Y.Z."; exit 1 ;;
+            core|cli|mcp|budget|authority|deps) ;;
+            *) echo "::error::Tag $GITHUB_REF_NAME names no package. Use core-vX.Y.Z, cli-vX.Y.Z, mcp-vX.Y.Z, budget-vX.Y.Z, authority-vX.Y.Z or deps-vX.Y.Z."; exit 1 ;;
           esac
           echo "pkg=$PKG" >> "$GITHUB_OUTPUT"
           echo "dist=assurance-$PKG" >> "$GITHUB_OUTPUT"

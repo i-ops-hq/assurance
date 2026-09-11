@@ -782,3 +782,23 @@ def test_the_date_tally_never_reaches_the_committed_baseline(tmp_path: Path) -> 
 
     # And an untouched folder still compares clean.
     assert check_against_baseline(str(root))["ok"] is True
+
+
+def test_the_deps_subcommand_forwards_whole_and_says_how_to_get_it(tmp_path: Path, capsys) -> None:
+    """`assurance deps` is a door onto assurance-deps, which ships separately.
+
+    Forwarded rather than re-declared: a second copy of its flags here is the drift this repo has
+    two gates about. Short-circuited before argparse, because argparse claims `--help` for the top
+    parser no matter what a REMAINDER positional says.
+    """
+    manifest = tmp_path / "requirements.txt"
+    manifest.write_text("alpha==1.0\n", encoding="utf-8")
+
+    code = main(["deps", str(manifest), "--json"])
+    out = capsys.readouterr()
+    if code == 2 and "pip install" in out.err:
+        pytest.skip("assurance-deps is not installed in this environment, which is the other path")
+    assert code == 1, out.out + out.err
+    payload = json.loads(out.out)
+    assert payload["requirements"] == 1
+    assert payload["claims"]["executed_anything"] is False

@@ -17,6 +17,14 @@ from assurance_cli.setdiff import KeySpecError, diff_sets, format_diff
 
 def main(argv: list[str] | None = None) -> int:
     """Command-line entry for assurance checks."""
+    # `deps` is forwarded whole, before argparse sees any of it. argparse claims `--help` for the
+    # top-level parser no matter what a REMAINDER positional says, so `assurance deps --help`
+    # printed this parser's usage and then called the flag unrecognised. Short-circuiting keeps
+    # the tail exactly as typed, which is the point of forwarding rather than re-declaring.
+    tail = list(sys.argv[1:] if argv is None else argv)
+    if tail[:1] == ["deps"]:
+        return _run_deps(tail[1:])
+
     parser = argparse.ArgumentParser(
         prog="assurance",
         description=(
@@ -119,6 +127,19 @@ def main(argv: list[str] | None = None) -> int:
     drift_parser.add_argument("--seed", type=int, default=20260823)
     drift_parser.add_argument("--json", action="store_true", dest="as_json")
 
+    # Forwarded verbatim rather than re-declared. assurance-deps owns its own flags, and a second
+    # copy of them here is the drift this repo has two gates about already.
+    deps_parser = sub.add_parser(
+        "deps",
+        help="What a Python install is about to execute, read without executing it",
+        description=(
+            "Reads install hooks, compiled payloads, off-index sources and a lockfile delta, "
+            "offline. Needs assurance-deps: pip install 'assurance-cli[deps]'."
+        ),
+        add_help=False,
+    )
+    deps_parser.add_argument("deps_args", nargs=argparse.REMAINDER, help="Passed through to assurance-deps")
+
     args = parser.parse_args(argv)
 
     try:
@@ -154,6 +175,26 @@ def main(argv: list[str] | None = None) -> int:
         return _emit({"error": str(exc)}, args, code=2)
     except (PathEscapeError, FileNotFoundError, NotADirectoryError) as exc:
         return _emit({"error": str(exc)}, args if args.command in ("check", "diff") else argparse.Namespace(as_json=False), code=2)
+
+
+
+def _run_deps(forwarded: list[str]) -> int:
+    """Hand the whole tail to assurance-deps, or say how to get it.
+
+    Imported here and not at module scope so `assurance check` keeps working on an install that
+    never asked for the dependency gate. Same shape as the mcp extra: an absent optional package is
+    a "could not run", which the exit table puts at 2.
+    """
+    try:
+        from assurance_deps.cli import main as deps_main
+    except ImportError:
+        print(
+            "assurance deps needs the assurance-deps package:\n"
+            "    pip install 'assurance-cli[deps]'",
+            file=sys.stderr,
+        )
+        return 2
+    return int(deps_main(list(forwarded)))
 
 
 def _run_diff(args: argparse.Namespace) -> int:
