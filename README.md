@@ -93,24 +93,26 @@ account and handing her the answer is a permission-laundering machine with your 
 folder it did not understand is worse than one that says it does not know, because you cannot argue
 with a number that was made up.
 
-## All five packages
+## All six packages
 
 The three commands above are the way in. These are the parts they are made of, each installable on
-its own and versioned on its own — a release tag names its package (`cli-v0.5.1`), because a bare
-version number is ambiguous between five.
+its own and versioned on its own — a release tag names its package (`cli-v0.5.10`), because a bare
+version number is ambiguous between six.
 
 | package | what it is |
 |---|---|
 | [`assurance-core`](packages/core) | the decision layer as a pure library — no I/O, no model, no framework. Coverage, corpus census, staleness, drift, tool pinning, the rule of two |
-| [`assurance-cli`](packages/cli) | five commands, each a CI gate: `check`, `diff`, `pin`, `drift`, `init` |
+| [`assurance-cli`](packages/cli) | six commands, each a CI gate: `check`, `diff`, `pin`, `drift`, `deps`, `init` |
 | [`assurance-mcp`](packages/mcp) | four MCP tools, read-only by construction, for Cursor / Claude Desktop / any MCP client |
+| [`assurance-deps`](packages/deps) | what a `pip install` or `npm install` is about to execute, read without executing it — and what could not be read |
 | [`assurance-budget`](packages/budget) | where a run spent, and where it went nowhere. Ceilings a caller cannot raise |
 | [`assurance-authority`](packages/authority) | whether a task may proceed for the person who asked, and what happens when it may not |
 
 `budget` and `authority` had their own repositories until 2026-09-09. One package per repository
 meant a reader had to find four front doors and work out how they related before anything happened,
-which is the opposite of the point. Their history is on the archived remotes; their PyPI names never
-changed.
+which is the opposite of the point. **Those repositories are private as of 2026-09-11**, so their old
+URLs no longer resolve — the history and the releases are here and on PyPI, and every PyPI name is
+unchanged.
 
 Two more worth knowing about once you are past the first command:
 
