@@ -129,9 +129,12 @@ def test_the_derivation_says_the_range_was_inferred_and_why_it_proceeded(tmp_pat
     result = check_coverage(str(_months(tmp_path, "2026-01", "2026-02", "2026-04")))
     derivation = result["derivation"]
 
-    assert "inferred from the filenames" in derivation
-    assert "spacing is uneven" in derivation, "the reader has to know no cadence was detected"
+    assert "Range inferred from filenames" in derivation
+    assert "uneven spacing" in derivation, "the reader has to know no cadence was detected"
     assert "--expect" in derivation, "and how to override the inference"
+    # It is copied onto every enumerated period, so length is a real cost: a five-year folder
+    # carries sixty of it. The detected-series derivation it sits beside is 93 characters.
+    assert len(derivation) < 200, f"{len(derivation)} chars, repeated once per period"
 
 
 def test_the_gap_is_a_gap_under_fail_on_gap(tmp_path: Path) -> None:
@@ -145,7 +148,7 @@ def test_a_complete_series_is_unchanged(tmp_path: Path) -> None:
     """The detected path still runs first, and still wins, when there is a cadence to detect."""
     result = check_coverage(str(_months(tmp_path, "2026-01", "2026-02", "2026-03", "2026-04")))
     assert "4 of 4 months" in result["summary"]
-    assert "spacing is uneven" not in result["derivation"], "nothing was inferred; a cadence was read"
+    assert "uneven spacing" not in result["derivation"], "nothing was inferred; a cadence was read"
 
 
 def test_a_numbered_series_with_a_hole_works_the_same_way(tmp_path: Path) -> None:

@@ -254,12 +254,14 @@ def check_coverage(
         )
     elif gapped is not None:
         expected_keys = enumerate_between(gapped.earliest, gapped.latest)
+        # Kept close to `inference_derivation`'s length on purpose: this string is copied onto
+        # every enumerated period as its `why`, so a sentence three times longer is three times
+        # longer sixty times over on a five-year folder. The count it used to repeat here is
+        # already the first thing the summary says.
         derivation = (
-            f"Range inferred from the filenames: earliest {point_key(gapped.earliest)}, latest "
-            f"{point_key(gapped.latest)}. Their spacing is uneven, so no cadence was detected; "
-            f"{kind.value} was read from the shape of the names themselves, and "
-            f"{gapped.present} of the {gapped.span} {unit} in that range are present, so the "
-            "absences are reported as gaps rather than refused. Override with --expect / --from / --to."
+            f"Range inferred from filenames: earliest {point_key(gapped.earliest)}, latest "
+            f"{point_key(gapped.latest)} — uneven spacing, so {kind.value} was read from the names "
+            "rather than detected. Override with --expect / --from / --to."
         )
         inferred_range = True
         scope = (

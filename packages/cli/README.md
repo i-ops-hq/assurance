@@ -40,10 +40,9 @@ Week 26. A tool that reported only the gap would have sent you looking for a fil
 ```
 $ assurance check ~/reports
 3 of 4 months from 2026-01 to 2026-04 in reports — not in this folder: March 2026 —
-Range inferred from the filenames: earliest 2026-01, latest 2026-04. Their spacing is
-uneven, so no cadence was detected; monthly was read from the shape of the names
-themselves, and 3 of the 4 months in that range are present, so the absences are
-reported as gaps rather than refused.                                       [exit 1]
+Range inferred from filenames: earliest 2026-01, latest 2026-04 — uneven spacing, so
+monthly was read from the names rather than detected. Override with --expect /
+--from / --to.                                              [exit 1 with --fail-on-gap]
 ```
 
 **Until 0.5.11 this refused.** Cadence was read from spacing, and a gap is uneven spacing by
