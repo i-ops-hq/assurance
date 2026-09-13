@@ -1,3 +1,37 @@
+# 0.2.2
+
+**A `pyproject.toml` came back as "136 requirements".** Named among them: `[build-system]`,
+`version`, `description` and `authors`. On `astral-sh/uv`, whose real answer is one build
+requirement. Three sentences of prose came back as three packages called `hello`, `this` and
+`chapter`. `read_manifest` was a `requirements.txt` line parser with no syntax it rejected, and
+`ManifestError` sat in the file carrying exactly the right docstring — *"The file named is not a
+requirements file this can read"* — never raised for a wrong file type.
+
+The help did say `manifest: A requirements.txt to read`, so this was outside the documented scope.
+That is why it mattered rather than why it did not: pyproject is the manifest most Python projects
+now have, the npm half already dispatched correctly on `package.json`, and a fabricated count is
+the one thing this package cannot ship.
+
+**Two changes.** A file that is not requirements-shaped is refused, with the line that gave it away
+named — every line has to be capable of being a requirement, not most of them, because a threshold
+means the count is wrong by exactly the share that is not. And `pyproject.toml` is read properly:
+PEP 621 `dependencies`, `[project.optional-dependencies]`, PEP 735 `[dependency-groups]`, poetry's
+table and `[build-system].requires`, each requirement carrying the table it came from.
+
+**There are two TOML readers, and they are held to each other.** 3.10 has no `tomllib` and adding
+`tomli` would cost this package its zero dependencies, so a text reader stands in and the report
+says when it did. Running the two against each other over 126 real pyprojects is what found the
+three defects in the text one: it collected `[tool.rooster.section-labels]` as packages (58 where a
+real parse found 18), a `]` inside `validate-pyproject[all,store]>=0.25` ended an array four entries
+early, and an apostrophe in a trailing comment opened a string that swallowed eight dependencies.
+They now agree string for string on all 126.
+
+A dependency group that includes another group, and a `[project]` that declares `dynamic =
+["dependencies"]`, are both named as gaps. Reporting the latter as zero would be a clean bill of
+health for a list that is produced at build time.
+
+**`20 dependencys`** sat on the most-read line of the output.
+
 # 0.2.1
 
 **Says what these four checks structurally cannot see.** They are offline, and offline is a real

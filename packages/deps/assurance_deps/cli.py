@@ -21,11 +21,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="assurance deps",
         description=(
-            "Read what a Python install is about to execute, and name what could not be read. "
+            "Read what an install is about to execute, and name what could not be read. "
             "Offline: no network, no advisory database, and nothing in the packages is run."
         ),
     )
-    parser.add_argument("manifest", help="A requirements.txt to read")
+    parser.add_argument(
+        "manifest",
+        help="A requirements.txt, a pyproject.toml or a package.json. Anything else is refused "
+        "rather than read as a list of packages",
+    )
     parser.add_argument(
         "--from",
         dest="search",

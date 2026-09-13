@@ -42,18 +42,27 @@ def _plural(n: int, one: str, many: str) -> str:
     return f"{n} {one}" if n == 1 else f"{n} {many}"
 
 
+def _plural_of(word: str) -> str:
+    """The plural of a unit noun. `dependency` is the reason this is not `word + "s"`."""
+    return f"{word[:-1]}ies" if word.endswith("y") and word[-2:-1] not in "aeiou" else f"{word}s"
+
+
 def format_report(report: Report) -> str:
     """The report as a person reads it: what could not be examined first, findings after."""
     lines: list[str] = []
     total, examined = report.total, report.examined
 
     if not total:
-        return f"{report.manifest.name} lists no requirements.\n"
+        said = [f"{report.manifest.name} lists no requirements."]
+        said += [f"Reading the manifest: {limit}." for limit in report.limits]
+        return "\n".join(said) + "\n"
 
     unit = report.unit
-    lines.append(f"{report.manifest.name} — {_plural(total, unit, unit + 's')}, {examined} read in full")
+    lines.append(f"{report.manifest.name} — {_plural(total, unit, _plural_of(unit))}, {examined} read in full")
     if report.scope_note:
         lines.append(f"Counted over {report.scope_note}.")
+    for limit in report.limits:
+        lines.append(f"Reading the manifest: {limit}.")
     lines.append("")
 
     # A lockfile flag answers "does this run code" and nothing else. Counting it as read would be
@@ -196,6 +205,9 @@ def report_to_dict(report: Report) -> dict[str, Any]:
         "requirements": report.total,
         "read": report.examined,
         "complete": report.complete,
+        # What the manifest reader could not be sure of. In the JSON for the same reason it is in
+        # the text: a CI job that reads only this dict would otherwise see a clean count.
+        "manifest_limits": list(report.limits),
         "unexamined": [{"name": u.name, "why": u.why} for u in report.unexamined],
         "lockfile_only": [
             {"name": e.name, "version": e.version, "declares_install_script": e.runs_at_install}

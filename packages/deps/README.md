@@ -77,8 +77,22 @@ Four checks, all of them offline, none of them consulting a model or a database.
 | non-registry sources | git URLs, direct archive URLs and local paths, where a version number is not a version |
 | transitive delta | what a committed lockfile holds that the manifest never asked for |
 
-Python reads `requirements.txt` plus any archives you have downloaded. npm reads `package.json`,
-`package-lock.json` and `node_modules`.
+Python reads `requirements.txt` or `pyproject.toml` — PEP 621 `dependencies`, the optional extras,
+PEP 735 dependency groups, poetry's table and the build requirements — plus any archives you have
+downloaded. npm reads `package.json`, `package-lock.json` and `node_modules`.
+
+**Anything else is refused rather than read.** Until 0.2.2 the Python half was a line parser with no
+syntax it rejected, so a `pyproject.toml` came back as "136 requirements" with `[build-system]`,
+`version` and `authors` named as packages, and three sentences of prose came back as three. A count
+assembled from whatever was on the lines is worse than no count. Now the file is identified first,
+and a file that is neither shape is named along with the line that gave it away.
+
+On Python 3.10 there is no `tomllib`, and adding `tomli` would cost this package its zero
+dependencies — so a text reader stands in, and the report says when it did. It is held to the real
+parser's answer two ways: a test compares the two readers directly on a fixture carrying every
+shape that has broken one of them, and during development they were run against each other over
+126 real `pyproject.toml` files until they agreed string for string. The test is what CI enforces;
+the 126 files are not in this repository and are not re-run on every commit.
 
 It also names `.pth` files, which the interpreter executes on every start, long after any
 install-time check has finished.

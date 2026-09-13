@@ -43,6 +43,11 @@ MAX_NUMBERED = 500
 # Enough to say "it is probably right there" without pasting a whole directory into one sentence.
 MAX_UNREAD = 20
 MIN_FILES_TO_INFER = 3
+#: How much of its own range a set has to fill before "a series with gaps" beats "not a series".
+#: Over half. Below that, naming the absences invents more denominator than was ever observed:
+#: five incident reports across sixty-six days would be reported as sixty-one missing days, which
+#: is the fabricated denominator this tool exists to refuse.
+MIN_DENSITY_FOR_GAPS = 0.5
 
 _KIND_FROM_NAME = {
     "monthly": SeriesKind.MONTHLY,
@@ -99,7 +104,12 @@ def check_coverage(
     inferred_range = False
     filenames = [path.name for paths in by_key.values() for path in paths]
     detected = detect_series(filenames)
+    # Only asked when the spacing rule already declined: a detected cadence is the better answer
+    # whenever there is one, and this exists for the case where the gap is what broke the detection.
+    gapped = _gapped_series(by_key) if detected is None else None
     kind = _resolve_kind(expect, detected)
+    if kind is None and not expect and gapped is not None:
+        kind = gapped.kind
 
     # **`--expect` names the kind; it does not rename the count.** Reported against 0.5.6: a folder
     # of six monthly files answered `--expect weekly` with "5 of 6 weeks from 2024-01 to 2024-06",
@@ -241,6 +251,19 @@ def check_coverage(
         scope = (
             f"{unit} from {point_key(cast(SequencePoint, detected.earliest))} "
             f"to {point_key(cast(SequencePoint, detected.latest))} in {root.name}"
+        )
+    elif gapped is not None:
+        expected_keys = enumerate_between(gapped.earliest, gapped.latest)
+        derivation = (
+            f"Range inferred from the filenames: earliest {point_key(gapped.earliest)}, latest "
+            f"{point_key(gapped.latest)}. Their spacing is uneven, so no cadence was detected; "
+            f"{kind.value} was read from the shape of the names themselves, and "
+            f"{gapped.present} of the {gapped.span} {unit} in that range are present, so the "
+            "absences are reported as gaps rather than refused. Override with --expect / --from / --to."
+        )
+        inferred_range = True
+        scope = (
+            f"{unit} from {point_key(gapped.earliest)} to {point_key(gapped.latest)} in {root.name}"
         )
     else:
         return {
@@ -764,6 +787,61 @@ def _detected_edge(
     if kind is not detected.kind:
         return None
     return cast(SequencePoint, point)
+
+
+class _Gapped(NamedTuple):
+    """A series whose spacing has a hole in it: the kind, and the ends of its own range."""
+
+    kind: SeriesKind
+    earliest: SequencePoint
+    latest: SequencePoint
+    present: int
+    span: int
+
+
+def _gapped_series(by_key: dict[str, list[Path]]) -> _Gapped | None:
+    """The series `detect_series` refused because a gap broke its spacing.
+
+    **A gap is irregular spacing by definition**, so the spacing rule cannot tell "a monthly series
+    missing March" from "five incident reports that were never a series" — and it declined both.
+    That left the tool blind in the one case it exists for: four consecutive months are detected,
+    and deleting one of them stops the detection. Verified 2026-09-13 against the published 0.5.10.
+
+    Density separates what spacing cannot. Three months of four fills 75% of its own range; the
+    incident reports in `test_a_refusal_names_the_flags_that_would_work` fill five of sixty-six
+    days. The rule is that a series has to be more there than not, and it is deliberately a
+    majority rather than a tuned number — anything finer would be a threshold chosen to make
+    particular folders pass.
+
+    Returns None whenever the answer is not clear, which leaves the existing refusal in place. The
+    refusal names the flags that would work, and that remains the right answer for a set that is
+    genuinely not a series.
+    """
+    points = [point_from_filename(paths[0].name) for paths in by_key.values()]
+    present = [p for p in points if p is not None]
+    # `len(present) != len(points)` cannot fire today — `_indexed_files` only puts names that parsed
+    # into `by_key`, and a name that did not is already reported as not-read beside the count. Kept
+    # as a guard rather than deleted, because the inference below divides by a span these points
+    # define, and a caller that one day passes unparsed names should get None rather than a ratio.
+    if len(present) < MIN_FILES_TO_INFER or len(present) != len(points):
+        return None
+    kinds = {type(p) for p in present}
+    if len(kinds) != 1:
+        return None
+    kind = _KIND_FROM_NAME.get(_EXPECT_FOR_TYPE.get(kinds.pop(), ""))
+    if kind is None:
+        return None
+    ordered = sorted(present, key=point_key)
+    span = enumerate_between(ordered[0], ordered[-1])
+    # Unreachable while the shape check above holds — `enumerate_between` returns nothing only for
+    # mismatched types or reversed ends, and neither survives that check and `sorted`. No test
+    # covers it, because none can; it is here so that relaxing the shape check fails closed.
+    if not span:
+        return None
+    observed = {point_key(p) for p in present} & {key for key, _ in span}
+    if len(observed) <= len(span) * MIN_DENSITY_FOR_GAPS:
+        return None
+    return _Gapped(kind, ordered[0], ordered[-1], len(observed), len(span))
 
 
 def _resolve_kind(expect: str | None, detected: DetectedSeries | None) -> SeriesKind | None:

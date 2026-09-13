@@ -35,6 +35,27 @@ Two different findings in one line, and they need different responses. Week 26 w
 `export FINAL v2.csv` **was** produced and is named in a way nothing can place — it may well be
 Week 26. A tool that reported only the gap would have sent you looking for a file you already have.
 
+**A monthly series with a month missing.**
+
+```
+$ assurance check ~/reports
+3 of 4 months from 2026-01 to 2026-04 in reports — not in this folder: March 2026 —
+Range inferred from the filenames: earliest 2026-01, latest 2026-04. Their spacing is
+uneven, so no cadence was detected; monthly was read from the shape of the names
+themselves, and 3 of the 4 months in that range are present, so the absences are
+reported as gaps rather than refused.                                       [exit 1]
+```
+
+**Until 0.5.11 this refused.** Cadence was read from spacing, and a gap is uneven spacing by
+definition — so four consecutive months were detected and deleting one of them produced "No dated
+or numbered series detected." The tool went blind at the exact moment the folder acquired the
+defect it exists to report, and you had to already know the answer to be told it.
+
+What decides now is how much of its own range a set fills. Three months of four is a series with a
+hole in it; the dataset below is 6 files across 61 months and is not a series at all. A series has
+to be more there than not — the majority, deliberately, rather than a number tuned until particular
+folders passed.
+
 **A dataset you downloaded. Is it complete?**
 
 ```
