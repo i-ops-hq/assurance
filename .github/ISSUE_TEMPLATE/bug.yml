@@ -1,0 +1,47 @@
+name: Something crashed or behaved wrongly
+description: A traceback, a wrong exit code, a flag that does nothing.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: command
+    attributes:
+      label: What you ran
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: What happened
+      description: The full output. If it is a traceback, all of it — the top frames are the useful half.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: exit
+    attributes:
+      label: Exit code
+      description: >
+        `echo $?` straight after. It matters: 0 means it ran, 1 means there is something in the
+        report to read, 2 means it could not run. A wrong code here is a bug on its own, because
+        CI reads it.
+      placeholder: "1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions and platform
+      placeholder: assurance-cli 0.5.11, Python 3.10.0, Ubuntu 24.04
+    validations:
+      required: true

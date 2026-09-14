@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security issue
+    url: https://github.com/i-ops-hq/assurance/blob/main/SECURITY.md
+    about: Email hello@i-ops.dev. Please do not open a public issue for a vulnerability.
+  - name: Looking for somewhere to start
+    url: https://github.com/i-ops-hq/assurance/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22
+    about: Issues scoped so the hard part is already decided in the issue text.

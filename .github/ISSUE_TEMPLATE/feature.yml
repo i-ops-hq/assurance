@@ -1,0 +1,40 @@
+name: A check or a flag that does not exist yet
+description: Something you wanted the tool to tell you and it could not.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Two things this project will not do, so you know before you write:
+
+        - **It will not have a model decide anything.** Every answer here is computed by code, which
+          is what makes it the same answer twice.
+        - **It will not invent a denominator.** "3 of 4 months" requires knowing there are four. If a
+          check cannot establish its own denominator, the honest output is a refusal that says so.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you were trying to find out
+      description: The question, not the feature. The feature is usually the second-best answer to it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today
+      description: What you ran instead, and where it stopped short.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: What the answer would look like
+      description: >
+        A sketch of the output is worth more than a description of the flag. Include the caveat you
+        think it would need — every number here carries one.
+    validations:
+      required: false
