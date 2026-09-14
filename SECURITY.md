@@ -10,11 +10,10 @@ Each package also carries its own `SECURITY.md` with the threat model specific t
 [`packages/deps/SECURITY.md`](packages/deps/SECURITY.md) if the report concerns dependency reading,
 since that is the one package here that reads attacker-controlled input by design.
 
-> **A note on the advisory links.** Three of the package files point at GitHub's *Report a
-> vulnerability* flow. Private vulnerability reporting is **not currently enabled** on this
-> repository, so that link does not work for anyone outside the org — the email above is the channel
-> that does. This is being fixed; until it is, the two sets of instructions disagree and the email
-> is the one to trust.
+You can also use GitHub's [*Report a vulnerability*](https://github.com/i-ops-hq/assurance/security/advisories/new)
+flow, which three of the package files already point at. Private vulnerability reporting was
+disabled on this repository until 2026-09-14, which meant those links did nothing for anyone outside
+the org; it is enabled now and both routes work.
 
 ## What is in this repository, and what is not
 
