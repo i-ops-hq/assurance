@@ -1,0 +1,77 @@
+name: The answer looked wrong
+description: A number, a gap or a refusal that does not match your folder. No fix needed.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **This is the most useful issue you can open here**, and it needs no fix attached.
+
+        Most of what has been fixed in this project was found by somebody pointing a command at
+        their own folder and noticing the answer did not describe it. A folder of twenty-eight files
+        once reported thirty-three absent months that had never existed, and nobody would have
+        written that fixture.
+
+  - type: textarea
+    id: command
+    attributes:
+      label: What you ran
+      description: The whole command, including any flags.
+      render: shell
+      placeholder: assurance check ~/reports --fail-on-gap
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: What it said
+      description: >
+        Paste all of it, including the derivation line and anything about what could not be read.
+        Those sentences are usually where the answer comes apart.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead, and why
+      description: >
+        The "why" matters more than the "what" — it tells us what the folder actually is, which is
+        the thing the tool was guessing at.
+    validations:
+      required: true
+
+  - type: textarea
+    id: folder
+    attributes:
+      label: What is in the folder
+      description: >
+        `ls` is ideal. Rename anything you cannot share, but keep the *shape* of the names — the
+        separators, the digits, the extensions — because that shape is what the parser reads.
+      render: shell
+      placeholder: |
+        $ ls ~/reports
+        2026-01.csv  2026-02.csv  2026-04.csv  notes.md
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`pip show assurance-cli | head -2` and `python --version`"
+      placeholder: assurance-cli 0.5.11, Python 3.12.4, macOS
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: One thing worth checking first
+      options:
+        - label: >
+            I have read the derivation line in the output. It says where the range came from, and a
+            range that was inferred is a weaker claim than one you passed with `--from` / `--to`.
+          required: false
