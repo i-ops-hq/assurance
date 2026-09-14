@@ -20,7 +20,9 @@ from assurance_deps.manifest import (
     Manifest,
     ManifestError,
     Requirement,
+    is_pyproject,
     read_manifest,
+    read_pyproject,
 )
 from assurance_deps.npm import is_npm_manifest, read_direct_dependencies, read_package_tree
 
@@ -74,6 +76,10 @@ class Report:
     partial: tuple[Examined, ...] = ()
     unit: str = "requirement"
     scope_note: str = ""
+    #: What the manifest reader could not be sure of — a dynamic dependency table, a TOML layout
+    #: the 3.10 text reader cannot see through. Carried onto the report rather than left in the
+    #: parser, because a gap nobody prints is a gap nobody knows about.
+    limits: tuple[str, ...] = ()
 
     @property
     def total(self) -> int:
@@ -138,6 +144,8 @@ def scan_manifest(
     """Read a manifest and everything local it points at. Executes nothing, in either ecosystem."""
     if is_npm_manifest(manifest_path):
         return _scan_npm(manifest_path, lock=lock)
+    if is_pyproject(manifest_path):
+        return _scan_python(manifest_path, search=search, lock=lock, manifest=read_pyproject(manifest_path))
     return _scan_python(manifest_path, search=search, lock=lock)
 
 
@@ -226,9 +234,15 @@ def _scan_python(
     *,
     search: list[Path] | None = None,
     lock: Path | None = None,
+    manifest: Manifest | None = None,
 ) -> Report:
-    """Read a requirements file and everything local it points at."""
-    manifest: Manifest = read_manifest(manifest_path)
+    """Read a Python manifest and everything local it points at.
+
+    `manifest` is supplied already parsed when the caller read a shape this function does not know
+    how to read itself — PEP 621. Everything after the parse is identical either way, which is why
+    the two readers meet here rather than growing two copies of the archive walk.
+    """
+    manifest = manifest if manifest is not None else read_manifest(manifest_path)
     base = manifest_path.parent
     folders = list(search) if search else [base, *(base / name for name in DEFAULT_SEARCH)]
     archives = _index_archives(folders)
@@ -283,6 +297,7 @@ def _scan_python(
         no_lock=no_lock,
         searched=tuple(folders),
         includes=manifest.includes,
+        limits=manifest.unparsed,
     )
 
 

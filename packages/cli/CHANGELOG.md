@@ -1,3 +1,25 @@
+# 0.5.11
+
+**`check` could not see a series that had a gap in it** — the one thing it exists to find. Four
+consecutive monthly files were detected and reported. Deleting the middle one produced *"No dated
+or numbered series detected."* Cadence was read from spacing, and **a gap is uneven spacing by
+definition**, so the tool went blind at the exact moment the folder acquired the defect. You had to
+already know the answer to be told it: `--expect monthly --from … --to …` answered correctly the
+whole time.
+
+The refusal was right for what it was written to prevent. Asserting `--expect daily` over five
+incident reports gives "1 of 36 days" — a denominator nobody ever expected, arrived at by the
+caller's own instruction. What spacing cannot tell apart, density can: three months of four fills
+75% of its own range, five incident reports fill five of sixty-six days.
+
+**A series has to be more there than not.** Over half the periods in its own range present, and the
+absences are reported as gaps; at half or below, the existing refusal stands and still names the
+flags that would work. Deliberately a majority rather than a tuned number — anything finer would be
+a threshold chosen until particular folders passed. The F1 dataset in this README, six files across
+sixty-one months, still refuses, unchanged.
+
+The derivation says the range was inferred, that no cadence was detected, and how to override it.
+
 # 0.5.10
 
 - **`assurance deps` is a sixth command**, a door onto the new `assurance-deps` package: what a
