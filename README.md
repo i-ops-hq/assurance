@@ -154,6 +154,18 @@ requests are welcome against it.
   answer.
 - **No cross-document inference.** It produced 21 false positives on a real corpus, so it is refused.
 
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the setup — it is the sequence that was actually run, and
+the note about upgrading pip first is load-bearing on Python 3.10.
+
+Issues labelled [`good first issue`](https://github.com/i-ops-hq/assurance/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+are scoped so the hard part is already decided in the issue text.
+
+**"I ran this on my own folder and the answer looked wrong" is a first-class issue** and needs no
+fix attached. That is how most of what is fixed here was found — including a folder of twenty-eight
+files that reported thirty-three absent months which had never existed.
+
 ## Licence
 
 Apache-2.0.
