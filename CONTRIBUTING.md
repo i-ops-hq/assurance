@@ -134,6 +134,11 @@ which is how most of what is fixed here was found.
 Be decent. Disagree about the work, not about the person. Anything that would make a reasonable
 contributor stop wanting to contribute is out of bounds, and maintainers will say so plainly.
 
+The long form is [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — Contributor Covenant 2.1, verbatim,
+because a project this small has no business writing its own and a familiar document is easier to
+rely on than a bespoke one. Reports go to **hello@i-ops.dev**, which is a private mailbox and not
+the security advisory channel.
+
 ## Security
 
 Do not open a public issue for a vulnerability. Each package has a `SECURITY.md` with the reporting
