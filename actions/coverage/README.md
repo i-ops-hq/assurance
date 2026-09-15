@@ -4,7 +4,7 @@ Fail the build when a dated or numbered series has a gap — **or when nothing c
 all**.
 
 ```yaml
-- uses: i-ops-hq/assurance/actions/coverage@cli-v0.5.11
+- uses: i-ops-hq/assurance/actions/coverage@coverage-action-v1.0.0
   with:
     folder: reports/monthly
 ```
@@ -78,7 +78,13 @@ It installs the `assurance-cli` that shipped alongside it in the same tag, and *
 it cannot work out which that is. An action that falls back to latest changes what a green tick
 meant without anybody editing a workflow, and the change is invisible from the outside.
 
-Pin the action to a release tag — `@cli-v0.5.11` — rather than a branch, for the same reason.
+**There is no floating `@v1` alias, deliberately.** Pin to `@coverage-action-v1.0.0` and move it
+when you decide to, rather than having it move under you. It would be inconsistent to refuse a
+floating CLI version inside the action and then offer a floating tag around it.
+
+The action is tagged separately from the packages because it is versioned by its own behaviour, not
+by a release of `assurance-cli` — and because the package tags are cut when a package ships, which
+is not when the action changes.
 
 ## What it will not tell you
 
