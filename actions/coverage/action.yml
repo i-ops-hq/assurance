@@ -1,0 +1,102 @@
+name: "assurance coverage"
+description: "Fail the build when a dated or numbered series has a gap — or when nothing could be checked at all."
+author: "I-Ops"
+
+branding:
+  icon: check-square
+  color: blue
+
+inputs:
+  folder:
+    description: "The folder to check. A series of dated or numbered files — 2026-01.csv, run_004.xlsx."
+    required: true
+  expect:
+    description: "Assert the cadence: monthly, quarterly, weekly, daily or numbered. Leave empty to let the filenames say."
+    required: false
+    default: ""
+  from:
+    description: "Start of the range. Needs `to` as well — neither works alone."
+    required: false
+    default: ""
+  to:
+    description: "End of the range. Needs `from` as well."
+    required: false
+    default: ""
+  allow-no-series:
+    description: >-
+      Pass when the folder is not a recognisable series. Default false, and think before changing it:
+      a refusal means NOTHING was checked, and a green tick on nothing checked is the thing this
+      action exists to prevent.
+    required: false
+    default: "false"
+  version:
+    description: "Version of assurance-cli to install. Defaults to the one this action shipped with."
+    required: false
+    default: ""
+  python-version:
+    description: "Python to run it on."
+    required: false
+    default: "3.12"
+
+outputs:
+  complete:
+    description: "true when every period in the range is present."
+    value: ${{ steps.check.outputs.complete }}
+  required:
+    description: "How many periods the range holds. 0 means no series was recognised and nothing was checked."
+    value: ${{ steps.check.outputs.required }}
+  read:
+    description: "How many of them were found."
+    value: ${{ steps.check.outputs.read }}
+  missing:
+    description: "The periods that are not in the folder, comma separated."
+    value: ${{ steps.check.outputs.missing }}
+  summary:
+    description: "The one-line answer, the same sentence the CLI prints."
+    value: ${{ steps.check.outputs.summary }}
+
+runs:
+  using: composite
+  steps:
+    - name: Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install assurance-cli
+      shell: bash
+      env:
+        REQUESTED: ${{ inputs.version }}
+      run: |
+        # Pinned to the version this action shipped with unless the caller says otherwise. An action
+        # that floats to latest changes what a green tick meant without anybody editing a workflow.
+        VERSION="$REQUESTED"
+        if [ -z "$VERSION" ]; then
+          # The version this action shipped with, read from the package beside it in the same
+          # checkout. Refused rather than floated: an action that falls back to latest changes what
+          # a green tick meant without anybody editing a workflow, and the change is invisible.
+          PYPROJECT="${{ github.action_path }}/../../packages/cli/pyproject.toml"
+          if [ ! -f "$PYPROJECT" ]; then
+            echo "::error title=assurance::cannot find $PYPROJECT to read the pinned version. Pass \`version:\` explicitly."
+            exit 1
+          fi
+          VERSION=$(grep -m1 '^version = ' "$PYPROJECT" | cut -d'"' -f2)
+        fi
+        if [ -z "$VERSION" ]; then
+          echo "::error title=assurance::could not determine which assurance-cli to install"
+          exit 1
+        fi
+        echo "installing assurance-cli==$VERSION"
+        python -m pip install --quiet --upgrade pip
+        python -m pip install --quiet "assurance-cli==$VERSION"
+
+    - name: Check coverage
+      id: check
+      shell: bash
+      env:
+        FOLDER: ${{ inputs.folder }}
+        EXPECT: ${{ inputs.expect }}
+        FROM: ${{ inputs.from }}
+        TO: ${{ inputs.to }}
+        ALLOW_NO_SERIES: ${{ inputs.allow-no-series }}
+      run: bash "${{ github.action_path }}/run.sh"

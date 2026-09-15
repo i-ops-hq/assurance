@@ -59,3 +59,74 @@ jobs:
           python -m pip install --upgrade pip build twine
           python -m build packages/${{ matrix.package }}
           python -m twine check packages/${{ matrix.package }}/dist/*
+
+  action:
+    name: the coverage action gates the way it says
+    runs-on: ubuntu-latest
+    # Run against the PUBLISHED assurance-cli, the way a caller's workflow will. A job that tests
+    # the action against the working tree proves the action works with code nobody can install yet.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fixtures — a complete series, one with a gap, and something that is not a series
+        run: |
+          mkdir -p fx/complete fx/gap fx/not-a-series
+          for m in 01 02 03 04; do printf 'date,n\n2026-%s-05,1\n' $m > fx/complete/2026-$m.csv; done
+          for m in 01 02 04; do printf 'date,n\n2026-%s-05,1\n' $m > fx/gap/2026-$m.csv; done
+          for d in 2025-01-08 2025-01-09 2025-01-23 2025-02-02 2025-03-14; do
+            printf 'a,b\n1,2\n' > "fx/not-a-series/incident-$d.csv"
+          done
+
+      - name: A complete series passes
+        id: complete
+        uses: ./actions/coverage
+        with:
+          folder: fx/complete
+
+      - name: ...and says so in its outputs
+        run: |
+          [ "${{ steps.complete.outputs.complete }}" = "true" ] || { echo "::error::complete series did not report complete"; exit 1; }
+          [ "${{ steps.complete.outputs.required }}" = "4" ] || { echo "::error::expected 4 required"; exit 1; }
+          [ "${{ steps.complete.outputs.read }}" = "4" ] || { echo "::error::expected 4 read"; exit 1; }
+
+      # `continue-on-error` and not `|| true`: a composite action's failure has to be observed as a
+      # step outcome, and a shell that swallows it would let a silently-passing gate through here.
+      - name: A gap fails
+        id: gap
+        uses: ./actions/coverage
+        continue-on-error: true
+        with:
+          folder: fx/gap
+
+      - name: ...and names the month
+        run: |
+          [ "${{ steps.gap.outcome }}" = "failure" ] || { echo "::error::a gap did not fail the gate"; exit 1; }
+          case "${{ steps.gap.outputs.missing }}" in
+            *March*) ;;
+            *) echo "::error::the missing month was not named, got '${{ steps.gap.outputs.missing }}'"; exit 1 ;;
+          esac
+
+      # The case the whole action exists for. A gate that passes when nothing was checked looks
+      # exactly like one that checked everything, and only one of them means anything.
+      - name: Nothing to check fails by default
+        id: nothing
+        uses: ./actions/coverage
+        continue-on-error: true
+        with:
+          folder: fx/not-a-series
+
+      - name: ...with required at zero, which is the tell
+        run: |
+          [ "${{ steps.nothing.outcome }}" = "failure" ] || { echo "::error::a folder with no series passed the gate"; exit 1; }
+          [ "${{ steps.nothing.outputs.required }}" = "0" ] || { echo "::error::expected required=0"; exit 1; }
+
+      - name: ...and passes only when the caller says so out loud
+        id: allowed
+        uses: ./actions/coverage
+        with:
+          folder: fx/not-a-series
+          allow-no-series: "true"
+
+      - name: ...still reporting that it verified nothing
+        run: |
+          [ "${{ steps.allowed.outputs.required }}" = "0" ] || { echo "::error::allow-no-series should not invent a denominator"; exit 1; }
