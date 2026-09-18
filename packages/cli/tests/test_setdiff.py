@@ -134,6 +134,41 @@ def test_fail_on_gap_is_what_makes_it_a_ci_gate(capsys: pytest.CaptureFixture[st
     assert main(["diff", "--expected", "a,b", "--found", "a,b", "--fail-on-gap"]) == 0
 
 
+def test_an_invented_key_fails_the_unexpected_gate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Checking an agent's output against an independent record, an extra key is an invented one.
+
+    The case that found this: Apple's 8-K-family filings since June, read from SEC EDGAR, against a
+    brief listing both of them plus one filing that does not exist. `--fail-on-gap` exited 0 because
+    nothing expected was missing, while the sentence above it named the invented filing.
+    """
+    expected = tmp_path / "expected.txt"
+    expected.write_text("2026-09-01 8-K/A\n2026-07-30 8-K\n", encoding="utf-8")
+    brief = tmp_path / "brief.txt"
+    brief.write_text("2026-09-01 8-K/A\n2026-07-30 8-K\n2026-08-14 8-K\n", encoding="utf-8")
+    args = ["diff", "--expected", str(expected), "--found", str(brief)]
+
+    assert main([*args, "--fail-on-unexpected"]) == 1
+    assert "also present and not expected: 2026-08-14 8-K" in capsys.readouterr().out
+    # The gap gate is unchanged on purpose. For a retriever an extra document costs nothing, and a
+    # caller who relied on --fail-on-gap passing it still gets the same exit code.
+    assert main([*args, "--fail-on-gap"]) == 0
+    assert main(args) == 0
+
+
+def test_each_gate_answers_its_own_question() -> None:
+    # An exact match passes both.
+    assert main(["diff", "--expected", "a,b", "--found", "a,b", "--fail-on-unexpected"]) == 0
+    # Something missing and nothing extra is not this flag's finding.
+    assert main(["diff", "--expected", "a,b", "--found", "a", "--fail-on-unexpected"]) == 0
+    # Asking for both, either finding fails it.
+    both = ["--fail-on-gap", "--fail-on-unexpected"]
+    assert main(["diff", "--expected", "a,b", "--found", "a", *both]) == 1
+    assert main(["diff", "--expected", "a,b", "--found", "a,b,z", *both]) == 1
+    assert main(["diff", "--expected", "a,b", "--found", "a,b", *both]) == 0
+
+
 def test_json_output_is_machine_readable(capsys: pytest.CaptureFixture[str]) -> None:
     main(["diff", "--expected", "a,b", "--found", "a", "--json"])
 

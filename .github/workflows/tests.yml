@@ -60,8 +60,37 @@ jobs:
           python -m build packages/${{ matrix.package }}
           python -m twine check packages/${{ matrix.package }}/dist/*
 
+  # The action pins the CLI version written beside it, so a commit that bumps that version points
+  # the action at a release that does not exist yet. Testing it anyway fails at `pip install`, which
+  # reads as a broken action. Testing it against the working tree instead would prove it works with
+  # code nobody can install. So the job waits, says why, and runs once the release is on PyPI —
+  # re-run this workflow on `main` after publishing, and it runs for real.
+  action-ready:
+    name: is the CLI this action pins on PyPI yet
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.published.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Look for the pinned version on PyPI
+        id: published
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' packages/cli/pyproject.toml | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::no version in packages/cli/pyproject.toml"; exit 1
+          fi
+          if curl -sf "https://pypi.org/pypi/assurance-cli/$VERSION/json" > /dev/null; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "assurance-cli $VERSION is on PyPI"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=coverage action::assurance-cli $VERSION is not on PyPI yet, so the action cannot be run the way a caller would run it. The job below is skipped, not passed; it runs once the release is published."
+          fi
+
   action:
     name: the coverage action gates the way it says
+    needs: action-ready
+    if: needs.action-ready.outputs.ready == 'true'
     runs-on: ubuntu-latest
     # Run against the PUBLISHED assurance-cli, the way a caller's workflow will. A job that tests
     # the action against the working tree proves the action works with code nobody can install yet.

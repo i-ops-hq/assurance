@@ -94,6 +94,11 @@ def main(argv: list[str] | None = None) -> int:
     diff_parser.add_argument("--json", action="store_true", dest="as_json")
     diff_parser.add_argument("--fail-on-gap", action="store_true",
                              help="Exit 1 when coverage is incomplete, for use as a CI gate")
+    diff_parser.add_argument(
+        "--fail-on-unexpected", action="store_true",
+        help="Exit 1 when the found set holds a key the expected set never had. For checking an "
+             "output against an independent record, where an extra key is an invented one",
+    )
 
     pin_parser = sub.add_parser(
         "pin",
@@ -217,7 +222,17 @@ def _run_diff(args: argparse.Namespace) -> int:
     # from a diff that ran and found everything.
     if payload.get("undetermined"):
         return 1
-    return 1 if (args.fail_on_gap and not payload.get("complete", False)) else 0
+    if args.fail_on_gap and not payload.get("complete", False):
+        return 1
+    # **An extra key is a separate question from a missing one, so it has its own flag.** For a
+    # retriever, a document outside the declared set is worth a line and costs nothing, which is why
+    # `unexpected` never counts against `complete` and `--fail-on-gap` ignores it. For an agent's
+    # output checked against an independent record it is the opposite: a filing the SEC has no
+    # record of is an invented one. Found checking a real brief against EDGAR — one invented
+    # filing, named in the sentence, and the gate exited 0.
+    if args.fail_on_unexpected and payload.get("unexpected"):
+        return 1
+    return 0
 
 
 def _run_check(args: argparse.Namespace) -> int:
