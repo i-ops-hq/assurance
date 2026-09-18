@@ -139,9 +139,10 @@ def test_an_invented_key_fails_the_unexpected_gate(
 ) -> None:
     """Checking an agent's output against an independent record, an extra key is an invented one.
 
-    The case that found this: Apple's 8-K-family filings since June, read from SEC EDGAR, against a
-    brief listing both of them plus one filing that does not exist. `--fail-on-gap` exited 0 because
-    nothing expected was missing, while the sentence above it named the invented filing.
+    The case that found this, constructed to test the gate: Apple's 8-K-family filings since June,
+    read from SEC EDGAR, against a brief listing both of them plus one filing that does not exist.
+    `--fail-on-gap` exited 0 because nothing expected was missing, while the sentence above it named
+    the invented filing.
     """
     expected = tmp_path / "expected.txt"
     expected.write_text("2026-09-01 8-K/A\n2026-07-30 8-K\n", encoding="utf-8")

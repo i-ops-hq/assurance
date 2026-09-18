@@ -228,8 +228,8 @@ def _run_diff(args: argparse.Namespace) -> int:
     # retriever, a document outside the declared set is worth a line and costs nothing, which is why
     # `unexpected` never counts against `complete` and `--fail-on-gap` ignores it. For an agent's
     # output checked against an independent record it is the opposite: a filing the SEC has no
-    # record of is an invented one. Found checking a real brief against EDGAR — one invented
-    # filing, named in the sentence, and the gate exited 0.
+    # record of is an invented one. Found checking a brief against EDGAR: a copy with one filing
+    # added that does not exist was named in the sentence, and the gate exited 0.
     if args.fail_on_unexpected and payload.get("unexpected"):
         return 1
     return 0
