@@ -212,7 +212,15 @@ assurance diff --expected cases.json --found ran.json --fail-on-gap
 # straight from a pipe
 retriever --query "$Q" | jq -r '.chunks[].doc_id' | \
   assurance diff --expected corpus.txt --found - --json
+
+# an agent's output against an independent record: an extra key is an invented one
+assurance diff --expected sec-record.txt --found brief.txt --fail-on-gap --fail-on-unexpected
 ```
+
+**Two gates, because missing and extra are different findings.** `--fail-on-gap` fails on what the
+found set lacks. `--fail-on-unexpected` fails on what it holds that was never expected. For a
+retriever an extra document is harmless, so it is reported and does not fail anything unless you ask.
+For an agent's output checked against a record, an extra key is one the agent made up.
 
 Inputs are whatever you already have: **one key per line**, a **JSON array** (strings, or objects
 with `key`/`id`/`name`/`path`), **`-` for stdin**, or an **inline comma list**.
@@ -265,7 +273,7 @@ assurance check ~/thesis-data --against-baseline
 | | |
 |---|---|
 | `0` | it checked, and either found no gap or wasn't asked to fail on one |
-| `1` | a finding: a gap with `--fail-on-gap`, a stale baseline, a changed MCP pin, or **nothing it could check** |
+| `1` | a finding: a gap with `--fail-on-gap`, an extra key with `--fail-on-unexpected`, a stale baseline, a changed MCP pin, or **nothing it could check** |
 | `2` | could not run: bad path, unreadable list, unparseable JSON, missing `mcp` extra, no MCP config |
 
 **"I couldn't check this" exits 1, not 0.** A folder whose filenames it can't parse must not look

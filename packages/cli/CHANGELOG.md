@@ -1,3 +1,19 @@
+# 0.5.12
+
+**`diff` can now fail on a key that should not be there.** `--fail-on-unexpected` exits 1 when the
+found set holds a key the expected set never had.
+
+It came from checking an agent's brief against an independent record: Apple's 8-K-family filings
+since June, read from SEC EDGAR. The real brief held up, 2 of 2. A copy with one filing added that
+does not exist, written to test the gate, passed too: the sentence named it, `also present and not
+expected: 2026-08-14 8-K`, and `--fail-on-gap` exited 0, because nothing expected was missing. **A
+gate that prints the invented filing and passes it is reading the wrong line.**
+
+`--fail-on-gap` is unchanged, on purpose. For a retriever, a document outside the declared set costs
+nothing and is often the more interesting line, which is why `unexpected` has never counted against
+`complete`. The two findings answer different questions, so each has its own flag, and asking for
+both asks both.
+
 # 0.5.11
 
 **`check` could not see a series that had a gap in it** — the one thing it exists to find. Four
