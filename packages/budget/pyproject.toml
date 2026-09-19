@@ -41,3 +41,7 @@ assurance_budget = ["py.typed"]
 
 [tool.mypy]
 strict = true
+# The siblings are installed editable, and a PEP 660 editable install is invisible to mypy, so
+# their sources are named here. Without it, `mypy --strict` reports every sibling import as
+# missing and then a cascade of Any-returns behind it, which is why nobody could run this.
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../core"

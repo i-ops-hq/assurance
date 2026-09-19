@@ -44,6 +44,51 @@ jobs:
         # asked for" is the promise people point this at a finance folder on.
         run: python -m pytest -q packages/cli/tests -k "write or read_only or baseline" --no-header
 
+  # Every package sets `strict = true` under `[tool.mypy]`, and until now nothing ran it. Two
+  # helpers in assurance-deps shipped without the annotations it asks for, and the only thing that
+  # ever said so was a pre-commit hook in a private repository, which says out loud that it can be
+  # bypassed. A standard a package declares and nothing runs is a comment.
+  #
+  # 3.12, one job: `assurance_deps` imports tomllib behind a `try`, and on 3.10 mypy reports it
+  # missing — true of that interpreter, not of the code.
+  types:
+    name: the strictness every package declares, run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The same install as the test job. A PEP 660 editable install is invisible to mypy, so each
+      # package's `mypy_path` names its siblings' sources instead; the third party they read through
+      # (openpyxl) still has to be installed, or every call into it reads as untyped.
+      - name: Install every package from this tree, in dependency order
+        run: |
+          python -m pip install --upgrade pip mypy
+          python -m pip install -e packages/core
+          python -m pip install -e "packages/cli[dev]"
+          python -m pip install -e "packages/mcp[dev]"
+          python -m pip install -e packages/budget
+          python -m pip install -e packages/authority
+          python -m pip install -e "packages/deps[dev]"
+
+      # From inside each package, which is where its configuration applies and the command
+      # CONTRIBUTING gives. From the repository root mypy reads no config at all and answers with
+      # dozens of errors that mean nothing.
+      - name: mypy --strict, every package, under its own config
+        run: |
+          failed=""
+          for pkg in core cli mcp budget authority deps; do
+            echo "::group::assurance_$pkg"
+            (cd "packages/$pkg" && python -m mypy --strict "assurance_$pkg") || failed="$failed assurance_$pkg"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error title=mypy::--strict failed for:$failed"
+            exit 1
+          fi
+
   build:
     runs-on: ubuntu-latest
     strategy:
