@@ -38,13 +38,18 @@ deps = ["assurance-deps>=0.1.0"]
 
 [tool.mypy]
 strict = true
+# A PEP 660 editable install is invisible to mypy, so the sibling source is named here. This
+# line sat inside the overrides table below, where `mypy_path` does nothing, and pointed at
+# ../assurance-core, a directory that stopped existing when the three repos became one on
+# 2026-09-09 — so every import of assurance_core read as missing, with a cascade of
+# Any-returns behind it, and `mypy --strict` was unrunnable here.
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../core"
 
 # assurance-deps is an optional extra, so it is legitimately absent from a default install and
 # mypy is told so rather than the import being silenced at the call site.
 [[tool.mypy.overrides]]
 module = ["assurance_deps.*"]
 ignore_missing_imports = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR/../assurance-core"
 
 [[tool.mypy.overrides]]
 module = "mcp.*"

@@ -56,16 +56,18 @@ on one package alone, install `core` plus that package and run `pytest packages/
 setup.py or setup.cfg not found"*, which names the wrong problem — there is no `setup.py` here and
 there should not be.
 
-Every package sets `strict = true` under `[tool.mypy]`, so run it before you open a PR:
+Every package sets `strict = true` under `[tool.mypy]`, and **CI runs it on all six**. Run it from
+inside the package you changed, which is where that configuration applies:
 
 ```bash
-python -m mypy --strict packages/core/assurance_core
+cd packages/core && python -m mypy --strict assurance_core
 ```
 
-**CI does not currently run mypy** — the configuration is there and nothing enforces it. Wiring it
-into `.github/workflows/tests.yml` is
-[a good first issue](https://github.com/i-ops-hq/assurance/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22),
-and until it lands, a type error reaches `main` without anything objecting.
+From the repository root there is no configuration to read, and mypy answers with dozens of errors
+that mean nothing — the sibling imports come from each package's `mypy_path`, which is relative to
+its own `pyproject.toml`. On Python 3.10, `assurance-deps` reports `tomllib` as missing: that module
+arrives in 3.11 and the import sits behind a `try`, so the report is about the interpreter rather
+than the code. CI type-checks on 3.12.
 
 ### If a version test fails locally
 
