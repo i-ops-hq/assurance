@@ -1,3 +1,9 @@
+# 0.4.8
+
+- **Requires `assurance-cli>=0.5.12`.** No code change here; the floor moves because that is the
+  version this tree tests against. It stayed at 0.5.10 through the cli's 0.5.11 and 0.5.12,
+  naming a version these tests had stopped running against.
+
 # 0.4.7
 
 - **Requires `assurance-cli>=0.5.10`.** No code change here; the floor moves because that is the
