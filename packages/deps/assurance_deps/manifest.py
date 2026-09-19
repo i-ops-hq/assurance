@@ -14,8 +14,10 @@ numbers mean what they say.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 #: How a requirement gets onto the machine. `registry` is the only one where a version number means
 #: what a reader assumes it means.
@@ -357,7 +359,7 @@ def _strings_in(text: str) -> tuple[list[str], int]:
     return found, tables
 
 
-def _outside_quotes(text: str):
+def _outside_quotes(text: str) -> Iterator[tuple[int, str]]:
     """Walk `text`, yielding (index, character) for characters that are not inside a TOML string.
 
     One walk serves both the comment stripper and the bracket counter, because they have to agree:
@@ -468,7 +470,7 @@ def _toml_arrays_by_text(text: str) -> tuple[dict[str, list[str]], set[str], lis
     return arrays, poetry, limits
 
 
-def _toml_arrays_by_parser(data: dict) -> tuple[dict[str, list[str]], set[str], list[str]]:
+def _toml_arrays_by_parser(data: dict[str, Any]) -> tuple[dict[str, list[str]], set[str], list[str]]:
     """The same three answers from a real parse, for 3.11 and later."""
     arrays: dict[str, list[str]] = {}
     limits: list[str] = []
