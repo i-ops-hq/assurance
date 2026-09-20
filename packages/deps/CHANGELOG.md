@@ -1,3 +1,28 @@
+# 0.2.3
+
+**An encrypted wheel crashed the tool.** A METADATA entry with the zip encryption bit set raised
+an uncaught `RuntimeError` from `zipfile` — traceback, exit 1, no named unread entry. The same
+shape hid elsewhere: tar members that were not regular files (symlink, fifo, char device, hardlink)
+were dropped with an empty note so the archive looked fully readable; the zip `MAX_MEMBERS` cap
+truncated silently where the tar path already said it had stopped; a 10 MB requirements line became
+one package name; a 10_000-deep `package.json` raised `RecursionError`; and a symlink discovered
+under `wheels/` pointing outside the project was followed and reported as "read in full".
+
+**Parser failure is a named unread entry, never a traceback.** Encrypted and otherwise unreadable
+zip or tar members set a reason on the archive. Non-file tar members are counted and named in the
+note. Hitting a member cap says the cap was reached. A requirements line longer than 100_000
+characters, and JSON that nests too deeply, are refused with the limit named rather than truncated
+into a fabricated answer.
+
+**Discovery does not follow a symlink out of the tree.** A path the caller names may be followed,
+because they named it. A path this tool finds inside a search folder that resolves outside that
+folder is unread, with reason `symlink out of the tree`. The denominator still counts the
+requirement; the report does not lower it to look clean.
+
+**Raw ANSI no longer reaches the terminal.** Control characters and bidirectional overrides in
+names, hook bodies, refusal echoes, and `--json` string fields are escaped to visible `\u00..`
+forms. JSON stays valid.
+
 # 0.2.2
 
 **A `pyproject.toml` came back as "136 requirements".** Named among them: `[build-system]`,

@@ -93,32 +93,79 @@ def _wanted(name: str) -> bool:
     return tail in {"setup.py", "pyproject.toml", "setup.cfg", "pkg-info", "metadata"}
 
 
+def _tar_member_kind(member: tarfile.TarInfo) -> str:
+    """A short name for a non-file tar member, for the coverage note."""
+    if member.issym():
+        return "symlink"
+    if member.islnk():
+        return "hardlink"
+    if member.isfifo():
+        return "fifo"
+    if member.ischr():
+        return "char device"
+    if member.isblk():
+        return "block device"
+    if member.isdir():
+        return "directory"
+    return "non-file"
+
+
 def _read_zip(path: Path) -> _Contents:
     out = _Contents()
     with zipfile.ZipFile(path) as zf:
-        for info in zf.infolist()[:MAX_MEMBERS]:
+        infos = zf.infolist()
+        if len(infos) > MAX_MEMBERS:
+            out.note = f"stopped after {MAX_MEMBERS} entries"
+            infos = infos[:MAX_MEMBERS]
+        for info in infos:
             out.names.append(info.filename)
-            if _wanted(info.filename) and info.file_size <= MAX_MEMBER_BYTES:
+            if not (_wanted(info.filename) and info.file_size <= MAX_MEMBER_BYTES):
+                continue
+            try:
                 out.files[info.filename] = zf.read(info)
+            except RuntimeError as err:
+                # zipfile raises RuntimeError when the encryption bit is set, not BadZipFile.
+                reason = f"encrypted entry could not be read: {info.filename} ({err})"
+                out.note = f"{out.note}; {reason}" if out.note else reason
+            except (OSError, zipfile.BadZipFile, EOFError) as err:
+                reason = f"member could not be read: {info.filename} ({err})"
+                out.note = f"{out.note}; {reason}" if out.note else reason
     return out
 
 
 def _read_tar(path: Path) -> _Contents:
     out = _Contents()
+    skipped: list[str] = []
     with tarfile.open(path, "r:*") as tar:
         for count, member in enumerate(tar):
             if count >= MAX_MEMBERS:
                 out.note = f"stopped after {MAX_MEMBERS} entries"
                 break
+            if member.isdir():
+                # Directories are structure in every sdist, not a coverage gap.
+                continue
             if not member.isfile():
+                kind = _tar_member_kind(member)
+                detail = member.name
+                if member.issym() or member.islnk():
+                    detail = f"{member.name} -> {member.linkname}"
+                skipped.append(f"{kind} {detail}")
                 continue
             out.names.append(member.name)
             if _wanted(member.name) and member.size <= MAX_MEMBER_BYTES:
-                handle = tar.extractfile(member)
-                if handle is not None:
-                    out.files[member.name] = handle.read()
+                try:
+                    handle = tar.extractfile(member)
+                    if handle is not None:
+                        out.files[member.name] = handle.read()
+                except (OSError, tarfile.TarError, EOFError) as err:
+                    reason = f"member could not be read: {member.name} ({err})"
+                    out.note = f"{out.note}; {reason}" if out.note else reason
+    if skipped:
+        named = ", ".join(skipped[:8])
+        more = f" (+{len(skipped) - 8} more)" if len(skipped) > 8 else ""
+        reason = f"{len(skipped)} non-file members not read: {named}{more}"
+        out.note = f"{out.note}; {reason}" if out.note else reason
     return out
-
 
 def _name_version_from_filename(path: Path) -> tuple[str, str]:
     stem = path.name
@@ -215,7 +262,9 @@ def examine_archive(path: Path) -> Examined:
 
     try:
         contents = _read_zip(path) if is_wheel or path.suffix.lower() == ".zip" else _read_tar(path)
-    except (OSError, tarfile.TarError, zipfile.BadZipFile, EOFError) as err:
+    except (OSError, tarfile.TarError, zipfile.BadZipFile, EOFError, RuntimeError, ValueError) as err:
+        # RuntimeError: encrypted zip members. ValueError: some corrupt headers.
+        # Never a traceback — a named unread entry is the only honest answer.
         return Examined(path=path, name=name, version=version, kind=kind, note=f"could not be opened: {err}")
 
     native = tuple(sorted(n for n in contents.names if n.lower().endswith(NATIVE_SUFFIXES)))

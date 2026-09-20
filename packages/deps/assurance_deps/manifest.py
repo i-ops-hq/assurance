@@ -19,6 +19,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from assurance_deps.text import scrub_controls
+
+#: A single requirements line longer than this is not a package name — it is an attempt at
+#: something. Named as unread rather than truncated into a fabricated distribution.
+MAX_LINE_CHARS = 100_000
+
 #: How a requirement gets onto the machine. `registry` is the only one where a version number means
 #: what a reader assumes it means.
 REGISTRY = "registry"
@@ -188,7 +194,7 @@ def _refuse_unless_requirements(path: Path, text: str) -> None:
         if why:
             raise ManifestError(
                 f"{path.name} is not a requirements file this can read: line {number} is {why}.\n"
-                f"  line {number}: {line[:70]}\n"
+                f"  line {number}: {scrub_controls(line[:70])}\n"
                 "Reading it anyway would report its lines as packages, which is a count that means "
                 "nothing. Name a requirements.txt, a pyproject.toml or a package.json instead."
             )
@@ -229,6 +235,12 @@ def read_manifest(path: Path) -> Manifest:
     for number, line in joined:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
+            continue
+        if len(stripped) > MAX_LINE_CHARS:
+            unparsed.append(
+                f"line {number} is longer than {MAX_LINE_CHARS} characters and was not read "
+                "as a requirement"
+            )
             continue
         if stripped.startswith(("-r", "--requirement")):
             target = stripped.split(None, 1)[1].strip() if " " in stripped else ""

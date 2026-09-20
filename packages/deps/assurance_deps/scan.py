@@ -111,20 +111,43 @@ class Report:
         return self.total > 0 and not self.unexamined and not self.partial
 
 
-def _index_archives(search: list[Path]) -> dict[str, list[Path]]:
-    found: dict[str, list[Path]] = {}
+def _index_archives(search: list[Path]) -> dict[str, list[tuple[Path, str]]]:
+    """Archives under each search folder, keyed by normalised distribution name.
+
+    A path the caller *names* may be followed — they named it. A path this tool *discovers*
+    inside a search folder may not leave that folder via a symlink: that is reported as unread
+    with reason ``symlink out of the tree``, never as a successful read.
+    """
+    found: dict[str, list[tuple[Path, str]]] = {}
     for folder in search:
         if not folder.is_dir():
             continue
+        try:
+            root = folder.resolve()
+        except OSError:
+            continue
         for path in sorted(folder.iterdir()):
-            if not path.is_file() or not path.name.lower().endswith(_ARCHIVE_SUFFIXES):
+            if not path.name.lower().endswith(_ARCHIVE_SUFFIXES):
+                continue
+            refuse = ""
+            if path.is_symlink():
+                try:
+                    target = path.resolve(strict=False)
+                except OSError:
+                    refuse = "symlink out of the tree"
+                else:
+                    try:
+                        target.relative_to(root)
+                    except ValueError:
+                        refuse = "symlink out of the tree"
+            elif not path.is_file():
                 continue
             stem = path.name
             for suffix in _ARCHIVE_SUFFIXES:
                 if stem.lower().endswith(suffix):
                     stem = stem[: -len(suffix)]
                     break
-            found.setdefault(_normalise(stem.split("-")[0]), []).append(path)
+            found.setdefault(_normalise(stem.split("-")[0]), []).append((path, refuse))
     return found
 
 
@@ -260,11 +283,18 @@ def _scan_python(
             unexamined.append(Unexamined(requirement.name, _why_missing(requirement, folders)))
             continue
         # Newest-looking first is not worth guessing at; the pinned version wins when it is named.
-        chosen = next(
-            (p for p in candidates if requirement.version and f"-{requirement.version}" in p.name),
+        chosen_path, refuse = next(
+            (
+                (p, why)
+                for p, why in candidates
+                if requirement.version and f"-{requirement.version}" in p.name
+            ),
             candidates[0],
         )
-        found = examine_archive(chosen)
+        if refuse:
+            unexamined.append(Unexamined(requirement.name, refuse))
+            continue
+        found = examine_archive(chosen_path)
         if found.readable:
             examined.append(found)
         else:
