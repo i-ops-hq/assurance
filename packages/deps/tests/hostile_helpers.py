@@ -53,7 +53,13 @@ def snapshot_file(path: Path) -> FileSnapshot:
 
 
 def assert_unchanged(before: FileSnapshot) -> None:
-    after = snapshot_file(before.path)
+    path = before.path
+    if path.is_symlink():
+        assert path.exists() == before.exists
+        digest = os.readlink(path).encode("utf-8", errors="surrogateescape")
+        assert digest == before.digest, f"symlink canary mutated: {path}"
+        return
+    after = snapshot_file(path)
     assert after.exists == before.exists
     assert after.size == before.size
     assert after.mtime_ns == before.mtime_ns
@@ -65,6 +71,10 @@ def snapshot_tree(root: Path) -> dict[str, FileSnapshot]:
     if not root.exists():
         return out
     for path in sorted(root.rglob("*")):
+        # pytest's basetemp keeps a `current` symlink into the active test dir; including it
+        # makes membership flicker across tests in the same session.
+        if path.name == "current" and path.is_symlink():
+            continue
         if path.is_file() or path.is_symlink():
             rel = str(path.relative_to(root))
             if path.is_symlink():
@@ -86,6 +96,30 @@ def assert_tree_unchanged(before: dict[str, FileSnapshot], root: Path) -> None:
         f"tree membership changed under {root}: "
         f"+{set(after) - set(before)} -{set(before) - set(after)}"
     )
+    for key, snap in before.items():
+        assert_unchanged(snap)
+
+
+def assert_parent_membership_unchanged(
+    before: dict[str, FileSnapshot],
+    parent: Path,
+    *,
+    allow_new: set[str],
+) -> None:
+    """Parent tree membership is frozen except for paths this test deliberately created.
+
+    `allow_new` is relative to `parent` (same keys as `snapshot_tree`). A stray write under any
+    other name fails — including a canary sibling the reader invents.
+    """
+    after = snapshot_tree(parent)
+    new = set(after) - set(before)
+    gone = set(before) - set(after)
+    unexpected = new - allow_new
+    assert not unexpected, (
+        f"unexpected new paths under {parent}: {sorted(unexpected)} "
+        f"(allow_new={sorted(allow_new)})"
+    )
+    assert not gone, f"paths disappeared under {parent}: {sorted(gone)}"
     for key, snap in before.items():
         assert_unchanged(snap)
 
