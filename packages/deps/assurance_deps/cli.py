@@ -14,6 +14,7 @@ from pathlib import Path
 from assurance_deps.manifest import ManifestError
 from assurance_deps.report import format_report, report_to_json
 from assurance_deps.scan import scan_manifest
+from assurance_deps.text import scrub_controls
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     manifest = Path(args.manifest).expanduser()
     if not manifest.is_file():
-        print(f"assurance deps: no file at {manifest}", file=sys.stderr)
+        print(scrub_controls(f"assurance deps: no file at {manifest}"), file=sys.stderr)
         return 2
 
     try:
@@ -65,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
             lock=Path(args.lock).expanduser() if args.lock else None,
         )
     except ManifestError as err:
-        print(f"assurance deps: {err}", file=sys.stderr)
+        print(scrub_controls(f"assurance deps: {err}"), file=sys.stderr)
         return 2
 
     print(report_to_json(report) if args.as_json else format_report(report), end="")

@@ -1,98 +1,119 @@
-# Hostile archive suite — report
+# Hostile archive suite — Round 2 report
 
 Branch: `test/deps-hostile-archives`  
-Package: `packages/deps` (`assurance_deps`)  
-Production code: **unchanged**  
-Command:
+Package: `packages/deps` (`assurance_deps` **0.2.3**)  
+Production code: **fixed** (Round 1 tests kept; parent-tree test strengthened first)
 
 ```bash
-python -m pytest -q packages/deps/tests/test_hostile_*.py
+python -m pytest -q packages/deps/tests
 cd packages/deps && python -m mypy --strict assurance_deps --python-version 3.11
 ```
 
-Result on this machine: **10 failed, 25 passed**. Failures are left red on purpose.
+Result: **88 passed, 1 skipped**. mypy: Success. Sibling floors: 2 passed.
 
-## Invariants
+## Test that proved less than its name (fixed first)
 
-### 1. Nothing written outside the temp tree — HOLDS (for the cases exercised)
+`test_hostile_nothing_written_outside_tree.py` asserted only the canary's exact path. Mutating
+`examine_archive` to write any other new file into the parent passed all five tests.
 
-Canary in the parent directory; relative/absolute/Windows zip traversal; symlink members. Canary bytes and mtime unchanged. Full `scan_manifest` over a hostile sdist also leaves the canary alone.
+**Now:** snapshot the parent tree before fixtures, allowlist exactly the relative paths the test
+creates, assert membership is otherwise unchanged (`assert_parent_membership_unchanged`).
 
-Counterfactual: patched `examine_archive` to rewrite `assurance-deps-canary-*` in the parent. Test failed with `AssertionError` in `assert_unchanged`. Restored; cleared `__pycache__`; green again.
+Mutation re-check:
+- Stray write `assurance-deps-stray-not-canary` → fails with `unexpected new paths ...`
+- Canary-path rewrite → all five fail via `assert_unchanged`
 
-### 2. Nothing executed / nothing imported — HOLDS (guarded path)
+## Wrong Round-1 test (said so, corrected)
 
-`subprocess.Popen` / `run` / `os.system` / `os.exec*` / `posix_spawn` raise for the duration of every parse. Planted `hostile_planted_*` modules must not appear in `sys.modules`.
+`test_symlinked_manifest_pointing_outside_folder_is_not_followed_as_trusted_input` expected a
+caller-named manifest symlink to be refused. Round 2 clarifies: **a path the caller names may be
+followed; a path discovery finds may not.** That Round-1 test was wrong under the clarified rule.
 
-Counterfactuals:
-- Inserted `os.system("true")` at the top of `examine_archive` → `ExecutionAttempted`. Restored → green.
-- Injected `sys.modules["hostile_planted_setup_side_effect"] = ...` → assertion on planted modules. Restored → green.
+Replaced with:
+- `test_discovered_archive_symlink_out_of_tree_is_unread_not_followed` — discovery refuse
+- `test_caller_named_manifest_symlink_may_be_followed` — documents the allowed case
 
-### 3. No symlink followed out of the tree (archives) — PARTIAL / DEFECT
+## Per defect: before → after
 
-**Defect:** `_read_tar` does `if not member.isfile(): continue` and never sets `note`. Symlink, fifo, char-device, and hardlink members are omitted with `note=''` and `readable=True`.
+### 1. Encrypted wheel → traceback
 
-| Test | Input | Output |
-|---|---|---|
-| `test_symlink_to_etc_passwd_is_reported...` | SYMTYPE → `/etc/passwd` + PKG-INFO | `Examined(..., members=1, note='')` |
-| `test_symlink_pointing_outside_archive_root...` | SYMTYPE → `../outside-secret.txt` | `note=''`, `members=1` |
-| `test_fifo_char_device_and_hardlink...` | FIFO + CHR + REG + LNK | `members=2, note=''` |
+**Before:** `RuntimeError: ... is encrypted, password required` escaped `examine_archive`; CLI
+exited 1 with a traceback.
 
-The outside file was not read into a package name (no content follow on this path), but the archive still looks fully readable — silent skip, which the promise forbids.
+**After (CLI):**
+```
+requirements.txt — 1 requirement, 0 read in full
+Could not be examined at all (1):
+  · enc                    encrypted entry could not be read: enc-1.0.dist-info/METADATA (...)
+```
+No traceback. Denominator stays 1; read = 0.
 
-### 4. Bounded — PARTIAL / DEFECTS
+### 2. Discovery symlink out of tree → "read in full"
 
-- Member above `MAX_MEMBER_BYTES` (3MB setup.py): returns quickly — holds.
-- Truncated gzip: `note='could not be opened: ...'`, `readable=False` — holds.
-  - Counterfactual: except-handler returned `note=""` → test failed. Restored → green.
-- Zip truncated at `MAX_MEMBERS`: **DEFECT** — tar sets `note=f"stopped after {MAX_MEMBERS} entries"`; zip slices `infolist()[:MAX_MEMBERS]` with **empty note**, `members=50`, looks complete.
-- Encrypted zip entry: **DEFECT** — `RuntimeError: ... is encrypted, password required` escapes. `examine_archive` catches `BadZipFile`/`OSError`/`EOFError` only.
-- 10MB single-line requirements.txt: **DEFECT** — accepted as one distribution name (`len(name)==10_000_000`). No size bound.
-- package.json nested 10_000 deep: **DEFECT** — uncaught `RecursionError` from `json.loads` (not turned into `err=`).
+**Before:** `wheels/evil-1.0-....whl` → outside wheel was examined like a real archive.
 
-### 5. What could not be read is named — FAILS on several shapes
+**After (CLI):**
+```
+  · evil                   symlink out of the tree
+```
+`--json` reports the same reason; requirement still counted.
 
-Covered by the silent tar skips, silent zip truncation, encrypted RuntimeError, deep-JSON crash, and:
+### 3. Raw ANSI in refusal / report / JSON
 
-**Defect:** `Path.read_text` follows a symlinked `requirements.txt` out of the project.  
-Input: `proj/requirements.txt` → `../outside-requirements.txt` containing `definitely-not-a-real-package-zzz==1.0.0`.  
-Output: parsed requirements include that name. Attacker-controlled path becomes a trusted manifest.
+**Before:** `\x1b[31m` reached stderr and `format_report` text raw.
 
-### 6. Escapes do not reach the terminal raw — FAILS
+**After (CLI refusal):**
+```
+  line 1: hello \u001b[31mworld
+```
+No raw ESC. `--json` string fields pre-scrubbed; `json.dumps` remains valid.
 
-`format_report` interpolates names and hook bodies unchanged.
+### 4–6. Tar SYMTYPE / FIFO / CHR / hardlink silent skip
 
-| Test | Input | Output fragment |
-|---|---|---|
-| ANSI / OSC-8 in name + hook | `\x1b[31mevil\x1b[0m`, `echo \x1b]8;;https://evil\x07click` | raw ESC in report text |
-| NUL in unexamined reason | `could not read\x00hidden` | NUL in report text |
+**Before:** `note=''`, `readable=True` — clean bill of health.
 
-## Counterfactuals run
+**After:** note names each kind, e.g. `3 non-file members not read: symlink …, fifo …, …`.
+Archive is unread (named), not silently complete.
 
-| # | Guard broken | Test | Failure |
-|---|---|---|---|
-| 1 | `examine_archive` writes sibling canary | `test_tar_member_named_relative_escape_does_not_write_canary` | `assert_unchanged` |
-| 2 | `os.system("true")` in `examine_archive` | `test_examine_archive_under_blocked_exec...` | `ExecutionAttempted` |
-| 3 | Corrupt-archive handler returns empty note | `test_truncated_gzip_and_corrupt_tar...` | `note=''` |
-| 4 | Plant module in `sys.modules` | same exec/import test | planted module listed |
-| 5 | npm non-object returns `err=""` | `test_package_json_that_is_array...` | `assert err` |
+### 7. Zip MAX_MEMBERS silent truncate
 
-Each restored; `__pycache__` cleared; re-run green for those tests. Production tree clean (`git diff packages/deps/assurance_deps` empty).
+**Before:** sliced `infolist()[:MAX_MEMBERS]` with empty note.
 
-## mypy
+**After:** `note='stopped after N entries'` (same shape as tar).
 
-`python -m mypy --strict assurance_deps --python-version 3.11` → Success.  
-On a 3.10 interpreter without `--python-version 3.11`, mypy reports missing `tomllib` stubs (stdlib 3.11+). Pre-existing; not introduced by tests.
+### 8. 10 MB single-line requirements
 
-## Files added (tests only)
+**Before:** accepted as one distribution name (`len == 10_000_000`).
 
-- `hostile_helpers.py` — fixtures, canary, exec/import guards
-- `conftest.py` — puts tests/ on `sys.path`
-- `test_hostile_nothing_written_outside_tree.py`
-- `test_hostile_nothing_executed_or_imported.py`
-- `test_hostile_tar_members_named_not_followed.py`
-- `test_hostile_zip_bounds_and_structure.py`
-- `test_hostile_npm_manifest_shapes.py`
-- `test_hostile_manifests_on_disk.py`
-- `test_hostile_terminal_escapes.py`
-- this report
+**After:** line skipped; `unparsed` / report limits name the `100_000` character cap; no fabricated
+package name.
+
+### 9. package.json nested 10_000 deep
+
+**Before:** uncaught `RecursionError`.
+
+**After:** `err` names that the file nests too deeply (limit named at 200 levels); no crash.
+
+### 10. Terminal escapes in format_report
+
+**Before:** CSI / OSC / RTL / NUL interpolated unchanged.
+
+**After:** `scrub_controls` on text and JSON string fields.
+
+## Counterfactuals (revert → fail → restore → clear `__pycache__`)
+
+| Broke | Test(s) that failed |
+|---|---|
+| Removed zip MAX_MEMBERS note | `test_zip_with_far_more_entries_than_cap_states_the_gap` |
+| Dropped RuntimeError handling for encrypted zip | `test_encrypted_zip_entry_is_named_unreadable_not_expanded` |
+| Restored silent tar non-file skip | symlink / fifo hostile tar tests |
+| Discovery follows symlinks again | `test_discovered_archive_symlink_out_of_tree_is_unread_not_followed` |
+| Removed `scrub_controls` from `format_report` | both `test_hostile_terminal_escapes` tests |
+| Removed line-length cap | `test_ten_megabyte_single_line_requirements_is_bounded` |
+| Dropped `RecursionError` catch in JSON load | `test_package_json_nested_ten_thousand_deep_is_bounded` |
+
+Each restored; full suite green again (88 passed, 1 skipped).
+
+## Scope
+
+Only `packages/deps`. Version **0.2.3**. No other packages, CI, or sibling versions touched.

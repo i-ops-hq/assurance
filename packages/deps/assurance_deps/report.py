@@ -16,6 +16,7 @@ import json
 from typing import Any
 
 from assurance_deps.scan import Report
+from assurance_deps.text import scrub_controls
 
 #: Never "safe", never "sandboxed", never "clean". This reports what an install will EXECUTE;
 #: whether that is acceptable is the reader's call and the tool has no standing to make it.
@@ -55,7 +56,7 @@ def format_report(report: Report) -> str:
     if not total:
         said = [f"{report.manifest.name} lists no requirements."]
         said += [f"Reading the manifest: {limit}." for limit in report.limits]
-        return "\n".join(said) + "\n"
+        return scrub_controls("\n".join(said) + "\n")
 
     unit = report.unit
     lines.append(f"{report.manifest.name} — {_plural(total, unit, _plural_of(unit))}, {examined} read in full")
@@ -195,55 +196,77 @@ def format_report(report: Report) -> str:
             88,
         )
     )
-    return "\n".join(lines) + "\n"
+    return scrub_controls("\n".join(lines) + "\n")
 
 
 def report_to_dict(report: Report) -> dict[str, Any]:
     """The same report as data, including the four things this tool did not do."""
     return {
-        "manifest": str(report.manifest),
+        "manifest": scrub_controls(str(report.manifest)),
         "requirements": report.total,
         "read": report.examined,
         "complete": report.complete,
         # What the manifest reader could not be sure of. In the JSON for the same reason it is in
         # the text: a CI job that reads only this dict would otherwise see a clean count.
-        "manifest_limits": list(report.limits),
-        "unexamined": [{"name": u.name, "why": u.why} for u in report.unexamined],
+        "manifest_limits": [scrub_controls(limit) for limit in report.limits],
+        "unexamined": [
+            {"name": scrub_controls(u.name), "why": scrub_controls(u.why)} for u in report.unexamined
+        ],
         "lockfile_only": [
-            {"name": e.name, "version": e.version, "declares_install_script": e.runs_at_install}
+            {
+                "name": scrub_controls(e.name),
+                "version": scrub_controls(e.version),
+                "declares_install_script": e.runs_at_install,
+            }
             for e in report.partial
         ],
         "runs_at_install": [
             {
-                "name": e.name,
-                "version": e.version,
-                "kind": e.kind,
-                "hooks": [{"where": h.where, "what": h.what} for h in e.hooks],
+                "name": scrub_controls(e.name),
+                "version": scrub_controls(e.version),
+                "kind": scrub_controls(e.kind),
+                "hooks": [
+                    {"where": scrub_controls(h.where), "what": scrub_controls(h.what)} for h in e.hooks
+                ],
             }
             for e in report.runs_at_install
         ],
         "native_payloads": [
-            {"name": e.name, "version": e.version, "files": list(e.native[:20]), "count": len(e.native)}
+            {
+                "name": scrub_controls(e.name),
+                "version": scrub_controls(e.version),
+                "files": [scrub_controls(f) for f in e.native[:20]],
+                "count": len(e.native),
+            }
             for e in report.with_native
         ],
         "startup_hooks": [
-            {"name": e.name, "version": e.version, "files": list(e.startup_hooks)}
+            {
+                "name": scrub_controls(e.name),
+                "version": scrub_controls(e.version),
+                "files": [scrub_controls(f) for f in e.startup_hooks],
+            }
             for e in report.with_startup_hooks
         ],
         "off_index": [
-            {"name": r.name, "source": r.source, "where": r.where, "note": r.note}
+            {
+                "name": scrub_controls(r.name),
+                "source": scrub_controls(r.source),
+                "where": scrub_controls(r.where),
+                "note": scrub_controls(r.note),
+            }
             for r in report.off_index
         ],
         "lock": (
             {
-                "path": str(report.delta.lock),
-                "only_in_lock": list(report.delta.only_in_lock),
-                "only_in_manifest": list(report.delta.only_in_manifest),
+                "path": scrub_controls(str(report.delta.lock)),
+                "only_in_lock": [scrub_controls(n) for n in report.delta.only_in_lock],
+                "only_in_manifest": [scrub_controls(n) for n in report.delta.only_in_manifest],
             }
             if report.delta
             else None
         ),
-        "lock_note": report.no_lock,
+        "lock_note": scrub_controls(report.no_lock),
         "claims": {
             "executed_anything": False,
             "consulted_an_advisory_database": False,

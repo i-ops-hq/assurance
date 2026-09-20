@@ -73,43 +73,67 @@ def test_ten_megabyte_single_line_requirements_is_bounded(
     )
 
 
-def test_symlinked_manifest_pointing_outside_folder_is_not_followed_as_trusted_input(
+def test_discovered_archive_symlink_out_of_tree_is_unread_not_followed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If the reader follows the symlink, it will parse /etc/passwd lines as packages.
+    """Round-1 tested a caller-named manifest symlink and expected refusal.
 
-    The promise under test: a manifest symlink escaping the project is reported or refused,
-    not silently read as if it lived inside the tree.
+    That test was wrong under the clarified rule: a path the caller names may be followed,
+    because they named it. A path this tool *discovers* (e.g. under wheels/) may not leave the
+    tree via a symlink — that is reported unread with reason ``symlink out of the tree``.
     """
+    from assurance_deps.scan import scan_manifest
+    from hostile_helpers import write_wheel
+
     project = tmp_path / "proj"
-    project.mkdir()
-    outside = tmp_path / "outside-requirements.txt"
-    outside.write_text("definitely-not-a-real-package-zzz==1.0.0\n", encoding="utf-8")
-    link = project / "requirements.txt"
+    wheels = project / "wheels"
+    wheels.mkdir(parents=True)
+    outside = tmp_path / "evil-1.0-py3-none-any.whl"
+    write_wheel(
+        outside,
+        {
+            "evil-1.0.dist-info/METADATA": b"Metadata-Version: 2.1\nName: evil\nVersion: 1.0\n",
+            "evil-1.0.dist-info/WHEEL": b"Wheel-Version: 1.0\n",
+        },
+    )
+    link = wheels / "evil-1.0-py3-none-any.whl"
     os.symlink(outside, link)
+    manifest = project / "requirements.txt"
+    manifest.write_text("evil==1.0\n", encoding="utf-8")
 
     canary = tmp_path / "canary"
     canary.write_bytes(b"canary")
     before = snapshot_file(canary)
 
     with block_all_execution(monkeypatch):
-        # Current behaviour may follow the symlink (Path.read_text follows). That is a defect
-        # if the tool claims not to follow symlinks out of the tree for manifests.
-        try:
-            manifest = read_manifest(link)
-            # If it followed, it will see the outside package name.
-            names = {r.name for r in manifest.requirements}
-            followed = "definitely-not-a-real-package-zzz" in names
-        except ManifestError:
-            followed = False
-            names = set()
+        report = scan_manifest(manifest, search=[wheels])
 
     assert_unchanged(before)
-    assert not followed, (
-        "symlinked requirements.txt pointing outside the project was followed and parsed. "
-        f"names={sorted(names)}. Input: symlink proj/requirements.txt -> ../outside-requirements.txt. "
-        "A silent follow turns an attacker-controlled path into a trusted manifest."
+    read_names = {e.name for e in report.examined_archives}
+    assert "evil" not in read_names, (
+        f"discovered symlink out of the tree was read in full: examined={sorted(read_names)}"
     )
+    unread = [u for u in report.unexamined if u.name == "evil"]
+    assert unread, f"evil not in unexamined: {[u.name for u in report.unexamined]}"
+    why = unread[0].why.lower()
+    assert "symlink" in why and "tree" in why, f"wrong reason: {unread[0].why!r}"
+
+
+def test_caller_named_manifest_symlink_may_be_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path the caller names may be followed — they named it. Documents the clarified rule."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    outside = tmp_path / "outside-requirements.txt"
+    outside.write_text("named-by-caller-zzz==1.0.0\n", encoding="utf-8")
+    link = project / "requirements.txt"
+    os.symlink(outside, link)
+
+    with block_all_execution(monkeypatch):
+        manifest = read_manifest(link)
+
+    assert any(r.name == "named-by-caller-zzz" for r in manifest.requirements)
 
 
 def test_pyproject_with_bom_and_crlf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

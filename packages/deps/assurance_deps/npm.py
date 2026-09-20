@@ -41,9 +41,31 @@ _GIT_PREFIXES = ("git+", "git:", "github:", "gitlab:", "bitbucket:", "gist:")
 _LOCAL_PREFIXES = ("file:", "link:", "portal:", "workspace:")
 
 
+#: Nested JSON deeper than this is refused rather than crashing the interpreter.
+MAX_JSON_DEPTH = 200
+
+
 def is_npm_manifest(path: Path) -> bool:
     """Whether this file is the npm half's input."""
     return path.name in NPM_MANIFESTS
+
+
+def _load_json(path: Path) -> tuple[Any, str]:
+    """Parse JSON with named limits. RecursionError is a report, never a traceback."""
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as err:
+        return None, f"{path.name} could not be read: {err}"
+    try:
+        data = json.loads(text)
+    except RecursionError:
+        return None, (
+            f"{path.name} nests too deeply and was not read "
+            f"(limit named at {MAX_JSON_DEPTH} levels)"
+        )
+    except json.JSONDecodeError as err:
+        return None, f"{path.name} could not be read: {err}"
+    return data, ""
 
 
 def _classify_spec(name: str, spec: str) -> Requirement:
@@ -81,10 +103,9 @@ def _classify_spec(name: str, spec: str) -> Requirement:
 
 def read_direct_dependencies(manifest: Path) -> tuple[list[Requirement], str]:
     """What `package.json` asks for directly, and why it could not be read when it could not."""
-    try:
-        data = json.loads(manifest.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as err:
-        return [], f"{manifest.name} could not be read: {err}"
+    data, why = _load_json(manifest)
+    if why:
+        return [], why
     if not isinstance(data, dict):
         return [], f"{manifest.name} is not an object"
     out: list[Requirement] = []
@@ -125,9 +146,8 @@ def _lock_entries(root: Path) -> dict[str, dict[str, Any]]:
         path = root / name
         if not path.is_file():
             continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        data, why = _load_json(path)
+        if why or not isinstance(data, dict):
             return {}
         packages = data.get("packages")
         if isinstance(packages, dict):
@@ -164,11 +184,12 @@ def read_package_tree(manifest: Path) -> list[Examined]:
         installed = folder / "package.json"
         kind = "npm"
         if installed.is_file():
-            try:
-                hooks = _own_scripts(json.loads(installed.read_text(encoding="utf-8")))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            pkg, why = _load_json(installed)
+            if why or not isinstance(pkg, dict):
                 note = "its installed package.json could not be read"
                 kind = "npm-unread"
+            else:
+                hooks = _own_scripts(pkg)
         else:
             # Not on this machine. The lockfile still answers whether an install script exists —
             # which is a real answer and not an absence of one — but says nothing about contents.
@@ -207,9 +228,8 @@ def read_package_tree(manifest: Path) -> list[Examined]:
                 if name in seen or not (candidate / "package.json").is_file():
                     continue
                 seen.add(name)
-                try:
-                    data = json.loads((candidate / "package.json").read_text(encoding="utf-8"))
-                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                data, why = _load_json(candidate / "package.json")
+                if why or not isinstance(data, dict):
                     continue
                 hooks = _own_scripts(data)
                 out.append(
