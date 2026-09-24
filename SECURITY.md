@@ -44,7 +44,7 @@ process, no telemetry. Nothing in this repository phones home, and nothing in it
 | `assurance-cli` | files in the folder you name; for `pin`, your MCP config (project, `~/.cursor`, Claude Desktop) | two files, each only when you ask: the `.assurance.json` baseline, and a pin snapshot at the path you give `pin` | never itself — but `pin` **starts the stdio servers your MCP config names**, and they may |
 | `assurance-mcp` | files inside the folders granted with `--root` in its config — never a folder the model names outside them | nothing | stdio to its client only |
 | `assurance-deps` | a manifest you name, and archives already on disk | nothing | never |
-| `assurance-budget` | one log file you name | nothing | never |
+| `assurance-budget` | the log or transcript you name; with `audit` and no path, Claude Code transcripts under `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`) to find the one for this folder; limits from `~/.config/assurance/config.toml`, `.assurance/config.toml` and `ASSURANCE_MAX_*` | nothing | never |
 | `assurance-authority` | one JSON file you name | nothing | never |
 
 **`assurance-deps` is the one to look at hardest.** It reads package archives, which are written by

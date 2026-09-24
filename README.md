@@ -1,170 +1,147 @@
 # assurance
 
+[![PyPI](https://img.shields.io/pypi/v/assurance?label=pip%20install%20assurance)](https://pypi.org/project/assurance/)
 [![tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
-[![assurance-core](https://img.shields.io/pypi/v/assurance-core?label=assurance-core)](https://pypi.org/project/assurance-core/)
-[![assurance-cli](https://img.shields.io/pypi/v/assurance-cli?label=assurance-cli)](https://pypi.org/project/assurance-cli/)
-[![assurance-mcp](https://img.shields.io/pypi/v/assurance-mcp?label=assurance-mcp)](https://pypi.org/project/assurance-mcp/)
-[![assurance-budget](https://img.shields.io/pypi/v/assurance-budget?label=assurance-budget)](https://pypi.org/project/assurance-budget/)
-[![assurance-authority](https://img.shields.io/pypi/v/assurance-authority?label=assurance-authority)](https://pypi.org/project/assurance-authority/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-## Software that reports success does not thereby prove it
+**Your AI agent says it's done. Assurance tells you what it didn't check.**
 
-Every tool here answers one question about work that has already happened, and refuses to answer it
-when it cannot. Nothing consults a model. Every result is arithmetic you can recompute yourself.
+Coding agents and agent pipelines report success confidently. Assurance reads what actually happened
+and says, in plain sentences, what was done, what was skipped, and — just as loudly — what it could not
+verify. No model decides anything. No network. No account.
 
-Start with the sentence that shows what that means in practice:
+## Try it in 10 seconds
 
-```
-$ pip install assurance-budget
-$ assurance-budget runs.jsonl
-
-0 of 3 runs hit a limit — 1 was going nowhere first
-
-  r-002
-      Stopped: 3 rounds repeating fetch(url=api/invoices) and failing the same way
-      (timeout) with nothing new read and no part of the goal closer. Continuing would
-      spend the rest of this run's budget on the same result.
-
-  Not tested by this log: iterations, retries, seconds. The log carries no events of
-  that kind, so this is silence rather than a pass.
-```
-
-Read the last line again. The run **passed** three of the four limits — and the tool says so is not
-the same as says nothing. Most software reports the absence of a failure as a success, which is how
-a check that never ran becomes a green tick. This one names what it could not test, in the same
-breath as what it could.
-
-That is the whole idea, and it is why these are separate from any product: **a claim you can check
-is worth more than a claim you have to trust.**
-
-## Three questions, three commands
-
-Each installs on its own. None needs the others, an account, a service, or a network.
-
-### Did the work cover what it was supposed to cover?
+In any project where you've used Claude Code, run:
 
 ```bash
-pip install assurance-cli
-assurance check ~/reports
+uvx assurance audit          # or: pip install assurance && assurance audit
 ```
 
-<img src="packages/cli/docs/demo.svg" alt="assurance check on a folder of monthly reports: 22 of 24 months, March 2024 and July 2025 named as absent; --fail-on-gap exits 1; a folder with no regular cadence is refused rather than given a denominator" width="860">
+Here is its real output on [a sample session](examples/audit/sample-session.jsonl) in this repo, where
+the agent was asked to fix a rounding bug "and make sure the tests pass", and finished by saying
+*"All done — the totals are correct now."*
 
-No config and no corpus file — it reads the cadence, the span and what is absent from the filenames.
-A folder with no regular cadence is **told so** rather than handed a ratio.
+```
+$ assurance audit examples/audit/sample-session.jsonl
+Claude Code session demo-8f2 — 13 min in /home/you/my-app
+10 tool calls, 3 failed — Bash 6, Edit 2, Grep 1, Read 1
 
-### Where did the run's budget go, and where did it go nowhere?
+  Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
+  Edited without reading it first: src/billing/rates.py
+  After the last edit (14:09): no test or check command ran
+  Not classified: 2 shell commands, so whether they read, wrote or tested anything is unknown.
+  Also in the transcript: 1 assistant turns, 1 user turns, 1 bookkeeping records.
+  Not read: 0 lines.
+```
+
+"All done" — but the tests failed three times in a row, a file was changed without being read, and
+nothing was tested after the last edit. The audit also names the two commands it can't vouch for either
+way, because **silence is not a pass**.
+
+## What's in the box
+
+One install, one command:
+
+| command | what it answers |
+|---|---|
+| `assurance audit` | What did the coding-agent session in this folder actually do — and what did it skip? |
+| `assurance diff` | Did the work cover everything it should have? (retrieved docs vs. required docs, files reviewed vs. files changed, …) |
+| `assurance pin` | Did an MCP server quietly change a tool's description after you approved it? |
+| `assurance deps` | What will `pip install` / `npm install` execute on your machine — read without running it? |
+| `assurance budget` | Where did an agent run's budget go, and where did it loop going nowhere? |
+| `assurance authority` | May this task proceed for the person who asked, without borrowing someone else's access? |
+| `assurance check` | Is a folder of dated reports complete, and which periods are missing? |
+
+Every command exits `0` when it checked and found nothing, `1` when there's something to look at —
+**including when something couldn't be checked** — and `2` when it couldn't run. So each one works as a
+CI gate as-is.
+
+## Three quick examples
+
+**Did the retriever fetch what the question needed?**
+```bash
+assurance diff --expected needed.txt --found retrieved.json --fail-on-gap
+# 2 of 5 items — not in the found set: doc-2, doc-3, doc-5
+# also present and not expected: doc-9
+```
+
+**Did an MCP server change a tool definition behind your back?** (the rug-pull, CVE-2025-54136)
+```bash
+pip install 'assurance-cli[mcp]'
+assurance pin --save      # snapshot every tool your MCP servers expose; commit .assurance/mcp-pins.json
+assurance pin --check     # in CI: exit 1 if any description changed, or any server couldn't be checked
+```
+
+**What will this install run?**
+```bash
+assurance deps package.json
+# Of the 100 read, 2 execute code when installed:
+#   · esbuild 0.23.1   node install.js
+#   · sharp 0.33.5   node install/check
+```
+
+## Use it inside Cursor, Claude Desktop or any MCP client
 
 ```bash
-pip install assurance-budget
-assurance-budget runs.jsonl --fail-on-exhausted
+pip install assurance-mcp
+```
+```json
+{
+  "mcpServers": {
+    "assurance": {
+      "command": "/absolute/path/to/python",
+      "args": ["-m", "assurance_mcp.server", "--root", "/absolute/path/to/your/project"]
+    }
+  }
+}
 ```
 
-The expensive runs are rarely the ones that crash. They are the ones that retried the same failing
-call fourteen times and finished with a plausible answer and a bill. Ceilings are enforced by code
-the caller cannot talk out of them.
+`--root` is the only folder the tools may read. You set it; the model can't widen it.
 
-### May this task proceed, for the person who asked?
+## Limits you set, that the agent can't raise
 
-```bash
-pip install assurance-authority
-assurance-authority team.json
+```toml
+# ~/.config/assurance/config.toml   (Windows: %APPDATA%\assurance\config.toml)
+[budget]
+tool_calls = 400
+seconds = 3600
 ```
 
-```
-1 of 3 tasks may proceed for the person who asked — 1 moved owner — 1 refused
+Your user file and `ASSURANCE_MAX_*` environment variables set the limits. A `.assurance/config.toml`
+inside the project — which an agent can write — can only *lower* them, and `assurance audit` tells you
+if a session touched it.
 
-  team roster      intern-42    proceed
-  Q3 margin memo   intern-42    escalate_ownership -> CFO
-      Priya (intern) may not receive finance-confidential, and CFO may. The task moves to
-      CFO rather than the answer moving to Priya (intern).
-  payroll extract  agent-a      refuse
-      Drafting agent may not receive payroll, and nobody offered can. The task stops here.
-```
+## What it won't do
 
-The middle row is the product. The intern may not have the margin memo; the CFO may. So the **task**
-moves to the CFO — she is told it moved, and never told the figure. An agent fetching it as a service
-account and handing her the answer is a permission-laundering machine with your company's name on it.
+- **Guess.** When it can't establish a number, it says so instead of inventing one.
+- **Call a model or the network.** Every result is arithmetic you can check.
+- **Claim more than it saw.** `audit` reads Claude Code transcripts today; other agents are next
+  (tell us which one you use).
 
-## The rule all three follow
+## Tell us where it's wrong
 
-**A denominator we cannot establish is refused, never invented.** A tool that answers "0 of 36" for a
-folder it did not understand is worse than one that says it does not know, because you cannot argue
-with a number that was made up.
+This is early, and the most useful thing you can do is run it on something real:
 
-## All six packages
+- **[It gave a wrong or misleading answer](https://github.com/i-ops-hq/assurance/issues/new?template=wrong-answer.yml)** — the most valuable report there is.
+- **[Something broke](https://github.com/i-ops-hq/assurance/issues/new?template=bug.yml)** or
+  **[I want it to support X](https://github.com/i-ops-hq/assurance/issues/new?template=feature.yml)** (another agent, lockfile, framework).
+- Want to contribute? Start with a [`good first issue`](https://github.com/i-ops-hq/assurance/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-The three commands above are the way in. These are the parts they are made of, each installable on
-its own and versioned on its own — a release tag names its package (`cli-v0.5.10`), because a bare
-version number is ambiguous between six.
+If it's useful to you, a ⭐ helps other people find it.
+
+## The packages
+
+`pip install assurance` installs the command-line tools. Each piece also installs on its own:
 
 | package | what it is |
 |---|---|
-| [`assurance-core`](packages/core) | the decision layer as a pure library — no I/O, no model, no framework. Coverage, corpus census, staleness, drift, tool pinning, the rule of two |
-| [`assurance-cli`](packages/cli) | six commands, each a CI gate: `check`, `diff`, `pin`, `drift`, `deps`, `init` |
-| [`assurance-mcp`](packages/mcp) | four MCP tools, read-only by construction, for Cursor / Claude Desktop / any MCP client |
-| [`assurance-deps`](packages/deps) | what a `pip install` or `npm install` is about to execute, read without executing it — and what could not be read |
-| [`assurance-budget`](packages/budget) | where a run spent, and where it went nowhere. Ceilings a caller cannot raise |
-| [`assurance-authority`](packages/authority) | whether a task may proceed for the person who asked, and what happens when it may not |
+| [`assurance-cli`](packages/cli) | the `assurance` command: `diff`, `check`, `pin`, `drift`, `init` |
+| [`assurance-budget`](packages/budget) | `audit` (coding-agent sessions) and `budget` (run logs) |
+| [`assurance-deps`](packages/deps) | read what an install will execute, without executing it |
+| [`assurance-authority`](packages/authority) | whether a task may proceed for the person who asked |
+| [`assurance-mcp`](packages/mcp) | the checks as MCP tools, read-only, confined to `--root` |
+| [`assurance-core`](packages/core) | the pure decision library underneath — no I/O, no model, no dependencies |
 
-`budget` and `authority` had their own repositories until 2026-09-09. One package per repository
-meant a reader had to find four front doors and work out how they related before anything happened,
-which is the opposite of the point. **Those repositories are private as of 2026-09-11**, so their old
-URLs no longer resolve — the history and the releases are here and on PyPI, and every PyPI name is
-unchanged.
-
-Two more worth knowing about once you are past the first command:
-
-```bash
-assurance pin --check      # fail the build when an MCP server changes a tool definition
-                           # after you approved it (CVE-2025-54136)
-assurance drift runs.jsonl # did the failure rate actually shift, or was the week noise?
-```
-
-`drift` reports no labels, no judge and no benchmark — it says whether a change is distinguishable
-from noise, and refuses when there is not enough history to say. Its
-[README](packages/cli/README.md) leads with the false-alarm rates of the textbook methods it
-rejected, because that is the part worth checking.
-
-## Layout
-
-```
-packages/core/       assurance-core
-packages/cli/        assurance-cli
-packages/mcp/        assurance-mcp
-packages/budget/     assurance-budget
-packages/authority/  assurance-authority
-skills/              agent skills that use the tools above
-```
-
-**Every package here, `core` included, is developed in this repository**, and pull requests are
-welcome against all of them. Until 2026-09-24 `packages/core/` was generated from a private runtime
-and hand edits were overwritten; that is no longer the case.
-
-## Honest limits
-
-- **`check` opens `.csv`, `.tsv` and `.xlsx` only.** Anything else in the folder is counted and
-  named, not silently skipped.
-- **The span is inferred from the earliest and latest filenames** unless you pass `--from` / `--to`,
-  which means a report missing from either *end* of the range cannot be detected. Pass the range
-  when you know it.
-- **`expected` is never inferred** in the MCP tools. A denominator nobody can argue with is not an
-  answer.
-- **No cross-document inference.** It produced 21 false positives on a real corpus, so it is refused.
-
-## Contributing
-
-[`CONTRIBUTING.md`](CONTRIBUTING.md) has the setup — it is the sequence that was actually run, and
-the note about upgrading pip first is load-bearing on Python 3.10.
-
-Issues labelled [`good first issue`](https://github.com/i-ops-hq/assurance/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
-are scoped so the hard part is already decided in the issue text.
-
-**"I ran this on my own folder and the answer looked wrong" is a first-class issue** and needs no
-fix attached. That is how most of what is fixed here was found — including a folder of twenty-eight
-files that reported thirty-three absent months which had never existed.
-
-## Licence
-
-Apache-2.0.
+Part of [I-Ops](https://i-ops.dev) — keep your models, agents and orchestration; put an independent
+check around them. Apache-2.0.

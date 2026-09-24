@@ -1,6 +1,6 @@
 # Contributing
 
-Six packages live here, each with its own `CONTRIBUTING.md`. Read this page first, then the one for
+Six packages live here, each with its own `CONTRIBUTING.md` (plus `packages/assurance`, which has no code and only installs the others). Read this page first, then the one for
 the package you are touching.
 
 Each one opens by naming the invariant that package may not break. Read it before changing anything:
