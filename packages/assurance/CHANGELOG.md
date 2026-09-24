@@ -1,3 +1,9 @@
+# 0.1.3
+
+- **Requires `assurance-budget` 0.2.3:** the Stop hook no longer treats a test piped into `tail` as
+  passed, and counts edits made with `sed -i`, `>` and similar. The README's hook command is pinned to
+  this version.
+
 # 0.1.2
 
 - **Requires `assurance-budget` 0.2.2 and `assurance-cli` 0.6.1:** `assurance audit --hook` runs the

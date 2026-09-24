@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-budget"
-version = "0.2.2"
+version = "0.2.3"
 description = "Where an agent run's budget went, and where the loop went nowhere. Ceilings a caller cannot raise."
 readme = "README.md"
 license = { text = "Apache-2.0" }

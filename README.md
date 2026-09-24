@@ -72,14 +72,17 @@ What "All done" left out:
 ## Run it after every session
 
 Add a Stop hook, and Claude Code runs the audit each time Claude says it's finished. It stays quiet
-when the last edit was followed by a passing test or check. When it wasn't, it tells you, and with
-`--nudge` it tells Claude too, so Claude runs the tests before it stops:
+when the last edit (with Edit or Write, or with `sed -i`, `>`, `git apply` and the like) was followed
+by a test or check that visibly passed. When it wasn't, it tells you, and with `--nudge` it tells
+Claude too, so Claude runs the tests before it stops. A test piped into `tail` or followed by `; echo`
+doesn't count as passed: its exit status is the other command's, so the result is read from the
+runner's summary line or reported as unknown.
 
 ```json
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx assurance audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx assurance@0.1.3 audit --hook --nudge" }] }
     ]
   }
 }
@@ -88,6 +91,10 @@ when the last edit was followed by a passing test or check. When it wasn't, it t
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
 `--nudge` to be told without Claude being asked. It nudges at most once per turn, and it never fails
 or blocks a session: if it can't read the transcript it says so and lets Claude finish.
+
+The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
+version you chose: unpinned, `uvx` keeps whichever version it cached first and switches without
+telling you when that cache is pruned. To upgrade, change the number.
 
 Installed with pip instead of uv? Use `"command": "assurance audit --hook --nudge"`. If Claude Code
 reports `command not found`, put the full path from `which uvx` (or `which assurance`) in the command.

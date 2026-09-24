@@ -76,8 +76,9 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
             "hookEventName": "Stop",
             "additionalContext": (
                 f"Assurance audit of this session: {finding}. Before you say the work is done, run "
-                "the project's tests or checks for what you changed, or say plainly why they cannot "
-                "be run here."
+                "the project's tests or checks for what you changed, without piping the test "
+                "command into another (or with `set -o pipefail`) so its result is visible, or say "
+                "plainly why they cannot be run here."
             ),
         }
     _hook_print(out)
@@ -92,9 +93,18 @@ def _hook_finding(after: dict[str, Any] | None) -> str | None:
     if int(after.get("tests") or 0) == 0 and int(after.get("checks") or 0) == 0:
         return f"files were edited and no test or check ran after the last edit{since}"
     runs = list(after.get("test_runs") or [])
-    if runs and runs[-1].get("failed"):
-        label = str(runs[-1].get("label") or runs[-1].get("command") or "")
+    if not runs:
+        return None  # only checks ran; they passed or failed on their own terms
+    last = runs[-1]
+    label = str(last.get("label") or last.get("command") or "")
+    outcome = last.get("outcome") or ("failed" if last.get("failed") else "passed")
+    if outcome == "failed":
         return f"the last test run after the last edit failed{since}: {label}"
+    if outcome == "unknown":
+        return (
+            f"the last test run after the last edit ({label}) was piped or followed by another "
+            f"command, so its exit status is not the test's and whether it passed is unknown{since}"
+        )
     return None
 
 

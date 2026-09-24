@@ -280,6 +280,11 @@ class ToolCall:
     result_digest: str
     has_result: bool
     result_first_line: str = ""
+    result_tail: str = ""
+    """The last few thousand characters of the result: where a test runner prints its summary."""
+
+
+_RESULT_TAIL_CHARS = 4000
 
 
 @dataclass(frozen=True)
@@ -486,6 +491,7 @@ def read_claude_code(path: Path) -> Session:
                     result_digest=digest,
                     has_result=True,
                     result_first_line=first,
+                    result_tail=text[-_RESULT_TAIL_CHARS:],
                 )
             )
         else:
@@ -712,11 +718,19 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
     """
     last_i: int | None = None
     last_at: float | None = None
+    last_by = ""
     outside = 0
     for i, call in enumerate(session.tool_calls):
-        if call.name not in _CHANGE_TOOLS:
-            continue
         if call.error:
+            continue
+        if call.name == "Bash":
+            # `sed -i`, `> file`, `tee`, `cp`, `git apply` … change files as surely as Edit does, and
+            # Claude Code is allowed to edit that way. Only changes inside the project count.
+            command = call.input.get("command")
+            if isinstance(command, str) and bash_edits_project(command, session.cwd):
+                last_i, last_at, last_by = i, call.at, "Bash"
+            continue
+        if call.name not in _CHANGE_TOOLS:
             continue
         path = _call_path(call)
         if path is None:
@@ -724,13 +738,13 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
         if not _path_inside_cwd(path, session.cwd):
             outside += 1
             continue
-        last_i = i
-        last_at = call.at
+        last_i, last_at, last_by = i, call.at, call.name
     if last_i is None:
         return None
 
     tests = 0
     tests_failed = 0
+    tests_unknown = 0
     checks = 0
     test_runs: list[dict[str, Any]] = []
     for call in session.tool_calls[last_i + 1 :]:
@@ -742,27 +756,144 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
         kind = classify_bash(command)
         if kind == "test":
             tests += 1
-            failed = bool(call.error)
-            if failed:
+            outcome = outcome_of_test_run(command, call.error, call.result_tail)
+            if outcome == "failed":
                 tests_failed += 1
+            elif outcome == "unknown":
+                tests_unknown += 1
             test_runs.append(
                 {
                     "command": command,
                     "label": bash_test_label(command),
-                    "failed": failed,
+                    "failed": outcome == "failed",
+                    "outcome": outcome,
                 }
             )
         elif kind == "check":
             checks += 1
     return {
         "at": last_at,
+        "by": last_by,
         "tests": tests,
         "tests_failed": tests_failed,
+        "tests_unknown": tests_unknown,
         "checks": checks,
         "test_runs": test_runs,
         "test_labels": _group_test_labels(test_runs),
         "outside_cwd_edits": outside,
     }
+
+
+def outcome_of_test_run(command: str, error: bool, result_tail: str = "") -> str:
+    """`passed`, `failed` or `unknown` for one test command.
+
+    The tool's error flag is the command's exit status, which is the test's only when nothing after
+    the test can replace it: `pytest -q | tail -8` exits with tail's status, `pytest; echo done`
+    with echo's. Then the result is read from a runner summary line in the output, if there is one
+    (`1 failed, 2 passed in 0.03s`), and is otherwise unknown — never assumed to have passed.
+    """
+    if _test_exit_is_visible(command):
+        return "failed" if error else "passed"
+    return _runner_summary(result_tail) or "unknown"
+
+
+def _test_exit_is_visible(command: str) -> bool:
+    try:
+        tokens = _scan_shell(strip_heredoc_bodies(command))[0]
+    except ValueError:
+        return False
+    segments: list[list[str]] = [[]]
+    separators: list[str] = []
+    for tok in tokens:
+        if tok in _SHELL_SEPARATORS:
+            separators.append(tok)
+            segments.append([])
+        else:
+            segments[-1].append(tok)
+    pipefail = any(_sets_pipefail(seg) for seg in segments)
+    for index, seg in enumerate(segments):
+        if not seg or _classify_segment(seg) != "test":
+            continue
+        after = separators[index:]
+        if not after:
+            return True
+        if after[0] == "|" and not pipefail:
+            return False
+        # `a && b` keeps a's failure; `;`, `||` and `&` let a later command decide the status.
+        return all(sep == "&&" or (sep == "|" and pipefail) for sep in after)
+    return True
+
+
+def _sets_pipefail(tokens: list[str]) -> bool:
+    if not tokens or tokens[0] != "set":
+        return False
+    for i, tok in enumerate(tokens[1:], start=1):
+        if tok.startswith("-") and "o" in tok[1:] and i + 1 < len(tokens) and tokens[i + 1] == "pipefail":
+            return True
+    return False
+
+
+_PYTEST_SUMMARY = re.compile(r"\b(\d+) (passed|failed|errors?)\b.* in [\d.]+s\b")
+
+
+def _runner_summary(text: str) -> str | None:
+    """A pytest summary line near the end of the output: `failed` if anything failed or errored,
+    `passed` if only passes were counted. Any other runner's output is not guessed at."""
+    for line in reversed([ln for ln in text.splitlines() if ln.strip()][-6:]):
+        if _PYTEST_SUMMARY.search(line):
+            if re.search(r"\b\d+ (failed|errors?)\b", line):
+                return "failed"
+            if re.search(r"\b\d+ passed\b", line):
+                return "passed"
+    return None
+
+
+#: git subcommands that rewrite files in the working tree.
+_GIT_TREE_WRITES = frozenset({"apply", "restore", "pull", "merge", "rebase", "cherry-pick", "am", "revert"})
+
+
+def bash_edits_project(command: str, cwd: str) -> bool:
+    """Whether a shell command changed a file inside the project `cwd`.
+
+    Counts a write target (`> f`, `>> f`, `tee f`, `sed -i … f`, `perl -i … f`, the destination of
+    `cp` / `mv` / `install`) that resolves inside `cwd`, and git or patch commands that rewrite the
+    working tree. After a `cd` elsewhere, relative targets are not taken to be the project's.
+    """
+    try:
+        segments = split_shell_segments(strip_heredoc_bodies(command))
+    except ValueError:
+        return False
+    left_cwd = False
+    for tokens in segments:
+        if not tokens:
+            continue
+        if _segment_cds_away(tokens, cwd):
+            left_cwd = True
+        argv = _strip_git_globals(_normalise_argv(_drop_redirections(tokens)) or [])
+        if not left_cwd and argv:
+            if argv[0] == "patch":
+                return True
+            if argv[0] == "git" and len(argv) >= 2:
+                sub, rest = argv[1], argv[2:]
+                if sub in _GIT_TREE_WRITES:
+                    return True
+                if sub == "stash" and rest[:1] in (["pop"], ["apply"]):
+                    return True
+                if sub == "reset" and "--hard" in rest:
+                    return True
+                if sub == "checkout" and "--" in rest:
+                    return True
+        targets = list(_write_targets(tokens))
+        if argv and argv[0] == "perl" and any(a.startswith("-") and "i" in a[1:] for a in argv[1:-1]):
+            targets.append(argv[-1])
+        for target in targets:
+            if left_cwd and not _is_absolute_path_token(target):
+                continue
+            if target in _DISCARD_TARGETS or "$" in target:
+                continue
+            if _path_inside_cwd(target, cwd):
+                return True
+    return False
 
 
 def _path_inside_cwd(path: str, cwd: str) -> bool:
@@ -778,29 +909,33 @@ def _path_inside_cwd(path: str, cwd: str) -> bool:
 
 
 def _group_test_labels(test_runs: list[dict[str, Any]]) -> list[str]:
-    """Group identical labels (first-seen order); mark failures per group."""
+    """Group runs by label (first-seen order); say how many failed and how many are unknown."""
     order: list[str] = []
     totals: dict[str, int] = {}
     fails: dict[str, int] = {}
+    unknown: dict[str, int] = {}
     for run in test_runs:
         label = str(run.get("label") or run["command"])
         if label not in totals:
             order.append(label)
-            totals[label] = 0
-            fails[label] = 0
+            totals[label] = fails[label] = unknown[label] = 0
         totals[label] += 1
-        if run.get("failed"):
+        outcome = run.get("outcome") or ("failed" if run.get("failed") else "passed")
+        if outcome == "failed":
             fails[label] += 1
+        elif outcome == "unknown":
+            unknown[label] += 1
     labels: list[str] = []
     for label in order:
-        n = totals[label]
-        failed = fails[label]
-        if failed == 0:
-            labels.append(label if n == 1 else f"{label} ×{n}")
-        elif failed == n:
-            labels.append(f"{label} failed" if n == 1 else f"{label} ×{n} failed")
-        else:
-            labels.append(f"{label} ×{n}, {failed} failed")
+        n, failed, unk = totals[label], fails[label], unknown[label]
+        text = label if n == 1 else f"{label} ×{n}"
+        # `pytest failed`, `pytest ×3 failed`, `pytest ×3, 1 failed` — and the same for unknown.
+        for count, word in ((failed, "failed"), (unk, "result unknown")):
+            if count == n:
+                text += f" {word}"
+            elif count:
+                text += f", {count} {word}"
+        labels.append(text)
     return labels
 
 

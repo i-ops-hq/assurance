@@ -1,3 +1,20 @@
+# 0.2.3
+
+Two ways `--hook` stayed silent when it should not have, both found in a real desktop Claude Code run:
+
+- **A piped test no longer counts as passed.** `python3 -m pytest -q 2>&1 | tail -8` exits with
+  tail's status, so a failing run read as passing and the hook said nothing. A test's exit status is
+  now trusted only when nothing after it can replace it (only `&&` follows, or a pipe under
+  `set -o pipefail`). Otherwise the result is read from a pytest summary line at the end of the
+  output (`1 failed in 0.02s`) or reported as unknown, and the hook says so and asks for a run whose
+  result is visible. Each test run in `--json` gains `outcome`: `passed`, `failed` or `unknown`;
+  `after_last_edit` gains `tests_unknown`.
+- **Edits made with shell commands count.** `sed -i`, `perl -i`, `>` / `>>` into a file, `tee`, the
+  destination of `cp` / `mv`, `patch`, and git commands that rewrite the working tree (`apply`,
+  `restore`, `pull`, `merge`, `rebase`, `stash pop`, `reset --hard`, `checkout --`) now start the
+  "after the last edit" clock when they touch a file inside the project. `after_last_edit` gains `by`
+  (the tool that made the last edit).
+
 # 0.2.2
 
 - **`assurance audit --hook`: run the audit after every Claude Code turn.** As a Stop hook it reads
