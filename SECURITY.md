@@ -41,7 +41,7 @@ process, no telemetry. Nothing in this repository phones home, and nothing in it
 | Package | Reads | Writes | Network |
 |---|---|---|---|
 | `assurance-core` | nothing — pure functions over values you pass in | nothing | never |
-| `assurance-cli` | files in the folder you name | two files, each only when you ask: the `.assurance.json` baseline, and a pin snapshot at the path you give `pin` | never |
+| `assurance-cli` | files in the folder you name; for `pin`, your MCP config (project, `~/.cursor`, Claude Desktop) | two files, each only when you ask: the `.assurance.json` baseline, and a pin snapshot at the path you give `pin` | never itself — but `pin` **starts the stdio servers your MCP config names**, and they may |
 | `assurance-mcp` | files in the folder you name | nothing | stdio to its client only |
 | `assurance-deps` | a manifest you name, and archives already on disk | nothing | never |
 | `assurance-budget` | one log file you name | nothing | never |
@@ -69,6 +69,11 @@ string in a listing here, not a file anywhere.
 - **A number that reads as more than it is.** Not a vulnerability in the usual sense, and we treat it
   with the same seriousness — a coverage figure that omits what it could not read is how somebody
   ships a gap believing they checked for one. Those belong in a public issue, not here.
+
+**`assurance pin` runs code by design.** Reading a server's tool definitions means starting it, so
+`pin --save` and `pin --check` execute every stdio command in the MCP config they read. Treat the
+config as code: in CI, run `pin` on `pull_request` rather than `pull_request_target`, and give that
+job no secrets, because a pull request can edit `.mcp.json`.
 
 ## What is out of scope
 

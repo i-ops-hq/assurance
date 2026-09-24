@@ -1,3 +1,22 @@
+# Unreleased
+
+**`pin` no longer reports silence as a pass.**
+
+- **One server that fails to start no longer aborts the rest.** `--save` raised on the first
+  unreachable server and pinned nothing for the healthy ones; `--check` verified none of them. Each
+  server is now tried on its own, with a 30-second limit, and one that fails is named with why.
+- **An unchecked server fails the gate.** `--check` printed nothing and exited 0 while an HTTP server
+  in the config went unchecked. It now ends every run with
+  `N tool(s) checked across M of K server(s)` and exits 1 when any configured server was not
+  verified. `--allow-unverified` exits 0 and still names them.
+- **The pin file stores the config path relative to the project**, so a committed lockfile no longer
+  carries one developer's home directory.
+- **Claude Desktop's config is found on Windows and Linux**, not only macOS.
+- `SECURITY.md` now says plainly that `pin` starts the servers in your MCP config.
+
+Found 2026-09-24 with a real `.mcp.json` holding a healthy stdio server, an HTTP server and a stale
+command path.
+
 # 0.5.12
 
 **`diff` can now fail on a key that should not be there.** `--fail-on-unexpected` exits 1 when the

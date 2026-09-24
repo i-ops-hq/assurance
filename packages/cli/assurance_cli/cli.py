@@ -11,7 +11,7 @@ from assurance_cli.baseline import BASELINE_NAME, check_against_baseline, init_b
 from assurance_cli.gather import check_coverage, readable_kinds
 from assurance_cli.drift import run_drift
 from assurance_cli.paths import PathEscapeError
-from assurance_cli.pin import run_pin_action
+from assurance_cli.pin import _ALLOW_HELP as _PIN_ALLOW_HELP, run_pin_action
 from assurance_cli.setdiff import KeySpecError, diff_sets, format_diff
 
 
@@ -116,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
                            help="Exit 1 if any definition changed since the snapshot")
     pin_parser.add_argument("--config", metavar="PATH",
                             help="Explicit MCP config instead of discovery")
+    pin_parser.add_argument("--allow-unverified", action="store_true", help=_PIN_ALLOW_HELP)
 
     drift_parser = sub.add_parser(
         "drift",
@@ -154,7 +155,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "diff":
             return _run_diff(args)
         if args.command == "pin":
-            return run_pin_action(save=args.save, check=args.check, config=args.config)
+            return run_pin_action(save=args.save, check=args.check, config=args.config,
+                                  allow_unverified=args.allow_unverified)
         if args.command == "drift":
             drift_argv = ["drift"]
             if args.file:

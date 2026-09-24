@@ -180,8 +180,24 @@ Stdio servers only in this release; HTTP/SSE transports are named and skipped.
 - run: assurance pin --check
 ```
 
-Exit `1` means a definition moved and needs a human look. Exit `2` means the gate could not run
-(missing `mcp` extra, no config, no pin file yet).
+Exit `1` means a definition moved and needs a human look — **or that a configured server could not
+be checked** (an HTTP server, or one that did not start within 30 seconds). Every run ends with how
+much it verified:
+
+```
+5 tool(s) checked across 1 of 3 server(s) — no definition changed — 2 not verified
+Not verified:
+  remote-thing: skipped — HTTP/SSE transport is not supported in this release
+  broken: could not be reached — [Errno 2] No such file or directory: '/nonexistent/bin/server'
+```
+
+An unchecked server is not a pass. If you know about it and accept it, `--allow-unverified` exits 0
+and still names it. Exit `2` means the gate could not run at all (missing `mcp` extra, no config, no
+pin file yet, no server reachable).
+
+**`pin` starts every stdio server in your config** — that is how it reads their tools. In CI, run it
+on `pull_request` (not `pull_request_target`) and without secrets, since a pull request can change
+`.mcp.json`.
 
 ### `assurance drift` — is the failure rate shifting?
 
