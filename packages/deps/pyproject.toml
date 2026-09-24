@@ -40,3 +40,10 @@ assurance_deps = ["py.typed"]
 
 [tool.mypy]
 strict = true
+
+# `tomllib` is standard from 3.11 and imported behind a `try` for 3.10, where the text reader stands
+# in. Without this, `mypy --strict` run on 3.10 reports the import missing — true of the interpreter,
+# not of the code — and a contributor on 3.10 sees a red type check for nothing they did.
+[[tool.mypy.overrides]]
+module = "tomllib"
+ignore_missing_imports = true
