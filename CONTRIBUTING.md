@@ -63,9 +63,7 @@ cd packages/core && python -m mypy --strict assurance_core
 
 From the repository root there is no configuration to read, and mypy answers with dozens of errors
 that mean nothing — the sibling imports come from each package's `mypy_path`, which is relative to
-its own `pyproject.toml`. On Python 3.10, `assurance-deps` reports `tomllib` as missing: that module
-arrives in 3.11 and the import sits behind a `try`, so the report is about the interpreter rather
-than the code. CI type-checks on 3.12.
+its own `pyproject.toml`. CI type-checks on 3.12.
 
 ### If a version test fails locally
 
