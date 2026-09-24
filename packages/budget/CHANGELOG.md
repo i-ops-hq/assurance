@@ -1,3 +1,17 @@
+# 0.1.4
+
+- **A line that names neither a `kind` nor an action is no longer a tool call.** Every line
+  defaulted to `kind: tool`, so a Claude Code transcript — user turns, system events, queue
+  operations — was reported as 177 tool calls for a session that made 35, and the run as stopped by
+  the 40-call ceiling. Those lines are now counted as unclassified, charged to nothing, and reported
+  under **Not counted**. A line with an action and no `kind` is still a tool call, as documented.
+- **ISO 8601 timestamps are read.** Only numbers were, so the wall-clock limit read as untested on
+  logs that recorded every second; the same transcript now measures 4,516 seconds against a 600s cap.
+- **`sessionId`, `traceId`, `conversation_id`, `thread_id` and their spellings name a run.**
+- **A line with no run identifier is counted, not fatal**, when other lines have one. The log is
+  still refused when no line does.
+- **`tool_calls` is listed as not tested** when the log holds no tool events, like the other limits.
+
 # 0.1.3
 
 - **Requires `assurance-core>=0.13.2`.** No code change here. The floor moves because the tree these

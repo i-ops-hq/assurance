@@ -78,9 +78,9 @@ assurance-budget runs.jsonl --fail-on-exhausted   # exit 1 if any run hit a limi
 
 ```
 $ assurance-budget transcript.jsonl
-Cannot audit: line 1: no run identifier. Looked for run, run_id, runId, session, session_id,
-trace_id. Without one, every event would be attributed to a single run and the per-run limits
-would be meaningless.                                                              [exit 2]
+Cannot audit: no run identifier on any line. Looked for run, run_id, runId, session, session_id,
+sessionId, trace_id, traceId, conversation_id, conversationId, thread_id, threadId. Without one,
+every event would be attributed to a single run and the per-run limits would be meaningless. [exit 2]
 ```
 
 An outside tester pointed this at his own agent transcripts and got exactly that. His logs were
@@ -127,8 +127,11 @@ JSONL, one event per line. Field names are matched loosely — `run`/`run_id`/`s
 {"run": "r-002", "action": "fetch(url=api/invoices)", "error": "timeout", "kind": "tool", "ts": 41.0}
 ```
 
-`kind` is one of `tool`, `frontier`, `retry`, `iteration` and defaults to `tool`. Anything else is
-refused rather than counted as something it isn't.
+`kind` is one of `tool`, `frontier`, `retry`, `iteration`. A line with no `kind` but an action is a
+`tool` call; **a line with neither is counted as unclassified and charged to nothing** — a user turn
+or a system event in a transcript is not a tool call, and the report says how many lines it did not
+count. A `kind` outside the four is refused rather than counted as something it isn't. Timestamps
+may be numbers or ISO 8601.
 
 ## As a library — the half that prevents rather than reports
 

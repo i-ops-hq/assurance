@@ -19,7 +19,7 @@ from assurance_core.run_budget import (
     Stalled,
 )
 
-from assurance_budget.events import Event, by_run
+from assurance_budget.events import UNATTRIBUTED, UNCLASSIFIED, Event, by_run
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,8 @@ class RunAudit:
     over_time: bool = False
     """Whether the log's own timestamps put this run past the wall-clock cap. Separate from
     `exhausted` because it is measured from the log rather than charged through the ledger."""
+    unclassified: int = 0
+    """Lines of this run that named neither a kind nor an action, so were charged to nothing."""
 
     def as_dict(self) -> dict[str, Any]:
         """The row as plain data, for `--json`."""
@@ -48,6 +50,7 @@ class RunAudit:
             "retries": self.retries,
             "duration": self.duration,
             "over_time": self.over_time,
+            "unclassified": self.unclassified,
             "exhausted": None if self.exhausted is None else {
                 "limit": self.exhausted.limit,
                 "cap": self.exhausted.cap,
@@ -70,6 +73,13 @@ class Audit:
     runs: tuple[RunAudit, ...]
     budget: Budget
     kinds_seen: frozenset[str]
+    unattributed: int = 0
+    """Lines with no run identifier, in a log where other lines had one. Not in any run's counts."""
+
+    @property
+    def unclassified(self) -> int:
+        """Lines that named neither a kind nor an action, across every run."""
+        return sum(run.unclassified for run in self.runs)
 
     @property
     def exhausted(self) -> int:
@@ -94,6 +104,8 @@ class Audit:
         statement from "this log has no iteration markers", and only one of them is evidence.
         """
         missing = []
+        if "tool" not in self.kinds_seen:
+            missing.append("tool_calls")
         if "iteration" not in self.kinds_seen:
             missing.append("iterations")
         if "frontier" not in self.kinds_seen:
@@ -126,6 +138,8 @@ class Audit:
             "stalled": self.stalled,
             "over_time": self.over_time,
             "limits_not_exercised": list(self.unexercised),
+            "unclassified_lines": self.unclassified,
+            "unattributed_lines": self.unattributed,
             "budget": {
                 "iterations": self.budget.iterations,
                 "tool_calls": self.budget.tool_calls,
@@ -159,7 +173,13 @@ def audit(events: list[Event], budget: Budget | None = None) -> Audit:
         watch = ProgressWatch()
         stalled: Stalled | None = None
 
+        unclassified = 0
         for event in run_events:
+            if event.kind == UNCLASSIFIED:
+                # Charged to nothing and shown to nobody as a stall: a line that is not an event
+                # cannot be a round of anything. Counted, so the report can say how much was unread.
+                unclassified += 1
+                continue
             kinds.add(event.kind)
             if event.kind == "iteration":
                 spend.charge_iteration()
@@ -186,7 +206,13 @@ def audit(events: list[Event], budget: Budget | None = None) -> Audit:
                 exhausted=spend.stopped,
                 stalled=stalled,
                 over_time=duration is not None and duration >= caps.seconds,
+                unclassified=unclassified,
             )
         )
 
-    return Audit(runs=tuple(rows), budget=caps, kinds_seen=frozenset(kinds))
+    return Audit(
+        runs=tuple(rows),
+        budget=caps,
+        kinds_seen=frozenset(kinds),
+        unattributed=sum(1 for event in events if event.kind == UNATTRIBUTED),
+    )
