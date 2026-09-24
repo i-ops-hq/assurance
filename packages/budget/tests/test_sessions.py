@@ -416,7 +416,7 @@ def test_main_always_prints_not_read_zero(tmp_path: Path, capsys) -> None:
     assert main([str(path)]) == 0
     out = capsys.readouterr().out
     assert "Not read: 0 lines." in out
-    assert "Not classified:" in out
+    assert "Every shell command was classified." in out
 
 
 def test_no_session_id_raises(tmp_path: Path) -> None:

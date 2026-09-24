@@ -1,5 +1,8 @@
 # Unreleased
 
+- **`Ceilings`:** the built-in `MAX_*` constants are the defaults an operator has not overridden.
+  `Budget.allowing(..., ceilings=…)` clamps the caller to those ceilings. Core never reads files or
+  the environment — callers load operator config and pass the result in.
 - **This repository is now the source of truth for `assurance-core`.** It was generated from a
   private runtime until today, so pull requests against it could not land; they can now.
   `CONTRIBUTING.md` states the package's invariants instead of pointing upstream.

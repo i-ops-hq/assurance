@@ -10,12 +10,15 @@ from __future__ import annotations
 import argparse
 import importlib.metadata
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Sequence
 
 from assurance_core.run_budget import Budget
 
 from assurance_budget.audit import Audit, audit
+from assurance_budget.config import ConfigError, load_ceilings
 from assurance_budget.events import LogError, read
 
 EXIT_OK = 0
@@ -57,12 +60,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def render(result: Audit) -> str:
+def render(result: Audit, *, ceilings_source: str = "built-in defaults") -> str:
     """The human-readable table. Only rows worth acting on are listed."""
-    lines = [result.summary, ""]
+    lines = [result.summary, "", f"  Limits from: {ceilings_source}", ""]
+    listed = 0
     for row in result.runs:
         if row.exhausted is None and row.stalled is None and not row.over_time:
             continue
+        listed += 1
         why = row.exhausted.message.split(" — ")[0] if row.exhausted else ""
         if not why and row.over_time and row.duration is not None:
             why = f"Ran {row.duration:.0f}s against a {result.budget.seconds:.0f}s cap"
@@ -71,7 +76,7 @@ def render(result: Audit) -> str:
             lines.append(f"      {why}")
         if row.stalled is not None:
             lines.append(f"      {row.stalled.message}")
-    if len(lines) == 2:
+    if listed == 0:
         lines.append("  Nothing hit a limit and nothing stalled.")
     not_counted = []
     if result.unclassified:
@@ -103,6 +108,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the audit. Returns the process exit code rather than raising SystemExit."""
     args = build_parser().parse_args(argv)
     try:
+        ceilings = load_ceilings(Path.cwd(), os.environ)
+    except ConfigError as exc:
+        print(f"Cannot audit: {exc}", file=sys.stderr)
+        return EXIT_UNREADABLE
+    try:
         events = read(args.log)
     except LogError as exc:
         print(f"Cannot audit: {exc}", file=sys.stderr)
@@ -116,9 +126,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             frontier_calls=args.frontier_calls,
             seconds=args.seconds,
             retries=args.retries,
+            ceilings=ceilings,
         ),
     )
-    print(json.dumps(result.as_dict(), indent=2) if args.as_json else render(result))
+    if args.as_json:
+        payload = result.as_dict()
+        payload["budget"]["source"] = ceilings.source
+        print(json.dumps(payload, indent=2))
+    else:
+        print(render(result, ceilings_source=ceilings.source))
 
     if args.fail_on_exhausted and (result.exhausted or result.stalled or result.over_time):
         return EXIT_GATE

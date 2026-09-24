@@ -1,5 +1,7 @@
 # Unreleased
 
+- **Operator ceilings** for `assurance budget` / `assurance audit` (config files and `ASSURANCE_MAX_*`),
+  forwarded through `assurance-budget`.
 - **Skipped directories are not files.** `assurance check` reports them as
   `N directories skipped (.git, node_modules, …)` instead of folding them into
   `N files not opened`.

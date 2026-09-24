@@ -5,14 +5,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
-from assurance_core.run_budget import Progress, ProgressWatch, Stalled
+from assurance_core.run_budget import Ceilings, Progress, ProgressWatch, Stalled
 
+from assurance_budget.config import ConfigError, load_ceilings
 from assurance_budget.events import LogError
 from assurance_budget.sessions import (
     Session,
@@ -58,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(list(argv) if argv is not None else None)
+    try:
+        ceilings = load_ceilings(Path.cwd(), os.environ)
+    except ConfigError as exc:
+        print(f"assurance audit: {exc}", file=sys.stderr)
+        return EXIT_UNREADABLE
+
     path: Path | None
     if args.transcript:
         path = Path(args.transcript).expanduser()
@@ -86,7 +94,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     unread_edits = edited_without_read(session)
     after = after_last_edit(session)
     unclassified = unclassified_bash_count(session)
-    report = build_report(session, loops, unread_edits, after, unclassified)
+    report = build_report(session, loops, unread_edits, after, unclassified, ceilings)
     if args.as_json:
         print(json.dumps(report, indent=2))
     else:
@@ -123,12 +131,23 @@ def build_report(
     unread_edits: list[str],
     after: dict[str, Any] | None,
     unclassified: int,
+    ceilings: Ceilings | None = None,
 ) -> dict[str, Any]:
     by_tool = dict(Counter(call.name for call in session.tool_calls))
     failed = sum(1 for call in session.tool_calls if call.error)
     duration = None
     if session.started is not None and session.ended is not None:
         duration = max(0.0, session.ended - session.started)
+    over_limit = None
+    caps = ceilings
+    if caps is not None and caps.source != "built-in defaults":
+        n = len(session.tool_calls)
+        if n > caps.tool_calls:
+            over_limit = {
+                "tool_calls": n,
+                "limit": caps.tool_calls,
+                "source": caps.source,
+            }
     return {
         "session_id": session.session_id,
         "source": session.source,
@@ -149,6 +168,8 @@ def build_report(
         "edited_without_read": list(unread_edits),
         "after_last_edit": after,
         "unclassified_commands": unclassified,
+        "over_configured_limit": over_limit,
+        "ceilings_source": None if caps is None or caps.source == "built-in defaults" else caps.source,
     }
 
 
@@ -197,17 +218,32 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         body.append(_after_last_edit_line(after))
 
     unclassified = int(report.get("unclassified_commands") or 0)
-    body.append(
-        f"Not classified: {unclassified} shell commands, so whether they read, wrote or "
-        "tested anything is unknown."
-    )
+    if unclassified == 0:
+        body.append("Every shell command was classified.")
+    elif unclassified == 1:
+        body.append(
+            "Not classified: 1 shell command, so whether it read, wrote or tested anything is unknown."
+        )
+    else:
+        body.append(
+            f"Not classified: {unclassified} shell commands, so whether they read, wrote or "
+            "tested anything is unknown."
+        )
+
+    over = report.get("over_configured_limit")
+    if over:
+        body.append(
+            f"Over the configured limit: {over['tool_calls']} tool calls against "
+            f"{over['limit']} (from {over['source']})"
+        )
 
     bookkeeping = sum(session.records.values())
     body.append(
         f"Also in the transcript: {session.assistant_turns} assistant turns, "
         f"{session.user_turns} user turns, {bookkeeping} bookkeeping records."
     )
-    body.append(f"Not read: {session.not_read} lines.")
+    not_read = session.not_read
+    body.append(f"Not read: {not_read} {'line' if not_read == 1 else 'lines'}.")
 
     if session.unmatched_results == 1:
         body.append("1 tool result matched no tool call.")

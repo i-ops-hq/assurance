@@ -28,6 +28,30 @@ def test_no_caller_can_exceed_the_ceiling():
     assert greedy.retries == run_budget.MAX_RETRIES
 
 
+def test_operator_ceilings_clamp_the_caller():
+    """The operator may raise the built-in defaults; the caller still cannot exceed them."""
+    from assurance_core.run_budget import Ceilings
+
+    assert Budget.allowing(tool_calls=5000, ceilings=Ceilings(tool_calls=400)).tool_calls == 400
+    assert Budget.allowing(tool_calls=300, ceilings=Ceilings(tool_calls=400)).tool_calls == 300
+
+
+def test_run_budget_imports_neither_os_nor_pathlib():
+    """Core stays pure: operator config is loaded outside this module."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(run_budget))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module.split(".", 1)[0])
+        elif isinstance(node, ast.Import):
+            names.update(alias.name.split(".", 1)[0] for alias in node.names)
+    assert "os" not in names
+    assert "pathlib" not in names
+
+
 def test_a_caller_may_always_be_more_conservative():
     """A tighter leash for a cheap plan or an untrusted worker has to remain possible."""
     tight = Budget.allowing(iterations=2, tool_calls=3, seconds=5)
