@@ -1,8 +1,17 @@
+# Actions are pinned to commit SHAs (see publish.yml), and a pinned SHA never updates itself. This is
+# what tells us when one of them has a new release. One grouped PR per ecosystem per month, so the
+# pull request list stays readable; a security advisory still opens its own PR straight away.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: pip
     directories: ["/packages/*"]
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    groups:
+      python:
+        patterns: ["*"]
