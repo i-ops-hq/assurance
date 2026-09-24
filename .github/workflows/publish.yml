@@ -11,6 +11,7 @@ name: publish
 # RELEASING: pyproject.toml is the version. The tag only triggers, and it names the package.
 #   1. bump `version` in packages/<pkg>/pyproject.toml   2. add the CHANGELOG heading
 #   3. commit                                            4. git tag <pkg>-vX.Y.Z && git push origin <pkg>-vX.Y.Z
+#   A GitHub Release with that CHANGELOG section follows on its own (release-notes.yml).
 #
 # Five packages share this repo, so a bare `v0.5.1` is ambiguous between them. The prefix is what
 # this workflow keys on to know what to build, and what the changelog gate checks each heading
