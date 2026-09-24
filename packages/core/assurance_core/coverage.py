@@ -1,17 +1,15 @@
 """What the agent was supposed to look at, what it actually opened, and the difference.
 
-Leg 3 of the strategy docs, designed in the product design.
-
 The failure this exists to prevent: ask for two years of financial trends, the agent reads
-twenty-two of the twenty-four monthly files, every tool call succeeds, `verify_narration` passes
+twenty-two of the twenty-four monthly files, every tool call succeeds, a groundedness check passes
 because every figure traces to something that was computed — **and the answer is wrong.** Nothing
 failed. Nothing flags it. Someone takes it to a board meeting.
 
-Every guard in this repo protects against the model *saying* something unsupported. None protects
+Most guards protect against the model *saying* something unsupported. None protects
 against the harness *reading* less than the question required. Grounding checks the output against
 the input; coverage checks the input against the question.
 
-Pure, like `run_outcome.py` and the question kinds module: no I/O, no model, no `app.services` import.
+Pure, like `run_outcome.py` and the question kinds module: no I/O, no model, no service import.
 That is what makes the guarantee model-independent — swap the brain and the prose changes, the
 coverage arithmetic does not. `tests/test_coverage.py` gates it.
 
@@ -46,7 +44,7 @@ before the inventory existed.
 - `unauthorized` — present, readable, and **this principal may not see it.** A different sentence
   entirely: "it is not in the folder" and "it exists and you are not cleared for it" send a user to
   do completely different things. This is also the seam where coverage meets
-  the context assurance doctrine's escalation path.
+  `principal.resolve`: the task changes owner, the answer does not.
 - `truncated` — the enumeration itself hit a cap, so the DENOMINATOR is wrong.
 
 That last one is the subtle one and it was nearly missed. `client_reports` caps at 500 clients and
@@ -333,7 +331,7 @@ class Coverage:
             parts.append(f"nothing readable in {', '.join(sorted(self.unreadable))}")
         if self.unauthorized:
             # NOT folded in with `missing`. "You are not cleared for this" is a different sentence
-            # and a different next step — see the context assurance doctrine on escalating task ownership.
+            # and a different next step — see `principal.resolve` on escalating task ownership.
             parts.append(f"not cleared to open {', '.join(sorted(self.unauthorized))}")
         if self.unmatched:
             # After the gap it explains, because it is the first thing to check when something is
@@ -409,7 +407,7 @@ def _names(expectations: list[Expectation]) -> str:
 #
 # Chroma tested 18 frontier models and every one degrades as input length grows, well before the
 # window fills; an association benchmark put ten of twelve below half their short-context score by
-# 32K tokens. The strategy docs §3.
+# 32K tokens.
 #
 # So this module is not a step towards feeding a model more. It is the record that lets the harness
 # feed a model LESS and still say what was left out — which is the only honest way to shrink an input

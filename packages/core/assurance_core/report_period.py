@@ -2,7 +2,7 @@
 
 Pure: no filesystem, no model, no clock unless one is handed in. That matters because this decides
 WHICH report gets attached to a client's email, and a wrong month is a wrong document sent to a
-customer — the most expensive mistake in the product design.
+customer — the most expensive mistake a report pipeline can make.
 
 **The default is evidence, not the calendar.** A common billing flow sends January's report in the first
 week of February, so "this month's report" means last month — and in the second week of March it

@@ -3,21 +3,19 @@
 Six packages live here, each with its own `CONTRIBUTING.md`. Read this page first, then the one for
 the package you are touching.
 
-Three of them open by naming an invariant that package may not break, and those are the ones to read
-closely before changing anything:
+Each one opens by naming the invariant that package may not break. Read it before changing anything:
 
 | Package | The line it may not cross |
 |---|---|
 | [`packages/deps`](packages/deps/CONTRIBUTING.md) | nothing may execute, import or extract the archives it examines |
 | [`packages/budget`](packages/budget/CONTRIBUTING.md) | a model may reason about a budget; only code may enforce one |
 | [`packages/authority`](packages/authority/CONTRIBUTING.md) | no branch returns `PROCEED` on the strength of a principal other than the initiator |
+| [`packages/core`](packages/core/CONTRIBUTING.md) | no I/O, no model, no third-party dependency — it decides, callers bring the data |
+| [`packages/cli`](packages/cli/CONTRIBUTING.md) | never invent a denominator; "could not check" is not a pass |
+| [`packages/mcp`](packages/mcp/CONTRIBUTING.md) | read-only by construction: no tool writes, deletes or opens the network |
 
-[`core`](packages/core/CONTRIBUTING.md), [`cli`](packages/cli/CONTRIBUTING.md) and
-[`mcp`](packages/mcp/CONTRIBUTING.md) carry a shorter, general page. Their constraints are real —
-core is the decision layer and stays free of I/O and model calls, cli must never invent a
-denominator, mcp is read-only by construction — but they are stated in those packages' READMEs
-rather than in their contributing pages. Writing them down properly is
-[a good first issue](https://github.com/i-ops-hq/assurance/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+All six are developed here. `packages/core` used to be generated from a private runtime; since
+2026-09-24 this repository is its source of truth, and pull requests against it land like any other.
 
 ## The rule all six follow
 
@@ -44,7 +42,7 @@ python -m pip install --upgrade pip                 # see the note below — thi
 python -m pip install -e packages/core -e "packages/cli[dev]" -e "packages/mcp[dev]" \
                       -e packages/budget -e packages/authority -e "packages/deps[dev]"
 
-python -m pytest                                    # 592 tests, about thirty seconds
+python -m pytest                                    # about 650 tests, about a minute
 ```
 
 That is the same order CI installs in, and all six are listed because the root `pytest` collects

@@ -17,7 +17,7 @@ would read as though it had.
 
 So a grant is checked against the worker's derived guarantees BEFORE the rules are consulted, and a
 worker that cannot be held to an effect is refused it no matter what any rule says. That is
-`NORTH_STAR` §5's "guarantees degrade honestly with integration depth" applied to authorisation
+"guarantees degrade honestly with integration depth" (see `worker`) applied to authorisation
 rather than to marketing copy.
 
 One consequence is worth stating because it looks strict until you follow it: **a worker that cannot
@@ -27,8 +27,8 @@ failure this product exists to remove.
 
 ## Shape, borrowed and not
 
-Deny before allow, default deny, fail closed on a broken rule, and a `dry-run` mode: all from
-OpenBot's policy engine (`docs/design/OPENBOT_GATEWAY_STUDY.md`), which had paid for each of them.
+Deny before allow, default deny, fail closed on a broken rule, and a `dry-run` mode: all borrowed
+from a published open-source agent gateway's policy engine, which had paid for each of them.
 
 **Not borrowed: CEL.** An expression language is right for an operator writing browser boundaries
 against a page nobody controls. Our rules answer authority questions, and *only code may enforce
@@ -44,7 +44,6 @@ from enum import Enum
 
 from assurance_core.effects import NEVER_PRODUCED, Effect
 from assurance_core.principal import Principal
-from assurance_core.effects import NEVER_PRODUCED, Effect
 from assurance_core.worker import Guarantee, WorkerDefinition
 
 NEVER_SOFTENS: frozenset[str] = frozenset({"unsupported", "not_produced"})
@@ -105,7 +104,7 @@ class Request:
     effect: Effect
     resource: str = ""
     """What the effect is aimed at — a folder label, a source name. Never a filesystem path: see
-    `docs/design/DISTRIBUTION_BOUNDARY.md` on authority naming a resource rather than a location."""
+    authority names a resource rather than a location, so a policy survives a folder being moved."""
 
 
 Rule = Callable[[Request], bool]
@@ -158,7 +157,7 @@ class Decision:
 def _fires(name: str, rule: Rule, request: Request, on_error: bool) -> bool:
     """Run one rule. Never raises.
 
-    `on_error` differs by list, which is OpenBot's asymmetry and it is right: **a broken `allow` must
+    `on_error` differs by list, which is that gateway's asymmetry and it is right: **a broken `allow` must
     not permit, and a broken `deny` must not stop denying.** A rule returning anything but a boolean
     is broken the same way as one that throws — it has not answered the question, and reading a
     non-answer as "no match" would silently disable a rule still listed as in force.
@@ -189,9 +188,9 @@ def decide(request: Request, policy: Policy) -> Decision:
     reason — a black-box worker would have been refused `DESTROY` because nothing destroys, rather
     than because nothing can supervise it, which is the claim that file exists to defend.
 
-    **Why step 1 is here and not in a deny rule.** It WAS a deny rule, in `decision_log.run_policy`,
-    and a fresh-context review found the hole: `run_plan` lets a caller inject its own `Policy` via
-    `context["policy"]`, and an injected policy without that rule permitted `SEND` and `DESTROY` for
+    **Why step 1 is here and not in a deny rule.** It WAS a deny rule, in the embedding runtime's
+    default policy, and a fresh-context review found the hole: the runtime let a caller inject its own
+    `Policy`, and an injected policy without that rule permitted `SEND` and `DESTROY` for
     a fully integrated worker. A protection that lives in one factory function is a property of that function, not of
     the system. Verified by constructing such a policy and asking — it returned `allowed=True`.
     """

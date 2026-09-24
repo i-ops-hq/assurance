@@ -1,14 +1,13 @@
 r"""Who a task is being done FOR, and the rule that no amount of machinery may bend.
 
-the completion doctrine, hard rules:
+The hard rule:
 
 > **Context acquisition must never increase the initiating principal's effective authorisation.** Not
 > through another worker, an employee, a summary, or a derived answer. An intern cannot direct an
 > agent to fetch finance-confidential context from the CFO — the run escalates task OWNERSHIP
 > instead. Anything else is a permission-laundering machine with our name on it.
 
-the runtime architecture §3 names `OrganizationPrincipal`. This is that, plus the one
-function the rule reduces to.
+This module is the principal, plus the one function the rule reduces to.
 
 ## Why the rule needs code and not care
 
@@ -41,7 +40,7 @@ from enum import Enum
 
 
 class PrincipalKind(str, Enum):
-    """From the runtime architecture §3."""
+    """What kind of identity is asking."""
 
     USER = "user"
     SERVICE_ACCOUNT = "service_account"
@@ -182,7 +181,7 @@ def resolve(
 
 
 # ---------------------------------------------------------------------------------------------------
-# What the three resolutions become. The context assurance doctrine §2 names both of these; they are the
+# What the three resolutions become. Both of these are
 # difference between a rule that refuses and a product that gets the task done anyway.
 # ---------------------------------------------------------------------------------------------------
 

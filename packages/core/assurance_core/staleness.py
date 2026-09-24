@@ -1,11 +1,11 @@
 r"""Whether a derived artifact still matches the source file it names today.
 
-Leg of the strategy docs §5b: an artifact records `facts_json` and `source_file` at
+An artifact records `facts_json` and `source_file` at
 generation time. This module compares those recorded figures to a fresh recompute — arithmetic only,
 no model, no cross-document inference. The artifact already names its own source; nothing is inferred
 from two unrelated folders sharing a period column.
 
-Pure: no I/O, no model, no `app.services` import. `tests/test_staleness.py` gates it.
+Pure: no I/O, no model, no service import. `tests/test_staleness.py` gates it.
 """
 
 from __future__ import annotations
