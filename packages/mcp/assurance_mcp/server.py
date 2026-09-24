@@ -155,7 +155,11 @@ def check_retrieval_coverage_tool(
 
 
 def main() -> None:
-    """Run the MCP server. `--root DIR` (repeatable) grants the folders the tools may read."""
+    """Run the MCP server. `--root DIR` (repeatable) grants the folders the tools may read.
+
+    `--version` is handled inside `parse` (argparse `action="version"`) and exits before the
+    server starts.
+    """
     boundary = parse(sys.argv[1:])
     configure(boundary)
     # stderr, because stdout is the protocol. Clients show a server's stderr in their MCP log, which

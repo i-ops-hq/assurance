@@ -27,6 +27,7 @@ touch no filesystem and work regardless, so a fresh install is never useless.
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -147,6 +148,11 @@ class Boundary:
 def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None) -> Boundary:
     """The boundary from `--root` arguments and `ASSURANCE_MCP_ROOTS`, together."""
     parser = argparse.ArgumentParser(prog="assurance-mcp", add_help=True)
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {importlib.metadata.version('assurance-mcp')}",
+    )
     parser.add_argument(
         "--root", action="append", default=[], metavar="DIR",
         help=f"A folder the tools may read (repeatable). Also read from {ENV_VAR}.",

@@ -1,3 +1,7 @@
+# Unreleased
+
+- **`--version`** prints `assurance deps <version>` and exits 0.
+
 # 0.2.4
 
 - **`prepare` on a registry dependency is no longer reported as install-time code.** npm runs
