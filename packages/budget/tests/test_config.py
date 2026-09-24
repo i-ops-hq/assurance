@@ -9,33 +9,131 @@ from pathlib import Path
 import pytest
 
 from assurance_budget.cli import main as budget_main
-from assurance_budget.config import ConfigError, load_ceilings
+from assurance_budget.config import ConfigError, limits_for_json, load_ceilings, project_overreach_notes
 from assurance_budget.session_cli import main as audit_main
 
 
-def test_precedence_user_project_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _write_user(monkeypatch: pytest.MonkeyPatch, home: Path, body: str) -> None:
+    monkeypatch.setenv("HOME", str(home))
+    cfg = home / ".config" / "assurance"
+    cfg.mkdir(parents=True)
+    (cfg / "config.toml").write_text(body, encoding="utf-8")
+
+
+def _write_project(project: Path, body: str) -> None:
+    (project / ".assurance").mkdir(parents=True, exist_ok=True)
+    (project / ".assurance" / "config.toml").write_text(body, encoding="utf-8")
+
+
+def test_project_cannot_raise_above_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
     if sys.version_info < (3, 11):
         pytest.skip("TOML config needs 3.11+")
     project = tmp_path / "proj"
-    (project / ".assurance").mkdir(parents=True)
-    (project / ".assurance" / "config.toml").write_text(
-        "[budget]\nseconds = 1200\n", encoding="utf-8"
-    )
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    home_cfg = tmp_path / "home" / ".config" / "assurance"
-    home_cfg.mkdir(parents=True)
-    (home_cfg / "config.toml").write_text("[budget]\ntool_calls = 100\n", encoding="utf-8")
+    project.mkdir()
+    _write_user(monkeypatch, tmp_path / "home", "[budget]\ntool_calls = 50\n")
+    _write_project(project, "[budget]\ntool_calls = 400\n")
 
+    ceilings = load_ceilings(project, {})
+    assert ceilings.tool_calls == 50
+    notes = project_overreach_notes(ceilings)
+    assert notes == [
+        ".assurance/config.toml asked for tool_calls = 400; "
+        "the project file can only lower a limit, so 50 applies."
+    ]
+    assert ("tool_calls", 400.0, 50.0) in ceilings.project_asked_more
+
+    log = project / "runs.jsonl"
+    log.write_text(
+        "\n".join(json.dumps({"run": "r", "action": f"s{i}", "kind": "tool"}) for i in range(2)),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project)
+    assert budget_main([str(log)]) == 0
+    out = capsys.readouterr().out
+    assert "asked for tool_calls = 400" in out
+    assert "so 50 applies" in out
+
+
+def test_project_can_tighten_under_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    if sys.version_info < (3, 11):
+        pytest.skip("TOML config needs 3.11+")
+    project = tmp_path / "proj"
+    project.mkdir()
+    _write_user(monkeypatch, tmp_path / "home", "[budget]\ntool_calls = 400\n")
+    _write_project(project, "[budget]\ntool_calls = 150\n")
+    ceilings = load_ceilings(project, {})
+    assert ceilings.tool_calls == 150
+    assert ceilings.project_asked_more == ()
+    assert ".assurance" in dict(ceilings.origins)["tool_calls"]
+
+
+def test_env_then_project_tighten_or_ignore(tmp_path: Path) -> None:
+    if sys.version_info < (3, 11):
+        pytest.skip("TOML config needs 3.11+")
+    project = tmp_path / "proj"
+    project.mkdir()
+    _write_project(project, "[budget]\ntool_calls = 200\n")
+
+    low = load_ceilings(project, {"ASSURANCE_MAX_TOOL_CALLS": "30"})
+    assert low.tool_calls == 30
+    assert ("tool_calls", 200.0, 30.0) in low.project_asked_more
+
+    high = load_ceilings(project, {"ASSURANCE_MAX_TOOL_CALLS": "300"})
+    assert high.tool_calls == 200
+    assert high.project_asked_more == ()
+    assert ".assurance" in dict(high.origins)["tool_calls"]
+
+
+def test_json_limits_names_source_per_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    if sys.version_info < (3, 11):
+        pytest.skip("TOML config needs 3.11+")
+    project = tmp_path / "proj"
+    project.mkdir()
+    _write_user(monkeypatch, tmp_path / "home", "[budget]\nseconds = 900\n")
+    _write_project(project, "[budget]\ntool_calls = 20\n")
+    env = {"ASSURANCE_MAX_ITERATIONS": "7"}
+    ceilings = load_ceilings(project, env)
+    limits = limits_for_json(ceilings)
+    assert limits["iterations"] == {"value": 7, "from": "ASSURANCE_MAX_ITERATIONS"}
+    assert limits["tool_calls"]["value"] == 20
+    assert ".assurance" in limits["tool_calls"]["from"]
+    assert limits["seconds"]["value"] == 900.0
+
+    log = project / "runs.jsonl"
+    log.write_text(
+        "\n".join(json.dumps({"run": "r", "action": f"s{i}", "kind": "tool"}) for i in range(2)),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("ASSURANCE_MAX_ITERATIONS", "7")
+    assert budget_main([str(log), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["limits"]["iterations"]["from"] == "ASSURANCE_MAX_ITERATIONS"
+    assert payload["limits"]["tool_calls"]["value"] == 20
+
+
+def test_precedence_user_env_then_project_tighten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if sys.version_info < (3, 11):
+        pytest.skip("TOML config needs 3.11+")
+    project = tmp_path / "proj"
+    project.mkdir()
+    # Project alone cannot raise seconds above the built-in 600.
+    _write_project(project, "[budget]\nseconds = 1200\n")
+    _write_user(monkeypatch, tmp_path / "home", "[budget]\ntool_calls = 100\n")
     env = {"ASSURANCE_MAX_ITERATIONS": "7"}
     ceilings = load_ceilings(project, env)
     assert ceilings.tool_calls == 100
-    assert ceilings.seconds == 1200.0
+    assert ceilings.seconds == 600.0
+    assert ("seconds", 1200.0, 600.0) in ceilings.project_asked_more
     assert ceilings.iterations == 7
-    assert ".assurance/config.toml" in ceilings.source or "config.toml" in ceilings.source
     assert "ASSURANCE_MAX_ITERATIONS" in ceilings.source
     assert "tool_calls" in ceilings.source
-    assert "seconds" in ceilings.source
-    assert "iterations" in ceilings.source
 
 
 def test_bad_values_are_refused_with_file_and_key(tmp_path: Path) -> None:
@@ -77,18 +175,13 @@ def test_env_still_works_when_toml_unavailable(
 def test_cli_flag_tightens_under_raised_ceiling(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    if sys.version_info < (3, 11):
-        pytest.skip("TOML config needs 3.11+")
-    (tmp_path / ".assurance").mkdir()
-    (tmp_path / ".assurance" / "config.toml").write_text(
-        "[budget]\ntool_calls = 400\n", encoding="utf-8"
-    )
     log = tmp_path / "runs.jsonl"
     log.write_text(
         "\n".join(json.dumps({"run": "r", "action": f"s{i}", "kind": "tool"}) for i in range(3)),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ASSURANCE_MAX_TOOL_CALLS", "400")
     budget_main([str(log), "--tool-calls", "300", "--json"])
     assert json.loads(capsys.readouterr().out)["budget"]["tool_calls"] == 300
 

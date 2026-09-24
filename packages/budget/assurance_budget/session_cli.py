@@ -14,12 +14,13 @@ from typing import Any, Sequence
 
 from assurance_core.run_budget import Ceilings, Progress, ProgressWatch, Stalled
 
-from assurance_budget.config import ConfigError, load_ceilings
+from assurance_budget.config import ConfigError, limits_for_json, load_ceilings, project_overreach_notes
 from assurance_budget.events import LogError
 from assurance_budget.sessions import (
     Session,
     ToolCall,
     after_last_edit,
+    changed_limits_file,
     edited_without_read,
     find_latest_session,
     read_claude_code,
@@ -94,7 +95,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     unread_edits = edited_without_read(session)
     after = after_last_edit(session)
     unclassified = unclassified_bash_count(session)
-    report = build_report(session, loops, unread_edits, after, unclassified, ceilings)
+    limits_changed = changed_limits_file(session)
+    report = build_report(
+        session, loops, unread_edits, after, unclassified, ceilings, limits_changed=limits_changed
+    )
     if args.as_json:
         print(json.dumps(report, indent=2))
     else:
@@ -132,6 +136,8 @@ def build_report(
     after: dict[str, Any] | None,
     unclassified: int,
     ceilings: Ceilings | None = None,
+    *,
+    limits_changed: bool = False,
 ) -> dict[str, Any]:
     by_tool = dict(Counter(call.name for call in session.tool_calls))
     failed = sum(1 for call in session.tool_calls if call.error)
@@ -140,15 +146,21 @@ def build_report(
         duration = max(0.0, session.ended - session.started)
     over_limit = None
     caps = ceilings
-    if caps is not None and caps.source != "built-in defaults":
-        n = len(session.tool_calls)
-        if n > caps.tool_calls:
-            over_limit = {
-                "tool_calls": n,
-                "limit": caps.tool_calls,
-                "source": caps.source,
-            }
-    return {
+    limits: dict[str, dict[str, Any]] = {}
+    project_notes: list[str] = []
+    if caps is not None:
+        limits = limits_for_json(caps)
+        project_notes = project_overreach_notes(caps)
+        if caps.source != "built-in defaults":
+            n = len(session.tool_calls)
+            if n > caps.tool_calls:
+                origin = dict(caps.origins).get("tool_calls", caps.source)
+                over_limit = {
+                    "tool_calls": n,
+                    "limit": caps.tool_calls,
+                    "source": origin,
+                }
+    payload: dict[str, Any] = {
         "session_id": session.session_id,
         "source": session.source,
         "cwd": session.cwd,
@@ -170,7 +182,13 @@ def build_report(
         "unclassified_commands": unclassified,
         "over_configured_limit": over_limit,
         "ceilings_source": None if caps is None or caps.source == "built-in defaults" else caps.source,
+        "changed_limits_file": limits_changed,
     }
+    if limits:
+        payload["limits"] = limits
+    if project_notes:
+        payload["project_limit_notes"] = project_notes
+    return payload
 
 
 def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]) -> str:
@@ -236,6 +254,12 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
             f"Over the configured limit: {over['tool_calls']} tool calls against "
             f"{over['limit']} (from {over['source']})"
         )
+
+    for note in report.get("project_limit_notes") or []:
+        body.append(note)
+
+    if report.get("changed_limits_file"):
+        body.append("This session changed .assurance/config.toml — the limits file for this project.")
 
     bookkeeping = sum(session.records.values())
     body.append(

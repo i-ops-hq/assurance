@@ -72,7 +72,13 @@ STALL_WINDOW = 3
 
 @dataclass(frozen=True)
 class Ceilings:
-    """The limits the operator has set. The agent (the caller) can never raise them."""
+    """The limits the operator has set. The agent (the caller) can never raise them.
+
+    `origins` maps each key whose final value is not a built-in default to a short label for where
+    that value came from (a config path or an `ASSURANCE_MAX_*` name). `project_asked_more` lists
+    `(key, asked, applied)` when a project file requested a higher ceiling than it is allowed to set
+    — the project file can only lower a limit.
+    """
 
     iterations: int = MAX_ITERATIONS
     tool_calls: int = MAX_TOOL_CALLS
@@ -80,6 +86,8 @@ class Ceilings:
     seconds: float = MAX_SECONDS
     retries: int = MAX_RETRIES
     source: str = "built-in defaults"
+    origins: tuple[tuple[str, str], ...] = ()
+    project_asked_more: tuple[tuple[str, float, float], ...] = ()
 
 
 def built_in_ceilings() -> Ceilings:

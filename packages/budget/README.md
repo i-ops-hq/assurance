@@ -117,22 +117,25 @@ With an operator ceiling of 400 and a flag asking for 300, you get 300 — the c
 tighten, never loosen:
 
 ```toml
-# ~/.config/assurance/config.toml  or  <project>/.assurance/config.toml
+# ~/.config/assurance/config.toml  (operator — may raise or lower)
 [budget]
 tool_calls = 400
 seconds = 3600
 ```
 
 ```bash
-export ASSURANCE_MAX_TOOL_CALLS=500   # wins over the files, for one key
+export ASSURANCE_MAX_TOOL_CALLS=500   # also operator; wins over the user file for one key
 assurance-budget runs.jsonl --tool-calls 300 --json | grep tool_calls
 #   "tool_calls": 300
 ```
 
-Precedence, lowest to highest: built-in defaults → `~/.config/assurance/config.toml` (Windows:
-`%APPDATA%\assurance\config.toml`) → `<cwd>/.assurance/config.toml` → `ASSURANCE_MAX_*` environment
-variables. Unknown keys and non-positive values are refused with the file and key named. Every report
-that applies a limit names where it came from.
+The user file and environment variables set limits; the project file, which sits in the repo an
+agent can write, can only lower them. Precedence: built-in defaults → `~/.config/assurance/config.toml`
+(Windows: `%APPDATA%\assurance\config.toml`) → `ASSURANCE_MAX_*` environment variables →
+`<cwd>/.assurance/config.toml` as `min(current, project)`. A project value above the current ceiling
+is ignored for that key and named in the report. Unknown keys and non-positive values are refused
+with the file and key named. Every report that applies a non-default limit names where it came from
+under `limits` in `--json`.
 
 It clamps rather than erroring, on purpose. A caller asking for 5000 is expressing a preference the
 runtime declines — that is not a reason to abort somebody's task. Lower values pass straight through,
