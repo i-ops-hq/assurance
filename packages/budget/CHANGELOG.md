@@ -1,3 +1,22 @@
+# 0.2.2
+
+- **`assurance audit --hook`: run the audit after every Claude Code turn.** As a Stop hook it reads
+  the hook input on stdin and speaks only when the session's last edit inside the project was not
+  followed by a test or check, or the last test run after it failed. You get one line
+  (`systemMessage`). With `--nudge` Claude is told too (`additionalContext`), so it runs the tests
+  before it stops; it never nudges twice in a turn (`stop_hook_active`). It always exits 0: a hook
+  that cannot read its input, or hits a bug, says so and lets the session end. Verified in a real
+  Claude Code run: the agent fixed a bug, said "All done" without testing, was nudged, ran pytest,
+  and the second Stop was silent.
+- **`assurance audit --demo`** audits a sample session bundled with the package, from any folder, so
+  anyone can see a report before using it on their own work. The "no session recorded" error now
+  points at it.
+- **"Not classified" names what it could not classify:** `Not classified: 158 shell commands
+  (python - ×65, curl ×28, assurance ×18, 15 more kinds)`. A short label per command (the program,
+  its subcommand for git/make/npm and similar, or python's mode), never the full text. `--json`
+  gains `unclassified_by_command`.
+- **A file that is not UTF-8 is refused with a message**, not a `UnicodeDecodeError` traceback.
+
 # 0.2.1
 
 - **`assurance audit` shortens test labels and groups by them.** After the last edit, each test

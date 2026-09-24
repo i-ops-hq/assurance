@@ -24,9 +24,17 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 
   Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
   After the last edit (14:09): no test or check command ran
-  Not classified: 2 shell commands, so whether they read, wrote or tested anything is unknown.
+  Not classified: 2 shell commands (make lint-fix, python script), so whether they read, wrote or tested anything is unknown.
   Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
   Not read: 0 lines.
+```
+
+`assurance audit --demo` prints this from any folder. As a Claude Code **Stop hook**, it runs after
+every turn and speaks only when the last edit wasn't followed by a passing test or check; `--nudge`
+also sends Claude back to run them (once per turn, and it never fails the session):
+
+```json
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx assurance audit --hook --nudge" } ] } ] } }
 ```
 
 **Run-log budget** (JSONL with a per-run id):
@@ -69,8 +77,9 @@ assert spend.tool_calls <= 20
 ## What it checks
 
 - Tool calls, failures, and loops in a Claude Code session (`assurance audit`)
-- Edits without a prior Read or Write; whether a test or check ran after the last in-project edit
-- Shell commands it could not classify (named at the same weight as findings); `Not read:` lines name why
+- Whether a test or check ran after the last in-project edit, and whether the last one passed
+- Shell commands it could not classify, named by kind (`python -c ×3, curl`); `Not read:` lines name why
+- Edits with no visible read, in `--json` (Claude Code itself refuses those, so the text stays quiet)
 - Which runs in a JSONL log hit a ceiling or stalled with nothing new read
 - Which configured limits the log never exercised (silence, not a pass)
 

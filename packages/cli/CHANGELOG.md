@@ -1,3 +1,12 @@
+# 0.6.1
+
+- **`audit` comes first** on the start screen, in `assurance --help`, and in the command list; the
+  start screen shows `assurance audit --demo` and where to set up the Stop hook. The help text leads
+  with what the tool is for: *your AI agent says it's done; this tells you what it didn't check.*
+- **`assurance --version` names every installed part:** `assurance 0.1.2 (cli 0.6.1, budget 0.2.2,
+  deps 0.2.4, authority 0.1.4, …)`, on one line. It printed only the cli's version, so someone who had
+  installed `assurance 0.1.1` was told `assurance 0.6.0`.
+
 # 0.6.0
 
 - **Operator ceilings** for `assurance budget` / `assurance audit` (config files and `ASSURANCE_MAX_*`),

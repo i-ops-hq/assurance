@@ -41,3 +41,21 @@ def test_the_readme_audit_block_is_what_the_tool_prints(
     shown = block.group(1).strip().splitlines()
 
     assert shown == printed
+
+
+@pytest.mark.skipif(not SAMPLE.is_file(), reason="not running from a source checkout")
+def test_every_readme_showing_the_sample_audit_shows_what_the_tool_prints(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The PyPI pages of `assurance` and `assurance-budget` show the same report; they drift too.
+    monkeypatch.setenv("TZ", "UTC")
+    if hasattr(time, "tzset"):
+        time.tzset()
+    else:
+        pytest.skip("cannot pin the timezone on this platform")
+    assert main([str(SAMPLE)]) == 0
+    printed = capsys.readouterr().out.strip().splitlines()
+    for readme in (ROOT / "packages" / "budget" / "README.md", ROOT / "packages" / "assurance" / "README.md"):
+        block = re.search(r"\n(Claude Code session demo-8f2.*?)\n```", readme.read_text(encoding="utf-8"), re.S)
+        assert block, f"{readme} no longer shows the sample audit"
+        assert block.group(1).strip().splitlines() == printed, readme
