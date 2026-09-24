@@ -34,7 +34,7 @@ every turn and speaks only when the last edit wasn't followed by a passing test 
 also sends Claude back to run them (once per turn, and it never fails the session):
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx assurance audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx assurance@0.1.3 audit --hook --nudge" } ] } ] } }
 ```
 
 **Run-log budget** (JSONL with a per-run id):

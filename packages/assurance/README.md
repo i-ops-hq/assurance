@@ -29,7 +29,7 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 testing its last edit, you're told, and with `--nudge` Claude is sent back to run the tests:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx assurance audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx assurance@0.1.3 audit --hook --nudge" } ] } ] } }
 ```
 
 ## Every command

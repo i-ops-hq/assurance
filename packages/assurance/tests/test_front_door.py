@@ -46,3 +46,19 @@ def test_the_readme_lists_every_forwarded_subcommand() -> None:
     readme = (PACKAGE / "README.md").read_text(encoding="utf-8")
     for name in FORWARDED:
         assert f"`assurance {name}`" in readme, name
+
+
+@pytest.mark.skipif(tomllib is None, reason="tomllib is Python 3.11+")
+def test_every_pinned_command_in_the_readmes_is_this_release() -> None:
+    """The hook runs after every turn, so the READMEs pin it (`uvx assurance@X.Y.Z …`). A pin that
+    lags the release would have everyone who copies it run old code; one ahead would fail to install."""
+    import re
+
+    version = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    root = PACKAGE.parents[1]
+    found = 0
+    for readme in (root / "README.md", PACKAGE / "README.md", root / "packages" / "budget" / "README.md"):
+        for pinned in re.findall(r"uvx assurance@([0-9][^ \"`]*)", readme.read_text(encoding="utf-8")):
+            found += 1
+            assert pinned == version, f"{readme} pins assurance@{pinned}, this release is {version}"
+    assert found, "no pinned `uvx assurance@…` command in the READMEs"
