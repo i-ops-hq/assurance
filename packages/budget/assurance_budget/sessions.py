@@ -40,6 +40,8 @@ _CHANGE_TOOLS = _EDIT_TOOLS | _WRITE_TOOLS
 _READ_TOOLS = frozenset({"Read"})
 _LIMITS_FILE_SUFFIX = ".assurance/config.toml"
 _LIMITS_BASH_MARKERS = (">", ">>", "tee", "sed -i", "cp", "mv")
+# Path-like tokens in a Bash command that name a limits file (relative or absolute).
+_LIMITS_PATH_IN_CMD = re.compile(r"""([^\s;|&'"]*\.assurance/config\.toml)""")
 
 BashKind = Literal["test", "check", "read", "unclassified"]
 
@@ -299,26 +301,37 @@ def read_claude_code(path: Path) -> Session:
 
 
 def changed_limits_file(session: Session) -> bool:
-    """True when this session wrote or edited `.assurance/config.toml`.
+    """True when this session wrote or edited *this project's* `.assurance/config.toml`.
 
-    Matches Write/Edit/MultiEdit/NotebookEdit whose path ends with that file, or a Bash command that
-    both names the file and contains a write marker (`>`, `>>`, `tee`, `sed -i`, `cp`, `mv`).
+    The path must resolve against the session `cwd` to exactly `<cwd>/.assurance/config.toml`.
+    A write to `/tmp/other/.assurance/config.toml` does not count. Relative
+    `.assurance/config.toml` / `./.assurance/config.toml` and the absolute project path do.
+    Write/Edit/MultiEdit/NotebookEdit use their path; Bash needs a write marker
+    (`>`, `>>`, `tee`, `sed -i`, `cp`, `mv`) and a matching path token in the command.
     """
     for call in session.tool_calls:
         if call.name in _CHANGE_TOOLS:
-            path = call.input.get("file_path")
-            if isinstance(path, str) and path.replace("\\", "/").endswith(_LIMITS_FILE_SUFFIX):
+            path = _call_path(call)
+            if path is not None and _is_session_limits_file(path, session.cwd):
                 return True
         if call.name == "Bash":
             command = call.input.get("command")
             if not isinstance(command, str):
                 continue
-            normalised = command.replace("\\", "/")
-            if ".assurance/config.toml" not in normalised:
+            if not any(marker in command for marker in _LIMITS_BASH_MARKERS):
                 continue
-            if any(marker in command for marker in _LIMITS_BASH_MARKERS):
-                return True
+            for token in _LIMITS_PATH_IN_CMD.findall(command.replace("\\", "/")):
+                if _is_session_limits_file(token, session.cwd):
+                    return True
     return False
+
+
+def _is_session_limits_file(path: str, cwd: str) -> bool:
+    """Whether `path`, resolved against `cwd`, is exactly `<cwd>/.assurance/config.toml`."""
+    if not cwd or not path:
+        return False
+    expected = _norm_path(_LIMITS_FILE_SUFFIX, cwd)
+    return _norm_path(path, cwd) == expected
 
 
 def edited_without_read(session: Session) -> list[str]:
@@ -367,7 +380,7 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
     tests = 0
     tests_failed = 0
     checks = 0
-    test_labels: list[str] = []
+    test_runs: list[dict[str, Any]] = []
     for call in session.tool_calls[last_i + 1 :]:
         if call.name != "Bash":
             continue
@@ -377,21 +390,48 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
         kind = classify_bash(command)
         if kind == "test":
             tests += 1
-            label = _bash_label(command, _TEST_PREFIXES) or "test"
-            if call.error:
+            failed = bool(call.error)
+            if failed:
                 tests_failed += 1
-                test_labels.append(f"{label}, failed")
-            else:
-                test_labels.append(label)
+            test_runs.append({"command": command, "failed": failed})
         elif kind == "check":
             checks += 1
+    # `test_labels` kept for JSON consumers: grouped display strings in first-seen order.
     return {
         "at": last_at,
         "tests": tests,
         "tests_failed": tests_failed,
         "checks": checks,
-        "test_labels": test_labels,
+        "test_runs": test_runs,
+        "test_labels": _group_test_labels(test_runs),
     }
+
+
+def _group_test_labels(test_runs: list[dict[str, Any]]) -> list[str]:
+    """Group identical command strings (first-seen order); mark failures per group."""
+    order: list[str] = []
+    totals: dict[str, int] = {}
+    fails: dict[str, int] = {}
+    for run in test_runs:
+        cmd = str(run["command"])
+        if cmd not in totals:
+            order.append(cmd)
+            totals[cmd] = 0
+            fails[cmd] = 0
+        totals[cmd] += 1
+        if run.get("failed"):
+            fails[cmd] += 1
+    labels: list[str] = []
+    for cmd in order:
+        n = totals[cmd]
+        failed = fails[cmd]
+        if failed == 0:
+            labels.append(cmd if n == 1 else f"{cmd} ×{n}")
+        elif failed == n:
+            labels.append(f"{cmd} failed" if n == 1 else f"{cmd} ×{n} failed")
+        else:
+            labels.append(f"{cmd} ×{n}, {failed} failed")
+    return labels
 
 
 def unclassified_bash_count(session: Session) -> int:
@@ -483,22 +523,6 @@ def _classify_argv(argv: list[str]) -> BashKind:
         if _startswith(argv, prefix):
             return "read"
     return "unclassified"
-
-
-def _bash_label(command: str, prefixes: tuple[tuple[str, ...], ...]) -> str:
-    """A short name for a matched prefix (e.g. `pytest`, `npm test`), for the report line."""
-    for segment in re.split(r"&&|;|\|", command):
-        segment = segment.strip()
-        if not segment:
-            continue
-        try:
-            argv = shlex.split(segment)
-        except ValueError:
-            continue
-        for prefix in prefixes:
-            if _startswith(argv, prefix):
-                return " ".join(prefix)
-    return ""
 
 
 def _startswith(argv: list[str], prefix: tuple[str, ...]) -> bool:

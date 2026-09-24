@@ -1,117 +1,43 @@
 # assurance-deps
 
-**`pip install` and `npm install` are permission to execute arbitrary code on your machine, and
-almost nothing looks at that code first.** This looks at it.
+[![PyPI](https://img.shields.io/pypi/v/assurance-deps)](https://pypi.org/project/assurance-deps/)
+[![Tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
+[![Python](https://img.shields.io/pypi/pyversions/assurance-deps)](https://pypi.org/project/assurance-deps/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance/blob/main/packages/deps/LICENSE)
+
+What will `pip install` / `npm install` execute on your machine — read without running it?
+
+## Install
+
+```bash
+pip install assurance-deps
+# or: pip install assurance   # every tool
+```
+
+## Quick start
+
+Point at a requirements file with no local wheels (real output):
 
 ```
-$ assurance deps requirements.txt
+$ assurance deps /tmp/deps-demo/requirements.txt
+requirements.txt — 1 requirement, 0 read in full
 
-requirements.txt — 12 requirements, 9 read in full
-Counted over the 12 requirements in requirements.txt.
+Could not be examined at all (1):
+  · requests               no archive for it under /tmp/deps-demo, /tmp/deps-demo/wheels and the network was never opened
 
-Could not be examined at all (3):
-  · torch                  no archive for it under /srv/app and the network was never opened
-  · internal-utils         a local path (../internal-utils), which is a working tree rather than an archive
-  · pyyaml                 a git URL, so there is no archive on this machine to read
-
-Of the 9 read, 2 execute code when installed:
-  · fastjsonschema 2.21.2   runs at install time; runs other programs, compiles a C extension
-  · numpy 1.26.4            builds with setuptools.build_meta
-
-3 ship a compiled binary:
-  · cryptography 42.0.5   12 binaries
-
-2 do not come from the package index:
-  · pyyaml    git+https://github.com/x/pyyaml@main   not pinned to a commit, so what installs can change without the file changing
-  · internal-utils   ../internal-utils   a local path, so what installs is whatever is on this machine
+Nothing was read, so nothing is reported about install-time code. This is silence, not a pass.
 
 No lockfile beside the manifest, so the transitive tree was not compared.
 
-This says what an install will run, not whether running it is acceptable — that is your call.
-Nothing here was executed, no advisory database was consulted, and the network was never opened.
+This says what an install will run, not whether running it is acceptable — that is your call. Nothing here was executed, no advisory database was consulted, and the network was never opened.
+
+Not looked for: how new any of this is. A package name an AI invented and somebody then
+registered is new by definition, and nothing here reads a publish date — so a name that
+appeared last week and one that has been on the index for a decade look identical to
+these four checks.
 ```
 
-## npm, where it matters most
-
-`preinstall`, `install` and `postinstall` are arbitrary shell that `npm install` runs on your
-machine, and `npx` runs a package before anyone has looked at anything at all.
-
-```
-$ assurance deps package.json
-
-package.json — 28 packages, 3 read in full
-Counted over the 28 packages the lockfile resolves to.
-
-25 known from the lockfile only — it records whether each has an install script, not what the script does:
-  · none of them declares one
-
-Of the 3 read, 1 executes code when installed:
-  · esbuild 0.28.2   node install.js
-
-Against package-lock.json: the same set of names, so the lock is not stale.
-```
-
-**The lockfile is the best evidence there is, and it needs no archives.** npm records
-`hasInstallScript` for every package in the resolved tree, so "what will run code" is answerable for
-the whole transitive tree offline. `node_modules` then supplies the script bodies for whatever is
-installed, and the two are counted apart — knowing a package *has* an install script is not the same
-as having read it. `prepare` is on the list too, which is the one people forget: it runs on `npm ci`
-and on every git or local-directory dependency. It is **not** counted for a package installed from a
-registry tarball, because npm does not run it there — counting it overstated a real project's
-install-time code threefold.
-
-## The part that is not a feature
-
-**It reports what it could NOT check, first, and at the same weight as what it did.**
-
-Every scanner prints findings. Almost none print their own blind spots, so a clean report and an
-incomplete one look identical. *"No issues found"* over 9 of 12 packages is a lie by omission, and
-the three lines above the findings are the ones that make the rest of the report mean anything.
-
-## What it checks
-
-Four checks, all of them offline, none of them consulting a model or a database.
-
-| check | what it answers |
-|---|---|
-| install hooks | what runs when pip installs this — `setup.py`, the PEP 517 build backend, `setup.cfg` |
-| native payloads | whether a compiled binary ships inside — `.so`, `.dylib`, `.dll`, `.node`, `.pyd` |
-| non-registry sources | git URLs, direct archive URLs and local paths, where a version number is not a version |
-| transitive delta | what a committed lockfile holds that the manifest never asked for |
-
-Python reads `requirements.txt` or `pyproject.toml` — PEP 621 `dependencies`, the optional extras,
-PEP 735 dependency groups, poetry's table and the build requirements — plus any archives you have
-downloaded. npm reads `package.json`, `package-lock.json` and `node_modules`.
-
-**Anything else is refused rather than read.** Until 0.2.2 the Python half was a line parser with no
-syntax it rejected, so a `pyproject.toml` came back as "136 requirements" with `[build-system]`,
-`version` and `authors` named as packages, and three sentences of prose came back as three. A count
-assembled from whatever was on the lines is worse than no count. Now the file is identified first,
-and a file that is neither shape is named along with the line that gave it away.
-
-On Python 3.10 there is no `tomllib`, and adding `tomli` would cost this package its zero
-dependencies — so a text reader stands in, and the report says when it did. It is held to the real
-parser's answer two ways: a test compares the two readers directly on a fixture carrying every
-shape that has broken one of them, and during development they were run against each other over
-126 real `pyproject.toml` files until they agreed string for string. The test is what CI enforces;
-the 126 files are not in this repository and are not re-run on every commit.
-
-It also names `.pth` files, which the interpreter executes on every start, long after any
-install-time check has finished.
-
-## It never runs what it reads
-
-Archive members are listed, a few named files are pulled into memory, and Python source is parsed to
-an AST — which compiles but does not execute. Nothing is written to disk and nothing is imported.
-Never extracting settles path traversal for free: a tar entry called `../../etc/passwd` is a name in
-a listing here, not a destination.
-
-`tests/test_never_executes.py` was written **before** the reader and proves it with a hostile
-`setup.py` that would leave a sentinel file behind. A dependency gate that executes the thing it is
-inspecting is not a bug in a security tool; it is the vulnerability, performed by the tool, on every
-package a user points it at.
-
-## Use it as a library
+As a library:
 
 ```python
 from pathlib import Path
@@ -129,13 +55,10 @@ folder = Path(tempfile.mkdtemp())
 
 report = scan_manifest(folder / "requirements.txt")
 
-# Nothing was downloaded, so nothing could be read — and that is stated, not implied.
 assert report.total == 2
 assert report.examined == 0
 assert report.complete is False
 assert [u.name for u in report.unexamined] == ["requests", "thing"]
-
-# The manifest alone still answers one of the four checks.
 assert [r.name for r in report.off_index] == ["thing"]
 assert "not pinned to a commit" in report.off_index[0].note
 
@@ -152,49 +75,27 @@ assert payload["claims"] == {
 }
 ```
 
-## The attack these four checks cannot see
+## What it checks
 
-Offline is a real constraint and not only a virtue. AI coding tools recommend package names that do
-not exist, the same invented name tends to recur across runs rather than being random, and an
-attacker only has to register one and wait. **A package arriving that way is new by definition.**
+- Install hooks (`setup.py`, PEP 517 backend, npm `preinstall`/`install`/`postinstall`/`prepare`)
+- Native binaries inside archives (`.so`, `.dylib`, `.dll`, `.node`, `.pyd`)
+- Non-registry sources (git URLs, direct archives, local paths)
+- Transitive delta vs a lockfile
+- What it could **not** examine, at the same weight as findings
 
-Publish date is the signal, and reading it needs a registry, which needs a network, which this does
-not open. So a name that appeared last week and one that has been on the index for a decade are
-indistinguishable here. The report says so in its own closing lines rather than leaving you to
-notice.
+## In CI
 
-None of the four checks is a substitute. A fabricated package that simply exfiltrates on import,
-with no install hook and no compiled payload, passes all of them.
-
-## What it will not say
-
-- **Not "safe".** It reports what a package will execute. Whether that is acceptable is your call,
-  and a tool that says "safe" has taken a decision it cannot support.
-- **Not "sandboxed".** Reading an archive is not containment.
-- **Not a vulnerability database.** Advisory lookup is somebody else's product. This consults none,
-  so it will never tell you a package is known-bad.
-- **Not blocking.** It reports. A gate that blocks before it has earned trust gets turned off, and
-  then it guards nothing.
-
-## Exit codes
-
-| | |
+| exit | means |
 |---|---|
-| `0` | it read every requirement and found nothing to report |
-| `1` | there is something to look at: install-time code, a `.pth` startup hook, an off-index source, **or a requirement nobody could examine** |
-| `2` | it could not run: no such file, or a manifest it cannot parse |
+| `0` | scanned; no install-hook / binary / off-index findings |
+| `1` | hooks, startup hooks, off-index sources, or unexamined requirements |
+| `2` | manifest could not be read |
 
-**A requirement it could not examine counts as a finding.** Exiting 0 over an incomplete read is the
-whole failure this is built against.
+## Limits
 
-**A compiled binary does not.** It is reported, and it is not a reason to stop: `psycopg2-binary`
-ships ten and MarkupSafe one, so exiting 1 on that would fire on nearly every repository there is,
-which is how a gate becomes a line in a CI file everybody has learned to ignore.
+- **Offline.** No network, no advisory DB — publish-date / typosquat age is invisible here and the report says so.
+- **Never executes** what it reads (AST / listing only).
+- **Unknown file shapes are refused**, not line-parsed into fake package counts.
+- npm `prepare` on a registry tarball is not counted as install-time code (npm does not run it there).
 
-## Scope
-
-Python and npm, both offline. Registry checks — publisher changes, release age, name distance
-against popular packages — need a network and are not here. Running an install under observation is
-a different promise and is not implied by this one.
-
-Apache-2.0. Part of [assurance](https://github.com/i-ops-hq/assurance).
+See the [root README](https://github.com/i-ops-hq/assurance#readme) and [CHANGELOG.md](CHANGELOG.md).

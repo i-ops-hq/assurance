@@ -10,3 +10,5 @@ uvx assurance audit examples/audit/sample-session.jsonl
 
 The session is invented; the output is what the published tool prints for it. To audit your own
 work, run `assurance audit` with no arguments inside a project where you've used Claude Code.
+
+Times print in your local timezone; the README shows UTC (`TZ=UTC assurance audit …`).

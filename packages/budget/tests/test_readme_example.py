@@ -7,6 +7,7 @@ where that rule matters most and where it drifts first, so the example is run he
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,17 @@ README = ROOT / "README.md"
 
 
 @pytest.mark.skipif(not SAMPLE.is_file(), reason="not running from a source checkout")
-def test_the_readme_audit_block_is_what_the_tool_prints(capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_readme_audit_block_is_what_the_tool_prints(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The audit prints times in the machine's local zone, so the README block is pinned to UTC and so
+    # is this run. Regenerating the block on a laptop in another zone gave 07:09 against CI's 14:09.
+    # Regenerate it with:  TZ=UTC assurance audit examples/audit/sample-session.jsonl
+    monkeypatch.setenv("TZ", "UTC")
+    if hasattr(time, "tzset"):
+        time.tzset()
+    else:  # Windows has no tzset; the times would follow the machine's zone
+        pytest.skip("cannot pin the timezone on this platform")
     assert main([str(SAMPLE)]) == 0
     printed = capsys.readouterr().out.strip().splitlines()
 

@@ -1,5 +1,13 @@
 # Unreleased
 
+- **`assurance audit` only reports a change to this project's limits file.** A write to
+  `/tmp/…/.assurance/config.toml` was treated as changing the project file because any path ending
+  in that name counted. Paths now resolve against the session `cwd` and must be exactly
+  `<cwd>/.assurance/config.toml`.
+- **Singular wording at 1** in the audit text (`1 assistant turn`, `1 test run`, `1 check`, …).
+- **Repeated test commands are grouped** in the after-last-edit line (`pytest -q ×2` instead of
+  listing the same command twice).
+
 - **`assurance audit` shows paths relative to the session folder on every machine.** It resolved the
   session's `cwd` against the local disk but not the file paths, so they stopped matching whenever the
   folder sat behind a symlink — on macOS `/home` is one, so every path in a transcript from a Linux

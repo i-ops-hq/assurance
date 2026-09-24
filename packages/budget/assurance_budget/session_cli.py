@@ -218,9 +218,8 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     if n or failed:
         fail_bit = f", {failed} failed" if failed else ""
         breakdown = _tool_breakdown(report["by_tool"])
-        lines.append(
-            f"{n} tool calls{fail_bit} — {breakdown}" if breakdown else f"{n} tool calls{fail_bit}"
-        )
+        call_bit = _count_phrase(n, "tool call", "tool calls")
+        lines.append(f"{call_bit}{fail_bit} — {breakdown}" if breakdown else f"{call_bit}{fail_bit}")
 
     body: list[str] = []
     if loops:
@@ -263,8 +262,10 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
 
     bookkeeping = sum(session.records.values())
     body.append(
-        f"Also in the transcript: {session.assistant_turns} assistant turns, "
-        f"{session.user_turns} user turns, {bookkeeping} bookkeeping records."
+        "Also in the transcript: "
+        f"{_count_phrase(session.assistant_turns, 'assistant turn', 'assistant turns')}, "
+        f"{_count_phrase(session.user_turns, 'user turn', 'user turns')}, "
+        f"{_count_phrase(bookkeeping, 'bookkeeping record', 'bookkeeping records')}."
     )
     not_read = session.not_read
     body.append(f"Not read: {not_read} {'line' if not_read == 1 else 'lines'}.")
@@ -283,6 +284,11 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     return "\n".join(lines)
 
 
+def _count_phrase(n: int, singular: str, plural: str) -> str:
+    """`1 thing` / `N things` — singular only at exactly 1."""
+    return f"1 {singular}" if n == 1 else f"{n} {plural}"
+
+
 def _after_last_edit_line(after: dict[str, Any]) -> str:
     when = _clock(after.get("at"))
     prefix = f"After the last edit ({when}):" if when else "After the last edit:"
@@ -291,15 +297,11 @@ def _after_last_edit_line(after: dict[str, Any]) -> str:
     if tests == 0 and checks == 0:
         return f"{prefix} no test or check command ran"
     labels = list(after.get("test_labels") or [])
-    if tests == 1 and labels:
-        test_bit = f"1 test run ({labels[0]})"
-    elif tests == 1:
-        test_bit = "1 test run"
-    elif labels:
-        test_bit = f"{tests} test runs ({'; '.join(labels)})"
-    else:
-        test_bit = f"{tests} test runs"
-    return f"{prefix} {test_bit}, {checks} checks"
+    test_bit = _count_phrase(tests, "test run", "test runs")
+    if labels:
+        test_bit = f"{test_bit} ({', '.join(labels)})"
+    check_bit = _count_phrase(checks, "check", "checks")
+    return f"{prefix} {test_bit}, {check_bit}"
 
 
 def _loop_line(loop: Stalled) -> str:

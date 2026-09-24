@@ -632,8 +632,198 @@ def test_after_last_edit_reports_failed_pytest(tmp_path: Path, capsys) -> None:
     assert after["checks"] == 0
     assert main([str(path)]) == 0
     out = capsys.readouterr().out
-    assert "1 test run (pytest, failed)" in out
+    assert "1 test run (pytest -q failed)" in out
     assert "0 checks" in out
+
+
+def test_limits_file_outside_cwd_is_not_this_projects(tmp_path: Path) -> None:
+    """A write to /tmp/.../.assurance/config.toml is not this project's limits file."""
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    outside = "/tmp/other/.assurance/config.toml"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("w1", "Write", file_path=outside, content="x")],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("w1", "ok")], "2026-09-24T01:00:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [
+                        _tool_use(
+                            "b1",
+                            "Bash",
+                            command=f"printf '[budget]\\n' > {outside}",
+                        )
+                    ],
+                    "2026-09-24T01:00:02.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("b1", "ok")], "2026-09-24T01:00:03.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert changed_limits_file(read_claude_code(path)) is False
+
+
+def test_relative_and_absolute_limits_file_in_cwd_count(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    abs_limits = str(tmp_path / ".assurance" / "config.toml")
+    for file_path in (".assurance/config.toml", "./.assurance/config.toml", abs_limits):
+        path = tmp_path / "s.jsonl"
+        path.write_text(
+            "\n".join(
+                [
+                    _assistant(
+                        "abc",
+                        cwd,
+                        [_tool_use("w1", "Write", file_path=file_path, content="x")],
+                        "2026-09-24T01:00:00.000Z",
+                    ),
+                    _user("abc", cwd, [_tool_result("w1", "ok")], "2026-09-24T01:00:01.000Z"),
+                ]
+            ),
+            encoding="utf-8",
+        )
+        assert changed_limits_file(read_claude_code(path)) is True, file_path
+
+
+def test_audit_plurals_at_one_and_two(tmp_path: Path, capsys) -> None:
+    cwd = str(tmp_path)
+
+    def _write(*, n: int) -> Path:
+        lines: list[str] = []
+        for i in range(n):
+            lines.append(
+                _line(
+                    type="summary",
+                    sessionId="abc",
+                    cwd=cwd,
+                    summary=f"s{i}",
+                    timestamp="2026-09-24T00:00:00.000Z",
+                )
+            )
+        for i in range(n):
+            lines.append(
+                _line(
+                    type="user",
+                    sessionId="abc",
+                    cwd=cwd,
+                    timestamp=f"2026-09-24T01:00:{i:02d}.000Z",
+                    message={"role": "user", "content": f"please {i}"},
+                )
+            )
+            lines.append(
+                _assistant(
+                    "abc",
+                    cwd,
+                    [{"type": "text", "text": f"ok {i}"}],
+                    f"2026-09-24T01:01:{i:02d}.000Z",
+                )
+            )
+        # One tool call (or n) so the header has a countable call phrase.
+        for i in range(n):
+            lines.append(
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use(f"t{i}", "Bash", command="echo hi")],
+                    f"2026-09-24T02:00:{i:02d}.000Z",
+                )
+            )
+            lines.append(
+                _user("abc", cwd, [_tool_result(f"t{i}", "hi")], f"2026-09-24T02:00:{i:02d}.500Z")
+            )
+        path = tmp_path / f"plural-{n}.jsonl"
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
+    one = _write(n=1)
+    assert main([str(one)]) == 0
+    out1 = capsys.readouterr().out
+    assert "1 tool call" in out1
+    assert "1 assistant turn," in out1
+    assert "1 user turn," in out1
+    assert "1 bookkeeping record." in out1
+    assert "1 assistant turns" not in out1
+    assert "1 user turns" not in out1
+    assert "1 bookkeeping records" not in out1
+
+    two = _write(n=2)
+    assert main([str(two)]) == 0
+    out2 = capsys.readouterr().out
+    assert "2 tool calls" in out2
+    assert "2 assistant turns," in out2
+    assert "2 user turns," in out2
+    assert "2 bookkeeping records." in out2
+
+
+def test_repeated_test_commands_are_grouped(tmp_path: Path, capsys) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    rows = [
+        _assistant("abc", cwd, [_tool_use("e1", "Edit", file_path="a.py")], "2026-09-24T14:00:00.000Z"),
+        _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T14:00:01.000Z"),
+    ]
+    # Four identical successes → ×4
+    for i in range(4):
+        rows.append(
+            _assistant(
+                "abc",
+                cwd,
+                [_tool_use(f"p{i}", "Bash", command="python -m pytest")],
+                f"2026-09-24T14:01:{i:02d}.000Z",
+            )
+        )
+        rows.append(
+            _user("abc", cwd, [_tool_result(f"p{i}", "ok")], f"2026-09-24T14:01:{i:02d}.500Z")
+        )
+    path.write_text("\n".join(rows), encoding="utf-8")
+    assert main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "4 test runs (python -m pytest ×4)" in out
+    assert "python -m pytest; python -m pytest" not in out
+
+    # Mixed: two of one command, one failed different command
+    rows2 = [
+        _assistant("abc", cwd, [_tool_use("e1", "Edit", file_path="a.py")], "2026-09-24T14:00:00.000Z"),
+        _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T14:00:01.000Z"),
+        _assistant("abc", cwd, [_tool_use("a1", "Bash", command="pytest -q")], "2026-09-24T14:01:00.000Z"),
+        _user("abc", cwd, [_tool_result("a1", "ok")], "2026-09-24T14:01:01.000Z"),
+        _assistant("abc", cwd, [_tool_use("a2", "Bash", command="pytest -q")], "2026-09-24T14:01:02.000Z"),
+        _user("abc", cwd, [_tool_result("a2", "ok")], "2026-09-24T14:01:03.000Z"),
+        _assistant(
+            "abc", cwd, [_tool_use("a3", "Bash", command="pytest tests/x.py")], "2026-09-24T14:01:04.000Z"
+        ),
+        _user(
+            "abc",
+            cwd,
+            [_tool_result("a3", "FAILED", is_error=True)],
+            "2026-09-24T14:01:05.000Z",
+        ),
+    ]
+    path.write_text("\n".join(rows2), encoding="utf-8")
+    assert main([str(path)]) == 0
+    out2 = capsys.readouterr().out
+    assert "3 test runs (pytest -q ×2, pytest tests/x.py failed)" in out2
+
+    # Singular check phrasing
+    rows3 = [
+        _assistant("abc", cwd, [_tool_use("e1", "Edit", file_path="a.py")], "2026-09-24T14:00:00.000Z"),
+        _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T14:00:01.000Z"),
+        _assistant("abc", cwd, [_tool_use("c1", "Bash", command="mypy .")], "2026-09-24T14:01:00.000Z"),
+        _user("abc", cwd, [_tool_result("c1", "ok")], "2026-09-24T14:01:01.000Z"),
+    ]
+    path.write_text("\n".join(rows3), encoding="utf-8")
+    assert main([str(path)]) == 0
+    out3 = capsys.readouterr().out
+    assert "1 check" in out3
+    assert "1 checks" not in out3
 
 
 def test_edit_after_last_test_is_unverified(tmp_path: Path, capsys) -> None:
