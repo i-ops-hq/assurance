@@ -9,7 +9,13 @@ import pytest
 
 from assurance_budget.events import LogError
 from assurance_budget.session_cli import detect_loops, main
-from assurance_budget.sessions import find_latest_session, read_claude_code
+from assurance_budget.sessions import (
+    after_last_edit,
+    classify_bash,
+    edited_without_read,
+    find_latest_session,
+    read_claude_code,
+)
 
 
 def _line(**fields: object) -> str:
@@ -109,7 +115,7 @@ def test_result_list_of_text_blocks_and_missing_is_error(tmp_path: Path) -> None
     assert call.result_first_line == "hello"
 
 
-def test_other_line_types_count_as_not_read_never_as_tool_calls(tmp_path: Path) -> None:
+def test_known_records_and_malformed_split(tmp_path: Path) -> None:
     path = tmp_path / "s.jsonl"
     path.write_text(
         "\n".join(
@@ -130,7 +136,85 @@ def test_other_line_types_count_as_not_read_never_as_tool_calls(tmp_path: Path) 
     )
     session = read_claude_code(path)
     assert len(session.tool_calls) == 1
-    assert session.not_read == 3
+    assert session.records == {"queue-operation": 1, "summary": 1}
+    assert session.not_read == 1
+
+
+def test_unknown_type_is_not_read_not_a_record(tmp_path: Path) -> None:
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _line(type="some-new-kind", sessionId="abc"),
+                _line(
+                    type="user",
+                    sessionId="abc",
+                    message={"role": "user", "content": "hi"},
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert session.not_read == 1
+    assert "some-new-kind" not in session.records
+    assert session.user_turns == 1
+
+
+def test_list_of_text_user_message_is_a_user_turn(tmp_path: Path) -> None:
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        _user(
+            "abc",
+            "/tmp/p",
+            [{"type": "text", "text": "please fix the tests"}],
+            "2026-09-24T01:00:00.000Z",
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert session.user_turns == 1
+    assert session.tool_calls == ()
+    assert session.not_read == 0
+
+
+def test_thinking_only_assistant_is_an_assistant_turn(tmp_path: Path) -> None:
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        _assistant(
+            "abc",
+            "/tmp/p",
+            [{"type": "thinking", "thinking": "hmm"}],
+            "2026-09-24T01:00:00.000Z",
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert session.assistant_turns == 1
+    assert session.tool_calls == ()
+    assert session.not_read == 0
+
+
+def test_attachment_is_a_record(tmp_path: Path) -> None:
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _line(type="attachment", sessionId="abc"),
+                _line(
+                    type="user",
+                    sessionId="abc",
+                    message={"role": "user", "content": "hi"},
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert session.records == {"attachment": 1}
+    assert session.not_read == 0
 
 
 def test_string_message_content_is_a_user_turn(tmp_path: Path) -> None:
@@ -254,7 +338,6 @@ def test_find_latest_session_matches_cwd_not_folder_name(tmp_path: Path) -> None
         + "\n",
         encoding="utf-8",
     )
-    # Newer mtime on the non-matching file.
     new_file.touch()
     assert find_latest_session(want, projects_dir=projects) == old_file
     assert find_latest_session(tmp_path / "nope", projects_dir=projects) is None
@@ -298,13 +381,42 @@ def test_main_json_keys(tmp_path: Path, capsys) -> None:
         "failed",
         "by_tool",
         "loops",
+        "assistant_turns",
+        "user_turns",
+        "records",
         "not_read",
         "unmatched_results",
+        "edited_without_read",
+        "after_last_edit",
+        "unclassified_commands",
     ):
-        assert key in payload
+        assert key in payload, key
     assert payload["tool_calls"] == 1
     assert payload["by_tool"] == {"Bash": 1}
-    assert payload["not_read"] == 1
+    assert payload["not_read"] == 0
+    assert payload["records"] == {"summary": 1}
+
+
+def test_main_always_prints_not_read_zero(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    "/tmp/p",
+                    [_tool_use("t1", "Bash", command="echo hi")],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user("abc", "/tmp/p", [_tool_result("t1", "hi")], "2026-09-24T01:00:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "Not read: 0 lines." in out
+    assert "Not classified:" in out
 
 
 def test_no_session_id_raises(tmp_path: Path) -> None:
@@ -312,3 +424,176 @@ def test_no_session_id_raises(tmp_path: Path) -> None:
     path.write_text('{"type":"summary","summary":"x"}\n', encoding="utf-8")
     with pytest.raises(LogError):
         read_claude_code(path)
+
+
+def test_edit_without_prior_read_is_reported(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="src/billing/rates.ts")],
+                    "2026-09-24T14:30:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T14:30:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert edited_without_read(session) == ["src/billing/rates.ts"]
+
+
+def test_read_then_edit_is_not_reported(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("r1", "Read", file_path="src/api.ts")],
+                    "2026-09-24T14:30:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("r1", "code")], "2026-09-24T14:30:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="src/api.ts")],
+                    "2026-09-24T14:30:02.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T14:30:03.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert edited_without_read(read_claude_code(path)) == []
+
+
+def test_write_alone_is_not_edited_without_read(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("w1", "Write", file_path="new.py", content="x")],
+                    "2026-09-24T14:30:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("w1", "ok")], "2026-09-24T14:30:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert edited_without_read(read_claude_code(path)) == []
+
+
+def test_relative_and_absolute_paths_are_the_same_file(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    abs_path = str(tmp_path / "src" / "api.ts")
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("r1", "Read", file_path=abs_path)],
+                    "2026-09-24T14:30:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("r1", "code")], "2026-09-24T14:30:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="src/api.ts")],
+                    "2026-09-24T14:30:02.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T14:30:03.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert edited_without_read(read_claude_code(path)) == []
+
+
+def test_classify_bash_commands() -> None:
+    assert classify_bash("cd x && pytest -q") == "test"
+    assert classify_bash("npm run test") == "test"
+    assert classify_bash("pytest || true") == "test"
+    assert classify_bash("echo pytest") == "read"
+    assert classify_bash('echo "unterminated') == "unclassified"
+
+
+def test_after_last_edit_reports_failed_pytest(tmp_path: Path, capsys) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="a.py")],
+                    "2026-09-24T14:32:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T14:32:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("t1", "Bash", command="pytest -q")],
+                    "2026-09-24T14:32:02.000Z",
+                ),
+                _user(
+                    "abc",
+                    cwd,
+                    [_tool_result("t1", "FAILED", is_error=True)],
+                    "2026-09-24T14:32:03.000Z",
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    after = after_last_edit(read_claude_code(path))
+    assert after is not None
+    assert after["tests"] == 1
+    assert after["tests_failed"] == 1
+    assert after["checks"] == 0
+    assert main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "1 test run (pytest, failed)" in out
+    assert "0 checks" in out
+
+
+def test_edit_after_last_test_is_unverified(tmp_path: Path, capsys) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("t1", "Bash", command="pytest")],
+                    "2026-09-24T14:30:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("t1", "ok")], "2026-09-24T14:30:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="a.py")],
+                    "2026-09-24T14:32:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T14:32:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main([str(path)]) == 0
+    assert "no test or check command ran" in capsys.readouterr().out
+    assert main([str(path), "--fail-on-unverified"]) == 1

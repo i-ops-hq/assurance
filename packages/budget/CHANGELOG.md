@@ -1,5 +1,12 @@
 # Unreleased
 
+- **`assurance audit` classifies the transcript.** Assistant text/thinking turns, user turns
+  (including list-of-text content), and named bookkeeping record types are counted separately;
+  `Not read:` is only for lines that still could not be classified — and the line is always printed,
+  including `Not read: 0 lines.`
+- **Three checks on what the session verified:** files edited without a prior Read; whether a test
+  or check command ran after the last edit; and how many shell commands could not be classified.
+  `--fail-on-unverified` exits 1 when there were edits and no test or check followed.
 - **`assurance audit`** reads a Claude Code session transcript and says what it did — tool calls,
   failures, loops via `ProgressWatch`, and lines that could not be classified — at the same weight.
   `assurance audit` with no path finds the latest session for the current directory under
