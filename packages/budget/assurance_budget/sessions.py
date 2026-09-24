@@ -524,12 +524,19 @@ def _norm_path(path: str, cwd: str) -> str:
 
 
 def _display_path(normed: str, cwd: str) -> str:
+    """`normed` relative to the session `cwd` when it is inside it, compared as recorded text.
+
+    Never `resolve()`d against this machine's disk. A transcript's paths were recorded on the machine
+    that ran the session, and resolving the `cwd` here while leaving `normed` as recorded made them
+    disagree whenever the folder sat behind a symlink — on macOS `/home` is one, so every path in a
+    transcript from a Linux machine printed absolute (found by CI on macOS, 2026-09-24).
+    """
     if not cwd:
         return normed
+    base = os.path.normpath(str(Path(cwd).expanduser()))
     try:
-        base = os.path.normpath(str(Path(cwd).expanduser().resolve()))
         return str(Path(normed).relative_to(base))
-    except (ValueError, OSError):
+    except ValueError:
         return normed
 
 

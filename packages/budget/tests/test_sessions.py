@@ -663,3 +663,35 @@ def test_edit_after_last_test_is_unverified(tmp_path: Path, capsys) -> None:
     assert main([str(path)]) == 0
     assert "no test or check command ran" in capsys.readouterr().out
     assert main([str(path), "--fail-on-unverified"]) == 1
+
+
+def test_paths_are_shown_relative_to_the_recorded_cwd_even_through_a_symlink(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The session's `cwd` and file paths are text from the machine that ran it; compare them as text.
+
+    Resolving only the `cwd` against this disk made `/home/you/app/src/x.py` print absolute on macOS,
+    where `/home` is a symlink. A symlinked folder reproduces it anywhere.
+    """
+    import json
+
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not permitted here")
+    cwd = str(link)
+    lines = [
+        {"type": "assistant", "sessionId": "s", "timestamp": "2026-09-24T10:00:00Z", "cwd": cwd,
+         "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Edit",
+                     "input": {"file_path": f"{cwd}/src/x.py", "old_string": "a", "new_string": "b"}}]}},
+        {"type": "user", "sessionId": "s", "timestamp": "2026-09-24T10:00:01Z", "cwd": cwd,
+         "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}},
+    ]
+    path = tmp_path / "session.jsonl"
+    path.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
+
+    assert main([str(path), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["edited_without_read"] == ["src/x.py"]

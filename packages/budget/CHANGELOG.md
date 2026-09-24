@@ -1,3 +1,10 @@
+# Unreleased
+
+- **`assurance audit` shows paths relative to the session folder on every machine.** It resolved the
+  session's `cwd` against the local disk but not the file paths, so they stopped matching whenever the
+  folder sat behind a symlink — on macOS `/home` is one, so every path in a transcript from a Linux
+  machine printed absolute. Paths are now compared as the text the transcript recorded.
+
 # 0.2.0
 
 - **The project config file can only lower a limit.** User file and `ASSURANCE_MAX_*` env vars may
