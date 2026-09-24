@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 from typing import Any
@@ -15,6 +16,16 @@ from assurance_cli.pin import _ALLOW_HELP as _PIN_ALLOW_HELP, run_pin_action
 from assurance_cli.setdiff import KeySpecError, diff_sets, format_diff
 
 
+#: Subcommands that are other packages' commands, forwarded whole: `(module, how to install it)`.
+#: `assurance deps` came first; `budget` and `authority` joined it so that one command — and one
+#: install, `pip install assurance` — reaches every tool.
+FORWARDED: dict[str, tuple[str, str]] = {
+    "deps": ("assurance_deps.cli", "pip install 'assurance-cli[deps]'"),
+    "budget": ("assurance_budget.cli", "pip install assurance-budget"),
+    "authority": ("assurance_authority.cli", "pip install assurance-authority"),
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     """Command-line entry for assurance checks."""
     # `deps` is forwarded whole, before argparse sees any of it. argparse claims `--help` for the
@@ -22,8 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     # printed this parser's usage and then called the flag unrecognised. Short-circuiting keeps
     # the tail exactly as typed, which is the point of forwarding rather than re-declaring.
     tail = list(sys.argv[1:] if argv is None else argv)
-    if tail[:1] == ["deps"]:
-        return _run_deps(tail[1:])
+    if tail and tail[0] in FORWARDED:
+        return _run_forwarded(tail[0], tail[1:])
 
     parser = argparse.ArgumentParser(
         prog="assurance",
@@ -145,6 +156,15 @@ def main(argv: list[str] | None = None) -> int:
         add_help=False,
     )
     deps_parser.add_argument("deps_args", nargs=argparse.REMAINDER, help="Passed through to assurance-deps")
+    # Listed so `assurance --help` shows them; `main` forwards them before argparse runs.
+    sub.add_parser(
+        "budget", add_help=False,
+        help="Where an agent run's budget went, and where it looped going nowhere (assurance-budget)",
+    )
+    sub.add_parser(
+        "authority", add_help=False,
+        help="Whether a task may proceed for the person who asked (assurance-authority)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -185,23 +205,20 @@ def main(argv: list[str] | None = None) -> int:
 
 
 
-def _run_deps(forwarded: list[str]) -> int:
-    """Hand the whole tail to assurance-deps, or say how to get it.
+def _run_forwarded(name: str, forwarded: list[str]) -> int:
+    """Hand the whole tail to a sibling package's command, or say how to get it.
 
-    Imported here and not at module scope so `assurance check` keeps working on an install that
-    never asked for the dependency gate. Same shape as the mcp extra: an absent optional package is
-    a "could not run", which the exit table puts at 2.
+    Imported here and not at module scope so `assurance check` keeps working on an install that never
+    asked for the others. An absent optional package is a "could not run", which the exit table puts
+    at 2.
     """
+    module_name, install = FORWARDED[name]
     try:
-        from assurance_deps.cli import main as deps_main
+        module = importlib.import_module(module_name)
     except ImportError:
-        print(
-            "assurance deps needs the assurance-deps package:\n"
-            "    pip install 'assurance-cli[deps]'",
-            file=sys.stderr,
-        )
+        print(f"assurance {name} needs a package that is not installed:\n    {install}", file=sys.stderr)
         return 2
-    return int(deps_main(list(forwarded)))
+    return int(module.main(list(forwarded)))
 
 
 def _run_diff(args: argparse.Namespace) -> int:

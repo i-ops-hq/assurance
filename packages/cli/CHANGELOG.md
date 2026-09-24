@@ -1,5 +1,10 @@
 # 0.5.13
 
+**One command reaches every tool.** `assurance budget …` and `assurance authority …` forward to
+those packages whole, the way `assurance deps …` already did, and `assurance --help` lists them.
+This is what `pip install assurance` — the new front-door package — relies on. A sibling that is not
+installed exits 2 with the command that installs it.
+
 **`pin` no longer reports silence as a pass.**
 
 - **One server that fails to start no longer aborts the rest.** `--save` raised on the first

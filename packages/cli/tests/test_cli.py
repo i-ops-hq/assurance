@@ -802,3 +802,41 @@ def test_the_deps_subcommand_forwards_whole_and_says_how_to_get_it(tmp_path: Pat
     payload = json.loads(out.out)
     assert payload["requirements"] == 1
     assert payload["claims"]["executed_anything"] is False
+
+
+def test_budget_and_authority_are_reachable_from_one_command(tmp_path: Path, capsys) -> None:
+    """`pip install assurance` gives one command, so every tool has to be reachable from it."""
+    code = main(["authority", "--example"])
+    out = capsys.readouterr()
+    if code == 2 and "pip install" in out.err:
+        pytest.skip("assurance-authority is not installed here")
+    assert code == 0 and "tasks may proceed" in out.out
+
+    log = tmp_path / "runs.jsonl"
+    log.write_text(
+        "\n".join(json.dumps({"run": "r", "action": "fetch", "error": "timeout"}) for _ in range(4)),
+        encoding="utf-8",
+    )
+    code = main(["budget", str(log), "--fail-on-exhausted"])
+    out = capsys.readouterr()
+    if code == 2 and "pip install" in out.err:
+        pytest.skip("assurance-budget is not installed here")
+    assert code == 1 and "going nowhere" in out.out
+
+
+def test_a_missing_sibling_says_how_to_install_it(monkeypatch, capsys) -> None:
+    import sys
+
+    # `None` in sys.modules makes the import raise ImportError, as if the package were absent.
+    monkeypatch.setitem(sys.modules, "assurance_budget.cli", None)
+
+    assert main(["budget", "runs.jsonl"]) == 2
+    assert "pip install assurance-budget" in capsys.readouterr().err
+
+
+def test_help_lists_every_forwarded_command(capsys) -> None:
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = capsys.readouterr().out
+    for name in ("deps", "budget", "authority"):
+        assert name in out
