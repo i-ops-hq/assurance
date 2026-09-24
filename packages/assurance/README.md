@@ -7,6 +7,10 @@ uvx assurance audit          # in a project where you've used Claude Code
 uvx assurance audit --demo   # or see a report on a bundled sample session
 ```
 
+No `uvx`? Install [uv](https://github.com/astral-sh/uv) (`brew install uv`, or
+`curl -LsSf https://astral.sh/uv/install.sh | sh`, or `pipx install uv`), or use
+`pip install assurance` and run `assurance audit`.
+
 Real output on the bundled sample. The agent was asked to fix a rounding bug "and make sure the tests
 pass", and ended with *"All done — the totals are correct now."*
 

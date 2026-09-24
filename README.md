@@ -25,11 +25,27 @@ you, in plain sentences, what was done, what was skipped, and what it **could no
 Run this in any project where you've used Claude Code:
 
 ```bash
-uvx assurance audit                        # with uv  (brew install uv, or pipx install uv)
+uvx assurance audit                        # with uv: runs it without installing anything
 pip install assurance && assurance audit   # without uv
 ```
 
 Not using Claude Code yet? `uvx assurance audit --demo` shows the report on a bundled sample session.
+
+<details>
+<summary><b>Don't have <code>uvx</code>?</b> It comes with <a href="https://github.com/astral-sh/uv">uv</a>. One line to install it:</summary>
+
+| where | command |
+|---|---|
+| macOS (Homebrew) | `brew install uv` |
+| macOS / Linux | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Windows | `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+| Windows (WinGet) | `winget install --id=astral-sh.uv -e` |
+| anywhere with Python | `pipx install uv` or `pip install uv` |
+
+Open a new terminal afterwards so `uvx` is on your `PATH`. Or skip uv entirely and use
+`pip install assurance`, which gives you the same `assurance` command.
+
+</details>
 
 Here is the real output on [a sample session](examples/audit/sample-session.jsonl) in this repo. The
 agent was asked to fix a rounding bug *"and make sure the tests pass"*, and ended with
@@ -72,6 +88,9 @@ when the last edit was followed by a passing test or check. When it wasn't, it t
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
 `--nudge` to be told without Claude being asked. It nudges at most once per turn, and it never fails
 or blocks a session: if it can't read the transcript it says so and lets Claude finish.
+
+Installed with pip instead of uv? Use `"command": "assurance audit --hook --nudge"`. If Claude Code
+reports `command not found`, put the full path from `which uvx` (or `which assurance`) in the command.
 
 ## Commands
 
