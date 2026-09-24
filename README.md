@@ -123,11 +123,14 @@ assurance pin --check     # in CI: exit 1 if any description changed, or any ser
 <summary><b>What will this install run?</b></summary>
 
 ```bash
-assurance deps package.json
+assurance deps package.json      # reads package-lock.json and node_modules; runs nothing
 # Of the 100 read, 2 execute code when installed:
 #   · esbuild 0.23.1   node install.js
 #   · sharp 0.33.5   node install/check
 ```
+
+It reads what is on disk: the lockfile, `node_modules`, or downloaded wheels for Python. With none of
+those it says it read nothing, rather than guessing.
 
 </details>
 
