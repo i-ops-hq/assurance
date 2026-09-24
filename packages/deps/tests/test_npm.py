@@ -164,3 +164,47 @@ def test_prepare_counts_as_a_lifecycle_script(tmp_path: Path) -> None:
     hooked = report.runs_at_install[0]
     assert [h.where for h in hooked.hooks] == ["scripts.prepare"], "prepare in, test out"
     assert "npm run build" in format_report(report)
+
+
+def test_prepare_on_a_registry_tarball_is_not_install_time_code(tmp_path: Path) -> None:
+    """npm does not run `prepare` for a package it installs from a registry tarball.
+
+    Found 2026-09-24 on a real project (esbuild, sharp, @modelcontextprotocol/sdk): six packages were
+    reported as executing at install, four of them registry dependencies whose only script was
+    `prepare`. npm's own `hasInstallScript` flagged two, and it was right.
+    """
+    manifest = _project(
+        tmp_path / "app", deps={"express-rate-limit": "7.5.1"},
+        lock={"": {"name": "app"}, "node_modules/express-rate-limit": {
+            "version": "7.5.1",
+            "resolved": "https://registry.npmjs.org/express-rate-limit/-/express-rate-limit-7.5.1.tgz",
+        }},
+        installed={"express-rate-limit": {"name": "express-rate-limit", "version": "7.5.1",
+                                          "scripts": {"prepare": "run-s compile && husky install"}}},
+    )
+    assert scan_manifest(manifest).runs_at_install == ()
+
+
+def test_a_registry_package_keeps_its_real_install_scripts(tmp_path: Path) -> None:
+    manifest = _project(
+        tmp_path / "app", deps={"esbuild": "0.23.1"},
+        lock={"": {"name": "app"}, "node_modules/esbuild": {
+            "version": "0.23.1", "hasInstallScript": True,
+            "resolved": "https://registry.npmjs.org/esbuild/-/esbuild-0.23.1.tgz",
+        }},
+        installed={"esbuild": {"name": "esbuild", "version": "0.23.1",
+                               "scripts": {"postinstall": "node install.js", "prepare": "make"}}},
+    )
+    hooked = scan_manifest(manifest).runs_at_install
+    assert [h.where for h in hooked[0].hooks] == ["scripts.postinstall"]
+
+
+def test_prepare_on_a_git_source_still_counts(tmp_path: Path) -> None:
+    manifest = _project(
+        tmp_path / "app", deps={"from-git": "github:o/r"},
+        lock={"": {"name": "app"}, "node_modules/from-git": {
+            "version": "1.0.0", "resolved": "git+ssh://git@github.com/o/r.git#0123abcd",
+        }},
+        installed={"from-git": {"name": "from-git", "version": "1.0.0", "scripts": {"prepare": "tsc"}}},
+    )
+    assert [h.where for h in scan_manifest(manifest).runs_at_install[0].hooks] == ["scripts.prepare"]

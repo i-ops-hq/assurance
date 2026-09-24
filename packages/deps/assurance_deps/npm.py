@@ -25,6 +25,11 @@ from assurance_deps.manifest import GIT, LOCAL, REGISTRY, URL, Requirement
 #: too, which is the one people forget.
 INSTALL_SCRIPTS = ("preinstall", "install", "postinstall", "prepare", "preprepare", "postprepare")
 
+#: The scripts that run only when npm builds a package from source: the project's own, a git
+#: dependency, a local directory. A tarball from a registry arrives already packed, so npm does not
+#: run these for it — which is also why npm's own `hasInstallScript` leaves them out.
+BUILD_FROM_SOURCE_SCRIPTS = ("prepare", "preprepare", "postprepare")
+
 #: Manifests this half understands.
 NPM_MANIFESTS = ("package.json",)
 
@@ -117,11 +122,21 @@ def read_direct_dependencies(manifest: Path) -> tuple[list[Requirement], str]:
     return out, ""
 
 
-def _own_scripts(data: dict[str, Any]) -> list[Hook]:
+def _own_scripts(data: dict[str, Any], *, packed: bool = False) -> list[Hook]:
+    """The scripts an install of this package runs.
+
+    `packed` is a package installed from a registry tarball. Until 0.2.4 its `prepare` was counted
+    as install-time code, and on a real project — esbuild, sharp and the MCP SDK — four of the six
+    packages reported as executing at install were registry dependencies whose only script was
+    `prepare`, which npm never runs for them. npm's lockfile, which counts the same way this now
+    does, flagged two.
+    """
     scripts = data.get("scripts")
     hooks: list[Hook] = []
     if isinstance(scripts, dict):
         for stage in INSTALL_SCRIPTS:
+            if packed and stage in BUILD_FROM_SOURCE_SCRIPTS:
+                continue
             body = scripts.get(stage)
             if isinstance(body, str) and body.strip():
                 hooks.append(Hook(f"scripts.{stage}", body.strip()))
@@ -153,6 +168,19 @@ def _lock_entries(root: Path) -> dict[str, dict[str, Any]]:
         if isinstance(packages, dict):
             return {k: v for k, v in packages.items() if isinstance(v, dict) and k}
     return {}
+
+
+def _from_a_registry(entry: dict[str, Any]) -> bool:
+    """Whether the lockfile says this package arrived as a packed tarball.
+
+    Only an `http(s)` `resolved` counts. A git source, a `file:` directory, a `link`, or no
+    `resolved` at all is not established as packed, so its `prepare` stays counted — the
+    conservative reading, because missing an install script is the failure that matters.
+    """
+    if entry.get("link"):
+        return False
+    resolved = entry.get("resolved")
+    return isinstance(resolved, str) and resolved.startswith(("https://", "http://"))
 
 
 def _name_from_lock_key(key: str) -> str:
@@ -189,7 +217,7 @@ def read_package_tree(manifest: Path) -> list[Examined]:
                 note = "its installed package.json could not be read"
                 kind = "npm-unread"
             else:
-                hooks = _own_scripts(pkg)
+                hooks = _own_scripts(pkg, packed=_from_a_registry(entry))
         else:
             # Not on this machine. The lockfile still answers whether an install script exists —
             # which is a real answer and not an absence of one — but says nothing about contents.
