@@ -24,6 +24,7 @@ FORWARDED: dict[str, tuple[str, str]] = {
     "deps": ("assurance_deps.cli", "pip install 'assurance-cli[deps]'"),
     "budget": ("assurance_budget.cli", "pip install assurance-budget"),
     "authority": ("assurance_authority.cli", "pip install assurance-authority"),
+    "audit": ("assurance_budget.session_cli", "pip install assurance-budget"),
 }
 
 _START_HERE = """\
@@ -35,6 +36,7 @@ assurance — what an agent run covered, spent, may do, and is about to install.
   assurance deps requirements.txt         what an install will execute, read without running it
   assurance budget runs.jsonl             where an agent run's budget went
   assurance authority --example           may a task proceed for the person who asked?
+  assurance audit [TRANSCRIPT]            what a Claude Code session did, and what it could not classify
 
 assurance <command> --help for more.
 """
@@ -189,6 +191,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "authority", add_help=False,
         help="Whether a task may proceed for the person who asked (assurance-authority)",
+    )
+    sub.add_parser(
+        "audit", add_help=False,
+        help="What a Claude Code session did, and what could not be classified (assurance-budget)",
     )
 
     args = parser.parse_args(argv)

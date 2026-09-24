@@ -482,6 +482,8 @@ class _Indexed(NamedTuple):
     unread: list[str]
     skipped: list[str]
     skipped_total: int
+    skipped_dirs: list[str]
+    skipped_dirs_total: int
 
 
 # --- does the file contain what its name claims? ----------------------------------------------
@@ -629,14 +631,15 @@ def _indexed_files(root: Path) -> _Indexed:
     unread: list[str] = []
     skipped: list[str] = []
     skipped_total = 0
-    files, unreadable = _walk_files(root)
-    # A directory that could not be listed is a part of the folder nobody looked at. It used to be a
-    # `PermissionError` out of `rglob` that ended the whole check — and over MCP, a tool error that
-    # told the agent nothing (reported 2026-09-24 against `/`). It is named with what was not opened.
-    for name in unreadable:
-        skipped_total += 1
-        if len(skipped) < MAX_UNREAD:
-            skipped.append(name)
+    skipped_dirs: list[str] = []
+    skipped_dirs_total = 0
+    files, unreadable, pruned = _walk_files(root)
+    # Directories that could not be listed, and tool directories we refused to enter, are not files.
+    # They are reported as directories skipped — never folded into the file count.
+    for label in [*pruned, *unreadable]:
+        skipped_dirs_total += 1
+        if len(skipped_dirs) < MAX_UNREAD:
+            skipped_dirs.append(label)
     for path in files:
         if not path.is_file():
             continue
@@ -669,19 +672,22 @@ def _indexed_files(root: Path) -> _Indexed:
             continue
         key = point_key(point)
         found.setdefault(key, []).append(path)
-    return _Indexed(found, unread[:MAX_UNREAD], skipped, skipped_total)
+    return _Indexed(
+        found, unread[:MAX_UNREAD], skipped, skipped_total, skipped_dirs, skipped_dirs_total
+    )
 
 
-def _walk_files(root: Path) -> tuple[list[Path], list[str]]:
-    """Every file under `root`, sorted, and the directories that could not be listed or were skipped.
+def _walk_files(root: Path) -> tuple[list[Path], list[str], list[str]]:
+    """Every file under `root`, directories that could not be listed, and directories pruned on purpose.
 
     `os.walk` rather than `Path.rglob`: the same traversal (symlinked directories are not descended
     into), but an unreadable directory arrives at `onerror` instead of raising out of the iterator.
 
     Tool directories (`.git`, `node_modules`, `__pycache__`, …, and any other name starting with `.`)
-    are pruned from the walk and named as skipped — what was not looked at is always said.
+    are pruned from the walk and named — what was not looked at is always said.
     """
     unreadable: list[str] = []
+    pruned: list[str] = []
 
     def _note(error: OSError) -> None:
         where = Path(error.filename) if error.filename else root
@@ -689,7 +695,7 @@ def _walk_files(root: Path) -> tuple[list[Path], list[str]]:
             label = str(where.relative_to(root))
         except ValueError:
             label = str(where)
-        unreadable.append(f"{label}/ (could not be listed)")
+        unreadable.append(label)
 
     files: list[Path] = []
     for directory, dirnames, names in os.walk(root, onerror=_note):
@@ -701,12 +707,12 @@ def _walk_files(root: Path) -> tuple[list[Path], list[str]]:
                     label = str(where.relative_to(root))
                 except ValueError:
                     label = str(where)
-                unreadable.append(f"{label}/ (skipped)")
+                pruned.append(label)
             else:
                 kept.append(name)
         dirnames[:] = kept
         files.extend(Path(directory) / name for name in names)
-    return sorted(files), unreadable
+    return sorted(files), unreadable, pruned
 
 
 #: Directories `check` never enters. Names starting with `.` are pruned too, even when not listed.
@@ -736,8 +742,12 @@ def _file_count(n: int) -> str:
     return "1 file" if n == 1 else f"{n} files"
 
 
+def _dir_count(n: int) -> str:
+    return "1 directory" if n == 1 else f"{n} directories"
+
+
 def _not_opened(indexed: _Indexed) -> dict[str, Any]:
-    """The files this command never opened, as a field a caller can read.
+    """The files and directories this command never opened, as fields a caller can read.
 
     `_indexed_files` has collected these since 0.4, and only `_nothing_indexed_summary` printed
     them — so they appeared only when NOTHING tabular was found, which is the one case where they
@@ -747,21 +757,36 @@ def _not_opened(indexed: _Indexed) -> dict[str, Any]:
     It matters most exactly where it was silent: a folder holding `2024-03.pdf` beside the CSVs is
     told March is "not in this folder", and the file that would have answered for March is the one
     nobody mentioned.
+
+    Directories skipped on the walk are not files; they have their own counts so
+    "N files not opened" never includes `.git/`.
     """
-    return {"total": indexed.skipped_total, "names": list(indexed.skipped)}
+    return {
+        "total": indexed.skipped_total,
+        "names": list(indexed.skipped),
+        "directories_skipped": indexed.skipped_dirs_total,
+        "directory_names": list(indexed.skipped_dirs),
+    }
 
 
 def _not_opened_clause(indexed: _Indexed) -> str:
-    if not indexed.skipped_total:
+    parts: list[str] = []
+    if indexed.skipped_dirs_total:
+        shown = ", ".join(indexed.skipped_dirs[:3])
+        more = " and more" if indexed.skipped_dirs_total > 3 else ""
+        parts.append(f"{_dir_count(indexed.skipped_dirs_total)} skipped ({shown}{more})")
+    if indexed.skipped_total:
+        shown = ", ".join(indexed.skipped[:3])
+        more = " and more" if indexed.skipped_total > 3 else ""
+        # Not "because of the extension": a `._2024-03.csv` sidecar IS a .csv and was skipped for being
+        # hidden. The clause names both reasons rather than asserting the one that is usually true.
+        parts.append(
+            f"{_file_count(indexed.skipped_total)} not opened ({shown}{more}); "
+            f"assurance check reads {readable_kinds()} and skips hidden files"
+        )
+    if not parts:
         return ""
-    shown = ", ".join(indexed.skipped[:3])
-    more = " and more" if indexed.skipped_total > 3 else ""
-    # Not "because of the extension": a `._2024-03.csv` sidecar IS a .csv and was skipped for being
-    # hidden. The clause names both reasons rather than asserting the one that is usually true.
-    return (
-        f" — {_file_count(indexed.skipped_total)} not opened ({shown}{more}); "
-        f"assurance check reads {readable_kinds()} and skips hidden files"
-    )
+    return " — " + " — ".join(parts)
 
 
 def _nothing_indexed_summary(root: Path, indexed: _Indexed) -> str:
@@ -777,6 +802,12 @@ def _nothing_indexed_summary(root: Path, indexed: _Indexed) -> str:
         return (
             f"Nothing in {root.name} was opened. assurance check reads {readable_kinds()}; "
             f"{_file_count(indexed.skipped_total)} here have another extension, including {shown}."
+        )
+    if indexed.skipped_dirs_total:
+        shown = ", ".join(indexed.skipped_dirs[:3])
+        return (
+            f"Nothing in {root.name} was opened — "
+            f"{_dir_count(indexed.skipped_dirs_total)} skipped ({shown})."
         )
     return f"There are no files in {root.name} to check."
 
