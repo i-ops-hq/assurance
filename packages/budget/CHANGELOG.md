@@ -1,11 +1,25 @@
 # 0.2.1
 
+- **`assurance audit` shortens test labels and groups by them.** After the last edit, each test
+  run keeps the full raw command under JSON `command` and adds a `label`: the first test segment
+  after wrapper / assignment / runner normalisation, rebuilt with `shlex.join`, truncated to 60
+  characters with an ellipsis. Grouping uses the label, so a heredoc-then-pytest line prints as
+  `python -m pytest -q` rather than the whole heredoc.
+- **Shell commands are tokenized once, quote-aware.** Physical newlines no longer split before
+  quotes are understood, so a multi-line `python3 -c "…"` is classified instead of becoming a
+  parse error. Tokens are never rejoined and re-split — `grep -n "it's here"` stays readable.
+  `2>&1` stays one redirection token and is dropped from classification argv; limits-file write
+  detection still sees `>` / `>>` / `tee` / `sed -i` targets.
+- **Known state changes are `write`, not unclassified.** `mkdir` / `rm` / `git commit` / `pip
+  install` / `uv sync` and similar count as classified writes. `--json` gains `bash_kinds` with
+  `test` / `check` / `read` / `write` / `unclassified` so the split is visible. `python -c`,
+  `curl`, `make lint-fix`, and project binaries stay honestly unclassified.
 - **`assurance audit` classifies real shell commands.** Heredoc bodies are stripped before
   parsing; segments split only outside quotes; `TZ=UTC pytest`, `/path/to/venv/bin/python -m pytest`,
   `cd x && uv run pytest`, and `timeout N` / `uv run` / `poetry run` wrappers count as tests. Neutral
   words (`cd`, `true`, `export`, …) no longer force a command unclassified. New read/check/test
   entries cover `make test`, `python -m mypy`, `git branch`, `sed -n`, `pip list`, `--version`, and
-  more — while `curl`, `rm`, `git commit`, and `python -c` stay honestly unclassified.
+  more — while `curl`, `python -c`, and unknown project binaries stay honestly unclassified.
 - **A file the session wrote is not "edited without reading".** A successful `Write` counts as
   knowing the path; a failed `Edit` changed nothing and is not reported.
 - **Limits-file changes require a real write target.** A heredoc whose *body* mentions

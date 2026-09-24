@@ -67,12 +67,61 @@ _NEUTRAL_COMMANDS = frozenset(
         "done",
         "case",
         "esac",
+        "break",
+        "continue",
+        "return",
+        "exit",
+        "shift",
+        "trap",
+        "local",
+        "declare",
+        "read",
         "{",
         "}",
         ")",
         "(",
     }
 )
+_FILE_WRITE_COMMANDS = frozenset(
+    {
+        "mkdir",
+        "touch",
+        "rm",
+        "rmdir",
+        "cp",
+        "mv",
+        "ln",
+        "chmod",
+        "chown",
+        "truncate",
+    }
+)
+_GIT_WRITE_SUBCOMMANDS = frozenset(
+    {
+        "add",
+        "commit",
+        "push",
+        "pull",
+        "fetch",
+        "checkout",
+        "switch",
+        "merge",
+        "rebase",
+        "reset",
+        "restore",
+        "rm",
+        "mv",
+        "clone",
+        "cherry-pick",
+        "revert",
+        "am",
+        "apply",
+    }
+)
+_NPM_WRITE_SUBCOMMANDS = frozenset(
+    {"install", "i", "ci", "add", "remove", "uninstall"}
+)
+_LABEL_MAX = 60
 # Leading keywords that introduce a following command in the same segment (`do pytest`).
 _LEADING_CONTROL = frozenset({"do", "then", "else", "elif"})
 _WRAPPER_NO_ARG = frozenset({"time", "sudo", "command", "exec", "xargs", "env"})
@@ -93,7 +142,7 @@ _PYTHON_NAMES = frozenset({"python", "python3", "pypy3"}) | {
 }
 _PIP_NAMES = frozenset({"pip", "pip3"})
 
-BashKind = Literal["test", "check", "read", "unclassified", "neutral"]
+BashKind = Literal["test", "check", "read", "write", "unclassified", "neutral"]
 
 # Longest prefixes first so `npm run test` wins over `npm test` over bare names.
 _TEST_PREFIXES: tuple[tuple[str, ...], ...] = (
@@ -152,12 +201,12 @@ _READ_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("git", "log"),
     ("git", "diff"),
     ("git", "show"),
-    ("git", "branch"),
     ("git", "rev-parse"),
     ("git", "remote"),
     ("git", "ls-files"),
     ("git", "blame"),
     ("git", "stash", "list"),
+    ("git", "stash", "show"),
     ("pip", "list"),
     ("pip", "show"),
     ("pip", "freeze"),
@@ -172,6 +221,7 @@ _READ_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("wc",),
     ("pwd",),
     ("echo",),
+    ("printf",),
     ("which",),
     ("sort",),
     ("uniq",),
@@ -470,11 +520,7 @@ def _bash_writes_session_limits(command: str, cwd: str) -> bool:
     except ValueError:
         return False
     left_cwd = False
-    for segment in segments:
-        try:
-            tokens = _tokenize_segment(segment)
-        except ValueError:
-            return False
+    for tokens in segments:
         if not tokens:
             continue
         if _segment_cds_away(tokens, cwd):
@@ -660,7 +706,13 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
             failed = bool(call.error)
             if failed:
                 tests_failed += 1
-            test_runs.append({"command": command, "failed": failed})
+            test_runs.append(
+                {
+                    "command": command,
+                    "label": bash_test_label(command),
+                    "failed": failed,
+                }
+            )
         elif kind == "check":
             checks += 1
     return {
@@ -687,34 +739,34 @@ def _path_inside_cwd(path: str, cwd: str) -> bool:
 
 
 def _group_test_labels(test_runs: list[dict[str, Any]]) -> list[str]:
-    """Group identical command strings (first-seen order); mark failures per group."""
+    """Group identical labels (first-seen order); mark failures per group."""
     order: list[str] = []
     totals: dict[str, int] = {}
     fails: dict[str, int] = {}
     for run in test_runs:
-        cmd = str(run["command"])
-        if cmd not in totals:
-            order.append(cmd)
-            totals[cmd] = 0
-            fails[cmd] = 0
-        totals[cmd] += 1
+        label = str(run.get("label") or run["command"])
+        if label not in totals:
+            order.append(label)
+            totals[label] = 0
+            fails[label] = 0
+        totals[label] += 1
         if run.get("failed"):
-            fails[cmd] += 1
+            fails[label] += 1
     labels: list[str] = []
-    for cmd in order:
-        n = totals[cmd]
-        failed = fails[cmd]
+    for label in order:
+        n = totals[label]
+        failed = fails[label]
         if failed == 0:
-            labels.append(cmd if n == 1 else f"{cmd} ×{n}")
+            labels.append(label if n == 1 else f"{label} ×{n}")
         elif failed == n:
-            labels.append(f"{cmd} failed" if n == 1 else f"{cmd} ×{n} failed")
+            labels.append(f"{label} failed" if n == 1 else f"{label} ×{n} failed")
         else:
-            labels.append(f"{cmd} ×{n}, {failed} failed")
+            labels.append(f"{label} ×{n}, {failed} failed")
     return labels
 
 
 def unclassified_bash_count(session: Session) -> int:
-    """How many Bash commands could not be classified as test, check or read."""
+    """How many Bash commands could not be classified as test, check, read or write."""
     n = 0
     for call in session.tool_calls:
         if call.name != "Bash":
@@ -726,6 +778,32 @@ def unclassified_bash_count(session: Session) -> int:
         if classify_bash(command) == "unclassified":
             n += 1
     return n
+
+
+def bash_kinds_count(session: Session) -> dict[str, int]:
+    """Counts of Bash commands by kind, including unclassified."""
+    counts: dict[str, int] = {
+        "test": 0,
+        "check": 0,
+        "read": 0,
+        "write": 0,
+        "unclassified": 0,
+    }
+    for call in session.tool_calls:
+        if call.name != "Bash":
+            continue
+        command = call.input.get("command")
+        if not isinstance(command, str):
+            counts["unclassified"] += 1
+            continue
+        kind = classify_bash(command)
+        if kind == "neutral":
+            counts["read"] += 1
+        elif kind in counts:
+            counts[kind] += 1
+        else:
+            counts["unclassified"] += 1
+    return counts
 
 
 def strip_heredoc_bodies(command: str) -> str:
@@ -757,43 +835,249 @@ def strip_heredoc_bodies(command: str) -> str:
     return "\n".join(out)
 
 
-def split_shell_segments(command: str) -> list[str]:
-    """Split on newlines and `&&` `||` `;` `|` `&`, only outside quotes.
+def split_shell_segments(command: str) -> list[list[str]]:
+    """Split into argv segments on newlines and `&&` `||` `;` `|` `&`, outside quotes.
 
-    Raises `ValueError` when a line cannot be tokenized — callers treat that as unclassified.
+    Tokenizes the whole command once. An unquoted newline counts as `;`. Never rejoins
+    tokens into a string for a second parse. Raises `ValueError` on unclosed quotes.
     """
-    segments: list[str] = []
-    for physical in command.split("\n"):
-        physical = physical.strip()
-        if not physical:
-            continue
-        tokens = _tokenize_segment(physical)
-        current: list[str] = []
-        for tok in tokens:
-            if tok in _SHELL_SEPARATORS:
-                piece = " ".join(current).strip()
-                if piece:
-                    segments.append(piece)
+    tokens = _scan_shell_tokens(command)
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for tok in tokens:
+        if tok in _SHELL_SEPARATORS:
+            if current:
+                segments.append(current)
                 current = []
-            else:
-                current.append(tok)
-        piece = " ".join(current).strip()
-        if piece:
-            segments.append(piece)
+        else:
+            current.append(tok)
+    if current:
+        segments.append(current)
     return segments
 
 
-def _tokenize_segment(segment: str) -> list[str]:
-    lexer = shlex.shlex(segment, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    return list(lexer)
+def _scan_shell_tokens(command: str) -> list[str]:
+    """Quote-aware token scan: single quotes, double quotes with \\ escapes, \\+newline."""
+    s = command
+    n = len(s)
+    i = 0
+    out: list[str] = []
+    while i < n:
+        ch = s[i]
+        if ch == "\\" and i + 1 < n and s[i + 1] == "\n":
+            i += 2
+            continue
+        if ch == "\n":
+            out.append(";")
+            i += 1
+            continue
+        if ch in " \t\r":
+            i += 1
+            continue
+        if ch == "'":
+            j = i + 1
+            while j < n and s[j] != "'":
+                j += 1
+            if j >= n:
+                raise ValueError("No closing quotation")
+            out.append(s[i + 1 : j])
+            i = j + 1
+            continue
+        if ch == '"':
+            j = i + 1
+            buf: list[str] = []
+            while j < n:
+                c = s[j]
+                if c == '"':
+                    break
+                if c == "\\" and j + 1 < n and s[j + 1] in '"\\$`\n':
+                    if s[j + 1] != "\n":
+                        buf.append(s[j + 1])
+                    j += 2
+                    continue
+                buf.append(c)
+                j += 1
+            if j >= n:
+                raise ValueError("No closing quotation")
+            out.append("".join(buf))
+            i = j + 1
+            continue
+        if ch == "$" and i + 1 < n and s[i + 1] == "(":
+            j = i + 2
+            depth = 1
+            while j < n and depth:
+                if s[j] == "(":
+                    depth += 1
+                elif s[j] == ")":
+                    depth -= 1
+                j += 1
+            out.append(s[i:j])
+            i = j
+            continue
+        if ch == "`":
+            j = i + 1
+            while j < n and s[j] != "`":
+                if s[j] == "\\" and j + 1 < n:
+                    j += 2
+                else:
+                    j += 1
+            if j >= n:
+                raise ValueError("No closing quotation")
+            out.append(s[i : j + 1])
+            i = j + 1
+            continue
+        if ch == "&" and i + 1 < n and s[i + 1] == "&":
+            out.append("&&")
+            i += 2
+            continue
+        if ch == "|" and i + 1 < n and s[i + 1] == "|":
+            out.append("||")
+            i += 2
+            continue
+        redir = _match_redir_op(s, i)
+        if redir is not None:
+            op, ni = redir
+            out.append(op)
+            i = ni
+            continue
+        if ch in "|&;":
+            out.append(ch)
+            i += 1
+            continue
+        buf_w: list[str] = []
+        while i < n:
+            c = s[i]
+            if c in " \t\r\n":
+                break
+            if c in "'\"`":
+                break
+            if c == "$" and i + 1 < n and s[i + 1] == "(":
+                break
+            if c == "\\" and i + 1 < n and s[i + 1] == "\n":
+                break
+            if c == "&" and i + 1 < n and s[i + 1] == "&":
+                break
+            if c == "|" and i + 1 < n and s[i + 1] == "|":
+                break
+            if c in "|&;":
+                break
+            if _match_redir_op(s, i) is not None:
+                break
+            if c == "\\" and i + 1 < n:
+                buf_w.append(s[i + 1])
+                i += 2
+                continue
+            buf_w.append(c)
+            i += 1
+        if not buf_w:
+            raise ValueError(f"unrecognised shell token at {i}")
+        out.append("".join(buf_w))
+    return out
+
+
+def _match_redir_op(s: str, i: int) -> tuple[str, int] | None:
+    """Match a redirection operator starting at `i`, including `2>&1` as one token."""
+    n = len(s)
+    if i >= n:
+        return None
+    if s[i] == "&" and i + 1 < n and s[i + 1] == ">":
+        if i + 2 < n and s[i + 2] == ">":
+            return ("&>>", i + 3)
+        return ("&>", i + 2)
+    j = i
+    while j < n and s[j].isdigit():
+        j += 1
+    if j < n and s[j] == ">":
+        if j + 1 < n and s[j + 1] == "&":
+            k = j + 2
+            while k < n and s[k].isdigit():
+                k += 1
+            return (s[i:k], k)
+        if j + 1 < n and s[j + 1] == ">":
+            return (s[i : j + 2], j + 2)
+        return (s[i : j + 1], j + 1)
+    if j < n and s[j] == "<":
+        if j + 1 < n and s[j + 1] == "<":
+            if j + 2 < n and s[j + 2] == "-":
+                return (s[i : j + 3], j + 3)
+            return (s[i : j + 2], j + 2)
+        if j + 1 < n and s[j + 1] == "&":
+            k = j + 2
+            while k < n and s[k].isdigit():
+                k += 1
+            return (s[i:k], k)
+        return (s[i : j + 1], j + 1)
+    return None
+
+
+_REDIR_SOLO = re.compile(r"^(?:\d*)>&\d+$|^>&\d+$")
+
+
+def _is_redir_token(tok: str) -> bool:
+    if tok in (">", ">>", "<", "<<", "<<-", "&>", "&>>"):
+        return True
+    if _REDIR_SOLO.match(tok):
+        return True
+    if re.fullmatch(r"\d*>>?", tok) or re.fullmatch(r"\d*<<?-?", tok):
+        return True
+    return False
+
+
+def _redir_takes_target(tok: str) -> bool:
+    if _REDIR_SOLO.match(tok):
+        return False
+    return _is_redir_token(tok)
+
+
+def _drop_redirections(tokens: list[str]) -> list[str]:
+    """Drop redirection operators and their targets from argv used for classification."""
+    out: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if _redir_takes_target(tok):
+            i += 2 if i + 1 < len(tokens) else 1
+            continue
+        if _is_redir_token(tok):
+            i += 1
+            continue
+        out.append(tok)
+        i += 1
+    return out
+
+
+def bash_test_label(command: str) -> str:
+    """Short label for the first test segment: normalised argv via shlex.join, max 60 chars."""
+    stripped = strip_heredoc_bodies(command)
+    try:
+        segments = split_shell_segments(stripped)
+    except ValueError:
+        return _truncate_label(command)
+    for tokens in segments:
+        argv = _normalise_argv(_drop_redirections(tokens))
+        if argv is None or not argv:
+            continue
+        if argv[0] in _NEUTRAL_COMMANDS:
+            continue
+        if _classify_argv(argv, tokens) == "test":
+            return _truncate_label(shlex.join(argv))
+    return _truncate_label(command)
+
+
+def _truncate_label(label: str, limit: int = _LABEL_MAX) -> str:
+    if len(label) <= limit:
+        return label
+    if limit <= 1:
+        return "…"
+    return label[: limit - 1] + "…"
 
 
 def classify_bash(command: str) -> BashKind:
     """Classify a shell command after heredoc strip, quote-aware split, and argv normalisation.
 
     On a parse error the whole command is unclassified. Across segments: any test wins, else any
-    check, else any unclassified, else read. Neutral-only commands are not unclassified.
+    check, else any unclassified, else any write, else read. Neutral-only commands are not
+    unclassified.
     """
     stripped = strip_heredoc_bodies(command)
     try:
@@ -801,11 +1085,8 @@ def classify_bash(command: str) -> BashKind:
     except ValueError:
         return "unclassified"
     kinds: set[BashKind] = set()
-    for segment in segments:
-        try:
-            kind = _classify_segment(segment)
-        except ValueError:
-            return "unclassified"
+    for tokens in segments:
+        kind = _classify_segment(tokens)
         if kind != "neutral":
             kinds.add(kind)
     if not kinds:
@@ -816,12 +1097,13 @@ def classify_bash(command: str) -> BashKind:
         return "check"
     if "unclassified" in kinds:
         return "unclassified"
+    if "write" in kinds:
+        return "write"
     return "read"
 
 
-def _classify_segment(segment: str) -> BashKind:
-    tokens = _tokenize_segment(segment)
-    argv = _normalise_argv(tokens)
+def _classify_segment(tokens: list[str]) -> BashKind:
+    argv = _normalise_argv(_drop_redirections(tokens))
     if argv is None:
         return "neutral"
     if not argv:
@@ -893,6 +1175,8 @@ def _normalise_argv(tokens: list[str]) -> list[str] | None:
     for prefix in _RUNNER_PREFIXES:
         if _startswith(argv, prefix):
             argv = argv[len(prefix) :]
+            if prefix == ("uvx",) and len(argv) >= 2 and argv[0] == "--from":
+                argv = argv[2:]
             break
     if not argv:
         return None
@@ -977,25 +1261,111 @@ def _classify_argv(argv: list[str], raw_tokens: list[str] | None = None) -> Bash
         return "read"
     if argv == ["env"]:
         return "read"
-    # git tag -l
-    if len(argv) >= 3 and argv[0] == "git" and argv[1] == "tag" and "-l" in argv[2:]:
-        return "read"
+    git_kind = _classify_git(argv)
+    if git_kind is not None:
+        return git_kind
     # sed -n without -i
     if argv[0] == "sed" and _sed_is_read(argv):
         return "read"
+    if argv[0] == "sed" and _has_sed_in_place(argv):
+        return "write"
     # awk without a > redirect in the segment
     if argv[0] == "awk" and raw_tokens is not None and ">" not in raw_tokens and ">>" not in raw_tokens:
         return "read"
+    if argv[0] == "tee" and _tee_has_file_arg(argv):
+        return "write"
     for prefix in _TEST_PREFIXES:
         if _startswith(argv, prefix):
             return "test"
     for prefix in _CHECK_PREFIXES:
         if _startswith(argv, prefix):
             return "check"
+    write_kind = _classify_write(argv)
+    if write_kind is not None:
+        return write_kind
     for prefix in _READ_PREFIXES:
         if _startswith(argv, prefix):
             return "read"
     return "unclassified"
+
+
+def _tee_has_file_arg(argv: list[str]) -> bool:
+    for arg in argv[1:]:
+        if not arg.startswith("-"):
+            return True
+    return False
+
+
+def _classify_git(argv: list[str]) -> BashKind | None:
+    if not argv or argv[0] != "git" or len(argv) < 2:
+        return None
+    sub = argv[1]
+    rest = argv[2:]
+    if sub == "stash":
+        if rest and rest[0] in ("list", "show"):
+            return "read"
+        return "write"
+    if sub == "tag":
+        if not rest:
+            return "read"
+        if "-l" in rest or "--list" in rest:
+            return "read"
+        return "write"
+    if sub == "branch":
+        return _classify_git_branch(rest)
+    if sub in _GIT_WRITE_SUBCOMMANDS:
+        return "write"
+    return None
+
+
+def _classify_git_branch(rest: list[str]) -> BashKind:
+    if not rest:
+        return "read"
+    read_flags = {"-a", "-r", "--list", "-v", "-vv", "--verbose"}
+    write_flags = {"-d", "-D", "-m", "-M", "-f", "--force", "--delete", "--move"}
+    has_write = False
+    has_name = False
+    for arg in rest:
+        if arg in write_flags or arg.startswith("--delete") or arg.startswith("--move"):
+            has_write = True
+        elif arg in read_flags or arg.startswith("--list") or arg.startswith("--verbose"):
+            continue
+        elif arg.startswith("-"):
+            # Unknown flag — do not guess a write from it alone.
+            continue
+        else:
+            has_name = True
+    if has_write or has_name:
+        return "write"
+    return "read"
+
+
+def _classify_write(argv: list[str]) -> BashKind | None:
+    cmd = argv[0]
+    if cmd in _FILE_WRITE_COMMANDS:
+        return "write"
+    if cmd == "pip" and len(argv) >= 2 and argv[1] in ("install", "uninstall"):
+        return "write"
+    if cmd == "uv":
+        if len(argv) >= 3 and argv[1] == "pip" and argv[2] in ("install", "uninstall"):
+            return "write"
+        if len(argv) >= 2 and argv[1] in ("sync", "add", "remove", "venv"):
+            return "write"
+    if cmd == "python" and len(argv) >= 3 and argv[1] == "-m":
+        if argv[2] == "venv":
+            return "write"
+        if argv[2] == "pip" and len(argv) >= 4 and argv[3] in ("install", "uninstall"):
+            return "write"
+    if cmd in ("npm", "pnpm", "yarn") and len(argv) >= 2 and argv[1] in _NPM_WRITE_SUBCOMMANDS:
+        return "write"
+    if cmd == "cargo" and len(argv) >= 2 and argv[1] == "add":
+        return "write"
+    if cmd == "go" and len(argv) >= 2:
+        if argv[1] == "get":
+            return "write"
+        if argv[1] == "mod" and len(argv) >= 3 and argv[2] == "tidy":
+            return "write"
+    return None
 
 
 def _is_version_query(argv: list[str]) -> bool:

@@ -11,10 +11,13 @@ import pytest
 from assurance_budget.session_cli import _duration_phrase, main
 from assurance_budget.sessions import (
     after_last_edit,
+    bash_kinds_count,
+    bash_test_label,
     changed_limits_file,
     classify_bash,
     edited_without_read,
     read_claude_code,
+    split_shell_segments,
     strip_heredoc_bodies,
     unclassified_bash_count,
 )
@@ -26,11 +29,11 @@ REALISTIC = FIXTURES / "realistic-session.jsonl"
 # Regenerate with: TZ=UTC assurance audit packages/budget/tests/fixtures/realistic-session.jsonl
 EXPECTED_REALISTIC_AUDIT = """\
 Claude Code session a1b2c3d4 — 1h 5 min in /workspace/demo-app
-75 tool calls, 1 failed — Bash 67, Edit 5, Read 2, Write 1
+82 tool calls, 1 failed — Bash 74, Edit 5, Read 2, Write 1
 
   Edited without reading it first: src/orphan.py, /tmp/scratch/notes.md
-  After the last edit (11:05): 2 test runs (pytest -q tests/, python -m pytest tests/test_app.py -q), 0 checks
-  Not classified: 8 shell commands, so whether they read, wrote or tested anything is unknown.
+  After the last edit (11:05): 3 test runs (pytest -q tests/, python -m pytest tests/test_app.py -q, pytest -q), 0 checks
+  Not classified: 2 shell commands, so whether they read, wrote or tested anything is unknown.
   This session changed .assurance/config.toml — the limits file for this project.
   Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
   Not read: 3 lines — type=progress 2, assistant block server_tool_use 1.\
@@ -122,16 +125,170 @@ def test_classify_new_table_entries() -> None:
     assert classify_bash("python --version") == "read"
     assert classify_bash("env") == "read"
     # Still unclassified on purpose
-    assert classify_bash("git commit -m x") == "unclassified"
     assert classify_bash("curl http://example.com") == "unclassified"
-    assert classify_bash("rm -rf build") == "unclassified"
+    assert classify_bash("python -c \"print(1)\"") == "unclassified"
+    # Known state changes are write, not unclassified
+    assert classify_bash("git commit -m x") == "write"
+    assert classify_bash("rm -rf build") == "write"
+    assert classify_bash("mkdir -p build") == "write"
+    assert classify_bash("pip install requests") == "write"
 
 
 def test_neutral_segments_do_not_unclassify() -> None:
     assert classify_bash("cd src") == "read"  # neutral-only → not unclassified
     assert classify_bash("true") == "read"
     assert classify_bash("export FOO=1") == "read"
-    assert classify_bash("cd x && rm -rf y") == "unclassified"  # rm still wins
+    assert classify_bash("cd x && rm -rf y") == "write"  # rm is a known write
+
+
+def test_test_label_from_heredoc_then_pytest() -> None:
+    cmd = "python3 - <<'EOF'\nimport re\np=1\nEOF\n&& /tmp/v/bin/python -m pytest -q"
+    label = bash_test_label(cmd)
+    assert label == "python -m pytest -q"
+    assert "\n" not in label
+    assert classify_bash(cmd) == "test"
+
+
+def test_test_label_strips_env_and_venv_path() -> None:
+    assert bash_test_label("TZ=UTC /x/venv/bin/python -m pytest -q") == "python -m pytest -q"
+
+
+def test_test_label_truncates_at_60() -> None:
+    long_cmd = "pytest " + "a" * 80
+    label = bash_test_label(long_cmd)
+    assert len(label) == 60
+    assert label.endswith("…")
+
+
+def test_after_last_edit_groups_by_label_keeps_full_command(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    heredoc_then_pytest = (
+        "python3 - <<'EOF'\nprint(1)\nEOF\n&& /tmp/v/bin/python -m pytest -q"
+    )
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="a.py", old_string="a", new_string="b")],
+                    "2026-09-24T10:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T10:00:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("t1", "Bash", command=heredoc_then_pytest)],
+                    "2026-09-24T10:01:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("t1", "ok")], "2026-09-24T10:01:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("t2", "Bash", command="TZ=UTC /tmp/v/bin/python -m pytest -q")],
+                    "2026-09-24T10:02:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("t2", "ok")], "2026-09-24T10:02:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    after = after_last_edit(read_claude_code(path))
+    assert after is not None
+    assert after["tests"] == 2
+    assert after["test_labels"] == ["python -m pytest -q ×2"]
+    assert after["test_runs"][0]["command"] == heredoc_then_pytest
+    assert after["test_runs"][0]["label"] == "python -m pytest -q"
+    assert "\n" not in after["test_runs"][0]["label"]
+
+
+def test_quote_aware_tokenize_multiline_and_apostrophe() -> None:
+    # Spanning two real lines — classified, not a parse error.
+    assert classify_bash('python3 -c "import json\nprint(1)" | head') == "unclassified"
+    segs = split_shell_segments('python3 -c "import json\nprint(1)" | head')
+    assert segs == [["python3", "-c", "import json\nprint(1)"], ["head"]]
+    assert classify_bash('grep -n "it\'s here" f.txt') == "read"
+    assert classify_bash("grep -n \"it's here\" f.txt") == "read"
+    assert classify_bash('echo "a|b" | wc -l') == "read"
+    assert classify_bash("pytest -q 2>&1") == "test"
+    assert bash_test_label("pytest -q 2>&1") == "pytest -q"
+
+
+def test_write_kind_known_state_changes() -> None:
+    assert classify_bash("git add .") == "write"
+    assert classify_bash("git push origin HEAD") == "write"
+    assert classify_bash("git stash") == "write"
+    assert classify_bash("git stash list") == "read"
+    assert classify_bash("git tag") == "read"
+    assert classify_bash("git tag v1") == "write"
+    assert classify_bash("git branch") == "read"
+    assert classify_bash("git branch -a") == "read"
+    assert classify_bash("git branch -d old") == "write"
+    assert classify_bash("git branch feature") == "write"
+    assert classify_bash("uv sync") == "write"
+    assert classify_bash("uv add rich") == "write"
+    assert classify_bash("python -m pip install x") == "write"
+    assert classify_bash("python -m venv .venv") == "write"
+    assert classify_bash("npm install") == "write"
+    assert classify_bash("cargo add serde") == "write"
+    assert classify_bash("go get ./...") == "write"
+    assert classify_bash("tee out.txt") == "write"
+    assert classify_bash("sed -i 's/a/b/' f") == "write"
+    assert classify_bash("printf hi") == "read"
+    assert classify_bash("uvx --from ruff ruff check .") == "check"
+    # Still unclassified
+    assert classify_bash("python scripts/regen_fixtures.py") == "unclassified"
+    assert classify_bash("make lint-fix") == "unclassified"
+    assert classify_bash("docker build .") == "unclassified"
+
+
+def test_bash_kinds_json_split(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("b1", "Bash", command="pytest -q")],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("b1", "ok")], "2026-09-24T01:00:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("b2", "Bash", command="mkdir x")],
+                    "2026-09-24T01:00:02.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("b2", "ok")], "2026-09-24T01:00:03.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("b3", "Bash", command="python -c '1'")],
+                    "2026-09-24T01:00:04.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("b3", "ok")], "2026-09-24T01:00:05.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert bash_kinds_count(session) == {
+        "test": 1,
+        "check": 0,
+        "read": 0,
+        "write": 1,
+        "unclassified": 1,
+    }
+    assert main([str(path), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["bash_kinds"]["write"] == 1
+    assert payload["bash_kinds"]["unclassified"] == 1
+    assert payload["unclassified_commands"] == 1
 
 
 def test_realistic_fixture_unclassified_at_most_25_percent() -> None:

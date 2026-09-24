@@ -20,6 +20,7 @@ from assurance_budget.sessions import (
     Session,
     ToolCall,
     after_last_edit,
+    bash_kinds_count,
     changed_limits_file,
     edited_without_read,
     find_latest_session,
@@ -95,9 +96,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     unread_edits = edited_without_read(session)
     after = after_last_edit(session)
     unclassified = unclassified_bash_count(session)
+    bash_kinds = bash_kinds_count(session)
     limits_changed = changed_limits_file(session)
     report = build_report(
-        session, loops, unread_edits, after, unclassified, ceilings, limits_changed=limits_changed
+        session,
+        loops,
+        unread_edits,
+        after,
+        unclassified,
+        ceilings,
+        limits_changed=limits_changed,
+        bash_kinds=bash_kinds,
     )
     if args.as_json:
         print(json.dumps(report, indent=2))
@@ -138,6 +147,7 @@ def build_report(
     ceilings: Ceilings | None = None,
     *,
     limits_changed: bool = False,
+    bash_kinds: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     by_tool = dict(Counter(call.name for call in session.tool_calls))
     failed = sum(1 for call in session.tool_calls if call.error)
@@ -160,6 +170,7 @@ def build_report(
                     "limit": caps.tool_calls,
                     "source": origin,
                 }
+    kinds = bash_kinds if bash_kinds is not None else bash_kinds_count(session)
     payload: dict[str, Any] = {
         "session_id": session.session_id,
         "source": session.source,
@@ -181,6 +192,7 @@ def build_report(
         "edited_without_read": list(unread_edits),
         "after_last_edit": after,
         "unclassified_commands": unclassified,
+        "bash_kinds": kinds,
         "over_configured_limit": over_limit,
         "ceilings_source": None if caps is None or caps.source == "built-in defaults" else caps.source,
         "changed_limits_file": limits_changed,
