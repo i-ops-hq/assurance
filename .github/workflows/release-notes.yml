@@ -1,0 +1,85 @@
+name: release notes
+
+# A GitHub Release for every published tag, with that version's section of the package CHANGELOG as
+# its notes. Releases are what notify watchers and fill the Releases sidebar; the tags alone did
+# neither, and 45 of them sat there with an empty "Create a new release" link.
+#
+# Two ways in:
+#   - automatically, after `publish` succeeds for a tag push
+#   - by hand (Actions → release notes → Run workflow), for tags that were published before this
+#     existed. Give it one or more tags separated by spaces. A tag that already has a release is
+#     skipped, so running it twice changes nothing.
+#
+# The notes are the CHANGELOG section as it stood *at the tag*, not on main, so a later edit never
+# rewrites what a release said.
+
+on:
+  workflow_run:
+    workflows: [publish]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Tags to release, space-separated (e.g. assurance-v0.1.0 budget-v0.2.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # create releases; nothing else
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0       # the CHANGELOG is read at each tag
+
+      - name: Create the releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Passed through the environment, never interpolated into the script: a tag name is text
+          # someone chose.
+          DISPATCH_TAGS: ${{ inputs.tags }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TAGS="$DISPATCH_TAGS"; else TAGS="$RUN_TAG"; fi
+
+          for TAG in $TAGS; do
+            if ! [[ "$TAG" =~ ^(core|cli|mcp|budget|authority|deps|assurance)-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::$TAG is not a package release tag (<pkg>-vX.Y.Z)"; exit 1
+            fi
+            if ! git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+              echo "::error::tag $TAG does not exist"; exit 1
+            fi
+            if gh release view "$TAG" > /dev/null 2>&1; then
+              echo "$TAG already has a release, skipping"; continue
+            fi
+
+            PKG="${TAG%%-v*}"
+            VERSION="${TAG#*-v}"
+            if [ "$PKG" = "assurance" ]; then DIST=assurance; else DIST="assurance-$PKG"; fi
+
+            SECTION=$(git show "$TAG:packages/$PKG/CHANGELOG.md" \
+              | awk -v v="# $VERSION" '$0 == v {on=1; next} on && /^# / {exit} on {print}')
+            if [ -z "$(echo "$SECTION" | tr -d '[:space:]')" ]; then
+              echo "::error::packages/$PKG/CHANGELOG.md at $TAG has no '# $VERSION' section"; exit 1
+            fi
+
+            {
+              echo "\`pip install $DIST==$VERSION\` · [PyPI](https://pypi.org/project/$DIST/$VERSION/)"
+              echo
+              echo "$SECTION"
+            } > notes.md
+
+            # Only the front-door package is marked Latest, so the sidebar points at the one install
+            # a newcomer should run.
+            if [ "$PKG" = "assurance" ]; then LATEST=true; else LATEST=false; fi
+            gh release create "$TAG" --title "$DIST $VERSION" --notes-file notes.md --verify-tag --latest="$LATEST"
+            echo "released $TAG"
+          done
