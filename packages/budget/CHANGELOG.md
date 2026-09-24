@@ -14,6 +14,25 @@
   install` / `uv sync` and similar count as classified writes. `--json` gains `bash_kinds` with
   `test` / `check` / `read` / `write` / `unclassified` so the split is visible. `python -c`,
   `curl`, `make lint-fix`, and project binaries stay honestly unclassified.
+- **No "edited without reading" line for Claude Code sessions.** Claude Code refuses to edit a
+  file the model has not read, so an edit with no visible read means the read reached the model some
+  way the transcript reader did not see, never that the agent skipped it. The text output no longer
+  reports it; `--json` keeps `edited_without_read`. Files the harness attaches are now counted as
+  read: an @-mentioned file, a file carried across a compaction (`compact_file_reference`), and a
+  file changed outside the session (`edited_text_file`). On a real 7-hour session that had
+  compacted twice, every edit the old check flagged was explained by one of these.
+- **Words are read the way the shell reads them.** `--format='%H'` and `X=$(git rev-parse HEAD)`
+  are one word each, and the commands inside `$( … )` and backticks are classified too.
+  `$(( … ))` is arithmetic, not a command.
+- **More commands have a known kind:** `git -C dir …` / `git --no-pager …` classify by their
+  subcommand; `git grep` and other inspection subcommands are reads; `sed` without `-i` is a read;
+  `gh` views and lists are reads, `gh` verbs that change something are writes, and `gh api` goes by
+  its method; `pgrep` / `lsof` / `cmp` are reads, `kill` / `pkill` are writes; output redirected to
+  a file (`cat a > b`) is a write.
+- **`custom-title`, `ai-title`, `pr-link`, `agent-name` and `file-history-delta` records are
+  bookkeeping.** A real 20-day session had 1662 lines of them under "Not read".
+- **"N other kinds" counts kinds.** It printed "132 other kinds" for 2 kinds covering 132 lines;
+  it now reads "2 other kinds (132 lines)".
 - **Loop bodies and condition tests.** `do s=$(…)` is an assignment inside a loop, and
   `[ … ]` / `test` are conditions; neither leaves a command unclassified. `sha256sum`, `ps` and
   `git ls-remote` are reads.

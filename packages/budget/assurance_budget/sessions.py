@@ -31,6 +31,11 @@ KNOWN_RECORDS = (
     "cost-state",
     "summary",
     "file-history-snapshot",
+    "file-history-delta",
+    "custom-title",
+    "ai-title",
+    "pr-link",
+    "agent-name",
 )
 
 _ASSISTANT_ONLY = frozenset({"text", "thinking", "redacted_thinking"})
@@ -295,6 +300,14 @@ class Session:
     not_read: int
     unmatched_results: int
     not_read_reasons: Mapping[str, int] = field(default_factory=dict)
+    attached_reads: tuple[tuple[int, str], ...] = ()
+    """Files the harness put in front of the model without a Read call, as (tool calls before it,
+    path): an @-mentioned file, a file carried across a compaction, a file changed outside the
+    session. Claude Code treats each as read."""
+
+
+#: `attachment` records that give the model a file's contents, so Claude Code counts it as read.
+_READ_ATTACHMENTS = frozenset({"file", "compact_file_reference", "edited_text_file"})
 
 
 def read_claude_code(path: Path) -> Session:
@@ -324,6 +337,7 @@ def read_claude_code(path: Path) -> Session:
     lines = 0
     unmatched_results = 0
     saw_session = False
+    attached_reads: list[tuple[int, str]] = []
 
     def _mark(reason: str) -> None:
         nonlocal not_read
@@ -359,6 +373,14 @@ def read_claude_code(path: Path) -> Session:
         kind = record.get("type")
         if isinstance(kind, str) and kind in KNOWN_RECORDS:
             record_counts[kind] += 1
+            attached = record.get("attachment")
+            if (
+                kind == "attachment"
+                and isinstance(attached, dict)
+                and attached.get("type") in _READ_ATTACHMENTS
+                and isinstance(attached.get("filename"), str)
+            ):
+                attached_reads.append((len(order), attached["filename"]))
             continue
 
         message = record.get("message")
@@ -492,6 +514,7 @@ def read_claude_code(path: Path) -> Session:
         not_read=not_read,
         unmatched_results=unmatched_results,
         not_read_reasons=dict(not_read_reasons),
+        attached_reads=tuple(attached_reads),
     )
 
 
@@ -636,7 +659,8 @@ def _is_session_limits_file(path: str, cwd: str) -> bool:
 
 
 def edited_without_read(session: Session) -> list[str]:
-    """Paths changed by Edit/MultiEdit/NotebookEdit with no earlier Read or successful Write.
+    """Paths changed by Edit/MultiEdit/NotebookEdit with no earlier Read, successful Write, or
+    attached copy of the file (an @-mention, a file carried across a compaction).
 
     `Write` creates or replaces whole files — the agent already knows the content. Failed edits
     change nothing. Paths are compared after `os.path.normpath`, with relative paths resolved
@@ -645,7 +669,12 @@ def edited_without_read(session: Session) -> list[str]:
     known_paths: set[str] = set()
     missing: list[str] = []
     seen: set[str] = set()
-    for call in session.tool_calls:
+    attached = sorted(session.attached_reads)
+    next_attached = 0
+    for index, call in enumerate(session.tool_calls):
+        while next_attached < len(attached) and attached[next_attached][0] <= index:
+            known_paths.add(_norm_path(attached[next_attached][1], session.cwd))
+            next_attached += 1
         if call.name in _READ_TOOLS:
             path = _call_path(call)
             if path is not None:
@@ -865,11 +894,84 @@ def split_shell_segments(command: str) -> list[list[str]]:
 
 
 def _scan_shell_tokens(command: str) -> list[str]:
-    """Quote-aware token scan: single quotes, double quotes with \\ escapes, \\+newline."""
+    """Quote-aware token scan. See `_scan_shell`."""
+    return _scan_shell(command)[0]
+
+
+def command_substitutions(command: str) -> list[str]:
+    """The commands inside every `$( … )` and backtick pair, outside single quotes."""
+    return _scan_shell(command)[1]
+
+
+def _scan_shell(command: str) -> tuple[list[str], list[str]]:
+    """Split a command into shell words and operators, the way the shell does.
+
+    A word runs until unquoted whitespace or an operator, and joins every piece inside it:
+    `--format='%H'` is one word, `X=$(git rev-parse HEAD)` is one word. Single quotes are literal;
+    double quotes honour `\\` escapes; `\\`+newline continues the line; an unquoted newline is
+    `;`. The text of each `$( … )` and backtick substitution is returned alongside, because the
+    commands inside it ran too. Raises `ValueError` on an unclosed quote or substitution.
+    """
     s = command
     n = len(s)
     i = 0
     out: list[str] = []
+    subs: list[str] = []
+
+    def closing_paren(j: int) -> int:
+        # j is just past `$(`; returns the index just past the matching `)`, skipping quotes.
+        depth = 1
+        while j < n:
+            c = s[j]
+            if c == "'":
+                k = s.find("'", j + 1)
+                if k < 0:
+                    raise ValueError("No closing quotation")
+                j = k + 1
+                continue
+            if c == '"':
+                j = closing_double(j + 1)
+                continue
+            if c == "\\" and j + 1 < n:
+                j += 2
+                continue
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    return j + 1
+            j += 1
+        raise ValueError("No closing parenthesis")
+
+    def closing_backtick(j: int) -> int:
+        while j < n:
+            if s[j] == "\\" and j + 1 < n:
+                j += 2
+                continue
+            if s[j] == "`":
+                return j + 1
+            j += 1
+        raise ValueError("No closing quotation")
+
+    def closing_double(j: int) -> int:
+        # j is just past the opening `"`; returns the index just past the closing `"`.
+        while j < n:
+            c = s[j]
+            if c == "\\" and j + 1 < n:
+                j += 2
+                continue
+            if c == '"':
+                return j + 1
+            if c == "$" and j + 1 < n and s[j + 1] == "(":
+                j = closing_paren(j + 2)
+                continue
+            if c == "`":
+                j = closing_backtick(j + 1)
+                continue
+            j += 1
+        raise ValueError("No closing quotation")
+
     while i < n:
         ch = s[i]
         if ch == "\\" and i + 1 < n and s[i + 1] == "\n":
@@ -881,58 +983,6 @@ def _scan_shell_tokens(command: str) -> list[str]:
             continue
         if ch in " \t\r":
             i += 1
-            continue
-        if ch == "'":
-            j = i + 1
-            while j < n and s[j] != "'":
-                j += 1
-            if j >= n:
-                raise ValueError("No closing quotation")
-            out.append(s[i + 1 : j])
-            i = j + 1
-            continue
-        if ch == '"':
-            j = i + 1
-            buf: list[str] = []
-            while j < n:
-                c = s[j]
-                if c == '"':
-                    break
-                if c == "\\" and j + 1 < n and s[j + 1] in '"\\$`\n':
-                    if s[j + 1] != "\n":
-                        buf.append(s[j + 1])
-                    j += 2
-                    continue
-                buf.append(c)
-                j += 1
-            if j >= n:
-                raise ValueError("No closing quotation")
-            out.append("".join(buf))
-            i = j + 1
-            continue
-        if ch == "$" and i + 1 < n and s[i + 1] == "(":
-            j = i + 2
-            depth = 1
-            while j < n and depth:
-                if s[j] == "(":
-                    depth += 1
-                elif s[j] == ")":
-                    depth -= 1
-                j += 1
-            out.append(s[i:j])
-            i = j
-            continue
-        if ch == "`":
-            j = i + 1
-            while j < n and s[j] != "`":
-                if s[j] == "\\" and j + 1 < n:
-                    j += 2
-                else:
-                    j += 1
-            if j >= n:
-                raise ValueError("No closing quotation")
-            out.append(s[i : j + 1])
-            i = j + 1
             continue
         if ch == "&" and i + 1 < n and s[i + 1] == "&":
             out.append("&&")
@@ -952,35 +1002,76 @@ def _scan_shell_tokens(command: str) -> list[str]:
             out.append(ch)
             i += 1
             continue
-        buf_w: list[str] = []
+
+        word: list[str] = []
         while i < n:
             c = s[i]
-            if c in " \t\r\n":
+            if c in " \t\r\n" or c in "|;":
                 break
-            if c in "'\"`":
+            if c == "&" and not (i + 1 < n and s[i + 1] == ">"):
                 break
-            if c == "$" and i + 1 < n and s[i + 1] == "(":
-                break
-            if c == "\\" and i + 1 < n and s[i + 1] == "\n":
-                break
-            if c == "&" and i + 1 < n and s[i + 1] == "&":
-                break
-            if c == "|" and i + 1 < n and s[i + 1] == "|":
-                break
-            if c in "|&;":
-                break
-            if _match_redir_op(s, i) is not None:
+            if c in "<>" or (c == "&" and i + 1 < n and s[i + 1] == ">"):
                 break
             if c == "\\" and i + 1 < n:
-                buf_w.append(s[i + 1])
+                if s[i + 1] == "\n":
+                    i += 2
+                    continue
+                word.append(s[i + 1])
                 i += 2
                 continue
-            buf_w.append(c)
+            if c == "'":
+                k = s.find("'", i + 1)
+                if k < 0:
+                    raise ValueError("No closing quotation")
+                word.append(s[i + 1 : k])
+                i = k + 1
+                continue
+            if c == '"':
+                end = closing_double(i + 1)
+                inner = s[i + 1 : end - 1]
+                j = 0
+                while j < len(inner):
+                    if inner[j] == "$" and inner[j + 1 : j + 2] == "(":
+                        close = i + 1 + j
+                        stop = closing_paren(close + 2)
+                        if s[close + 2 : close + 3] != "(":  # `$(( … ))` is arithmetic
+                            subs.append(s[close + 2 : stop - 1])
+                        word.append(s[close:stop])
+                        j = stop - (i + 1)
+                        continue
+                    if inner[j] == "`":
+                        close = i + 1 + j
+                        stop = closing_backtick(close + 1)
+                        subs.append(s[close + 1 : stop - 1])
+                        word.append(s[close:stop])
+                        j = stop - (i + 1)
+                        continue
+                    if inner[j] == "\\" and j + 1 < len(inner) and inner[j + 1] in '"\\$`\n':
+                        if inner[j + 1] != "\n":
+                            word.append(inner[j + 1])
+                        j += 2
+                        continue
+                    word.append(inner[j])
+                    j += 1
+                i = end
+                continue
+            if c == "$" and i + 1 < n and s[i + 1] == "(":
+                stop = closing_paren(i + 2)
+                if s[i + 2 : i + 3] != "(":  # `$(( … ))` is arithmetic, not a command
+                    subs.append(s[i + 2 : stop - 1])
+                word.append(s[i:stop])
+                i = stop
+                continue
+            if c == "`":
+                stop = closing_backtick(i + 1)
+                subs.append(s[i + 1 : stop - 1])
+                word.append(s[i:stop])
+                i = stop
+                continue
+            word.append(c)
             i += 1
-        if not buf_w:
-            raise ValueError(f"unrecognised shell token at {i}")
-        out.append("".join(buf_w))
-    return out
+        out.append("".join(word))
+    return out, subs
 
 
 def _match_redir_op(s: str, i: int) -> tuple[str, int] | None:
@@ -1090,11 +1181,17 @@ def classify_bash(command: str) -> BashKind:
     stripped = strip_heredoc_bodies(command)
     try:
         segments = split_shell_segments(stripped)
+        inner = command_substitutions(stripped)
     except ValueError:
         return "unclassified"
     kinds: set[BashKind] = set()
     for tokens in segments:
         kind = _classify_segment(tokens)
+        if kind != "neutral":
+            kinds.add(kind)
+    # `X=$(git rev-parse HEAD)` ran `git rev-parse`; `for f in $(ls)` ran `ls`. Those count too.
+    for sub in inner:
+        kind = classify_bash(sub) if sub.strip() else "neutral"
         if kind != "neutral":
             kinds.add(kind)
     if not kinds:
@@ -1118,7 +1215,23 @@ def _classify_segment(tokens: list[str]) -> BashKind:
         return "neutral"
     if argv[0] in _NEUTRAL_COMMANDS:
         return "neutral"
-    return _classify_argv(argv, tokens)
+    kind = _classify_argv(argv, tokens)
+    # `cat a > b` read `a` and wrote `b`. Output to /dev/null or a stream writes nothing.
+    if kind in ("read", "neutral") and _redirects_output_to_a_file(tokens):
+        return "write"
+    return kind
+
+
+_DISCARD_TARGETS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+
+
+def _redirects_output_to_a_file(tokens: list[str]) -> bool:
+    for i, tok in enumerate(tokens):
+        if re.fullmatch(r"\d*>>?|&>>?", tok):  # an output redirection; `2>&1` is not one
+            target = tokens[i + 1] if i + 1 < len(tokens) else ""
+            if target and target not in _DISCARD_TARGETS:
+                return True
+    return False
 
 
 def _normalise_argv(tokens: list[str]) -> list[str] | None:
@@ -1265,7 +1378,88 @@ def _assistant_turn_only(blocks: list[Any]) -> bool:
     return True
 
 
+_GIT_GLOBAL_WITH_VALUE = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace"})
+_GIT_GLOBAL_FLAGS = frozenset(
+    {"--no-pager", "-P", "--paginate", "-p", "--no-optional-locks", "--bare", "--literal-pathspecs"}
+)
+_GIT_READ_SUBCOMMANDS = frozenset(
+    {
+        "grep",
+        "ls-tree",
+        "cat-file",
+        "describe",
+        "shortlog",
+        "reflog",
+        "show-ref",
+        "merge-base",
+        "name-rev",
+        "for-each-ref",
+        "count-objects",
+        "check-ignore",
+        "whatchanged",
+        "range-diff",
+        "var",
+        "help",
+        "version",
+    }
+)
+_GH_READ_VERBS = frozenset({"view", "list", "diff", "checks", "status", "watch"})
+_PROCESS_READS = frozenset({"pgrep", "lsof", "id", "groups", "cmp", "ss", "netstat", "uptime", "pstree"})
+_PROCESS_WRITES = frozenset({"kill", "pkill", "killall"})
+
+
+def _strip_git_globals(argv: list[str]) -> list[str]:
+    """`git -C dir --no-pager log` → `git log`. Options before the subcommand change where and how
+    git runs, not what the subcommand does."""
+    if not argv or argv[0] != "git":
+        return argv
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg in _GIT_GLOBAL_WITH_VALUE:
+            i += 2
+        elif arg in _GIT_GLOBAL_FLAGS or (arg.startswith("--") and "=" in arg):
+            i += 1
+        else:
+            break
+    return ["git", *argv[i:]]
+
+
+def _classify_gh(argv: list[str]) -> BashKind | None:
+    if not argv or argv[0] != "gh" or len(argv) < 2:
+        return None
+    if argv[1] == "api":
+        rest = argv[2:]
+        method = "GET"
+        for j, arg in enumerate(rest):
+            if arg in ("-X", "--method") and j + 1 < len(rest):
+                method = rest[j + 1].upper()
+            elif arg.startswith("--method="):
+                method = arg.split("=", 1)[1].upper()
+            elif arg in ("-f", "-F", "--field", "--raw-field", "--input") and method == "GET":
+                method = "POST"  # gh api sends fields as a POST unless told otherwise
+        return "read" if method == "GET" else "write"
+    if argv[1] == "auth" and len(argv) >= 3 and argv[2] == "status":
+        return "read"
+    if len(argv) >= 3:
+        return "read" if argv[2] in _GH_READ_VERBS else "write"
+    return None
+
+
 def _classify_argv(argv: list[str], raw_tokens: list[str] | None = None) -> BashKind:
+    argv = _strip_git_globals(argv)
+    if len(argv) >= 2 and argv[0] == "git" and argv[1] in _GIT_READ_SUBCOMMANDS:
+        return "read"
+    gh_kind = _classify_gh(argv)
+    if gh_kind is not None:
+        return gh_kind
+    if argv[0] in _PROCESS_READS:
+        return "read"
+    if argv[0] in _PROCESS_WRITES:
+        return "write"
+    # sed without -i prints to stdout and changes no file.
+    if argv[0] == "sed" and not _has_sed_in_place(argv):
+        return "read"
     if _is_version_query(argv):
         return "read"
     if argv == ["env"]:

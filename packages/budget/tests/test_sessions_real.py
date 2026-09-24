@@ -31,7 +31,6 @@ EXPECTED_REALISTIC_AUDIT = """\
 Claude Code session a1b2c3d4 — 1h 5 min in /workspace/demo-app
 82 tool calls, 1 failed — Bash 74, Edit 5, Read 2, Write 1
 
-  Edited without reading it first: src/orphan.py, /tmp/scratch/notes.md
   After the last edit (11:05): 3 test runs (pytest -q tests/, python -m pytest tests/test_app.py -q, pytest -q), 0 checks
   Not classified: 2 shell commands, so whether they read, wrote or tested anything is unknown.
   This session changed .assurance/config.toml — the limits file for this project.
@@ -101,8 +100,8 @@ def test_classify_heredoc_body_is_not_commands() -> None:
     stripped = strip_heredoc_bodies(cmd)
     assert "echo should_not_be_a_command" not in stripped
     assert "pytest" not in stripped
-    # Body's pytest must not make this a test; cat alone is a read.
-    assert classify_bash(cmd) == "read"
+    # Body's pytest must not make this a test; `cat > notes.md` wrote a file.
+    assert classify_bash(cmd) == "write"
     # A write tool with only a heredoc body mentioning pytest stays honest.
     assert classify_bash("tee out <<'EOF'\npytest -q\nEOF") != "test"
 
@@ -631,3 +630,137 @@ def test_realistic_fixture_audit_output_pinned(
     assert main([str(REALISTIC)]) == 0
     printed = capsys.readouterr().out.strip()
     assert printed == EXPECTED_REALISTIC_AUDIT.strip()
+
+
+# ---------------------------------------------------------------------------
+# Found on a real 20-day session and a real 7-hour one (review of #72)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "kind"),
+    [
+        # Quoted pieces and substitutions are part of the word they touch.
+        ("git log --format='%H' -1", "read"),
+        ("X=$(ps aux | awk '{print $NF}') && echo $X", "read"),
+        # The commands inside a substitution ran, and count.
+        ("sha=$(git rev-parse origin/main)", "read"),
+        ("X=$(curl -s https://example.com)", "unclassified"),
+        ('echo "result: $(python -m pytest -q)"', "test"),
+        ("for f in $(ls); do cat $f; done", "read"),
+        ("echo `date`", "read"),
+        # Single quotes are literal, and $(( )) is arithmetic, not a command.
+        ("echo 'lit $(rm -rf /)'", "read"),
+        ("echo $((1+2))", "read"),
+        # git options before the subcommand, and more git reads.
+        ("git -C repo status", "read"),
+        ("git --no-pager log -1", "read"),
+        ("git -C repo commit -m x", "write"),
+        ("git grep TODO", "read"),
+        # sed without -i only prints.
+        ("sed 's/x/y/' f.txt", "read"),
+        ("sed -i '' 's/x/y/' f.txt", "write"),
+        # gh: views read, verbs that change something write, api by method.
+        ("gh pr view 3", "read"),
+        ("gh run list", "read"),
+        ("gh pr merge 3 --squash", "write"),
+        ("gh api repos/o/r/pulls", "read"),
+        ("gh api -X POST repos/o/r/issues", "write"),
+        ("gh api repos/o/r/issues -f title=x", "write"),
+        # Processes.
+        ("pgrep -f server", "read"),
+        ("pkill -f server", "write"),
+        # Output redirected to a file is a write; to /dev/null it is not.
+        ("cat a.txt > b.txt", "write"),
+        ("echo done >> log.txt", "write"),
+        ("ls missing 2>/dev/null", "read"),
+        ("grep x f &>/dev/null", "read"),
+        ("python -m pytest -q > out.txt", "test"),
+    ],
+)
+def test_real_session_command_shapes(command: str, kind: str) -> None:
+    assert classify_bash(command) == kind
+
+
+def _attachment(session: str, cwd: str, kind: str, filename: str, ts: str) -> str:
+    return _line(
+        type="attachment",
+        sessionId=session,
+        timestamp=ts,
+        cwd=cwd,
+        attachment={"type": kind, "filename": filename},
+    )
+
+
+def _edit_session(tmp_path: Path, attachment_first: bool) -> Path:
+    cwd = str(tmp_path)
+    edit = [
+        _assistant(
+            "abc",
+            cwd,
+            [_tool_use("e1", "Edit", file_path=f"{cwd}/src/app.py", old_string="a", new_string="b")],
+            "2026-09-24T01:00:02.000Z",
+        ),
+        _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T01:00:03.000Z"),
+    ]
+    attached = [
+        _attachment("abc", cwd, "compact_file_reference", f"{cwd}/src/app.py", "2026-09-24T01:00:01.000Z")
+    ]
+    path = tmp_path / "s.jsonl"
+    lines = attached + edit if attachment_first else edit + attached
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def test_a_file_carried_across_a_compaction_counts_as_read(tmp_path: Path) -> None:
+    # After a compaction Claude Code re-attaches the files it had read; an edit that follows is not
+    # an edit without reading. The same attachment *after* the edit does not excuse it.
+    assert edited_without_read(read_claude_code(_edit_session(tmp_path, attachment_first=True))) == []
+    later = tmp_path / "later"
+    later.mkdir()
+    assert edited_without_read(read_claude_code(_edit_session(later, attachment_first=False))) == [
+        "src/app.py"
+    ]
+
+
+def test_claude_code_sessions_do_not_print_edited_without_reading(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Claude Code refuses an edit to an unread file, so an unseen read is the reader's blind spot,
+    # not the agent's. The text stays quiet; --json still carries it.
+    later = tmp_path / "later"
+    later.mkdir()
+    path = _edit_session(later, attachment_first=False)
+    assert main([str(path)]) == 0
+    assert "Edited without reading" not in capsys.readouterr().out
+    assert main(["--json", str(path)]) == 0
+    assert json.loads(capsys.readouterr().out)["edited_without_read"] == ["src/app.py"]
+
+
+def test_title_link_and_agent_records_are_bookkeeping(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    kinds = ["custom-title", "ai-title", "pr-link", "agent-name", "file-history-delta"]
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(_line(type=k, sessionId="abc", cwd=cwd, timestamp="2026-09-24T01:00:00.000Z") for k in kinds),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert session.not_read == 0
+    assert sum(session.records.values()) == len(kinds)
+
+
+def test_other_kinds_counts_kinds_and_lines_separately(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A real session printed "132 other kinds" for 2 kinds covering 132 lines.
+    cwd = str(tmp_path)
+    counts = {"type=a": 5, "type=b": 4, "type=c": 3, "type=d": 2, "type=e": 1}
+    lines = [_line(type="user", sessionId="abc", cwd=cwd, timestamp="2026-09-24T01:00:00.000Z", message={"role": "user", "content": "hi"})]
+    for name, n in counts.items():
+        lines += [_line(type=name.split("=")[1] + "-unknown", sessionId="abc", cwd=cwd) for _ in range(n)]
+    path = tmp_path / "s.jsonl"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    assert main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "2 other kinds (3 lines)" in out

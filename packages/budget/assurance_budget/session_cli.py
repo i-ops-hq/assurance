@@ -33,6 +33,10 @@ EXIT_GATE = 1
 EXIT_UNREADABLE = 2
 
 
+
+#: Transcript sources whose harness refuses an edit to a file the model has not read.
+_READ_BEFORE_EDIT_ENFORCED = frozenset({"claude-code"})
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="assurance audit",
@@ -239,8 +243,13 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         for loop in loops:
             body.append(_loop_line(loop))
 
+    # Claude Code refuses to edit a file the model has not read, so in its transcripts an edit with
+    # no visible read means the read reached the model some way this reader does not see, not
+    # that the agent skipped it. Printing it would report our blind spot as the agent's fault.
+    # It stays in --json for anyone checking the reader, and prints for sources whose harness
+    # does not enforce the read.
     unread_edits = report.get("edited_without_read") or []
-    if unread_edits:
+    if unread_edits and report.get("source") not in _READ_BEFORE_EDIT_ENFORCED:
         body.append(f"Edited without reading it first: {', '.join(unread_edits)}")
 
     after = report.get("after_last_edit")
@@ -368,11 +377,10 @@ def _not_read_line(not_read: int, reasons: dict[str, int] | Any) -> str:
     top = ranked[:3]
     rest = ranked[3:]
     parts = [f"{name} {count}" for name, count in top]
-    other = sum(count for _, count in rest)
-    if other == 1:
-        parts.append("1 other kind")
-    elif other:
-        parts.append(f"{other} other kinds")
+    if rest:
+        lines = sum(count for _, count in rest)
+        kinds = "1 other kind" if len(rest) == 1 else f"{len(rest)} other kinds"
+        parts.append(f"{kinds} ({lines} {'line' if lines == 1 else 'lines'})")
     return f"Not read: {not_read} {unit} — {', '.join(parts)}."
 
 
