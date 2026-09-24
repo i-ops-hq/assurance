@@ -33,9 +33,14 @@ def _build_wheel(outdir: Path, project: Path) -> Path:
 
 
 def _install_core(vpy: Path, tmp_path: Path) -> None:
-    # From PyPI, deliberately. This package depends on a released assurance-core, so the wheel test
-    # exercises exactly what a stranger's `pip install` resolves.
-    subprocess.run([str(vpy), "-m", "pip", "install", "-q", "assurance-core>=0.13"], check=True)
+    # Prefer the sibling in this tree: a floor raise lands here before the matching PyPI release, and
+    # installing an older published core would exercise a floor the suite is not running against.
+    sibling = ROOT.parent / "core"
+    if sibling.is_dir():
+        wheel = _build_wheel(tmp_path / "core-dist", sibling)
+        subprocess.run([str(vpy), "-m", "pip", "install", "-q", str(wheel)], check=True)
+        return
+    subprocess.run([str(vpy), "-m", "pip", "install", "-q", "assurance-core>=0.14.0"], check=True)
 
 
 def test_installed_wheel_runs_the_console_script(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-# Unreleased
+# 0.1.4
 
 - **`--version`** prints `assurance-authority <version>` and exits 0.
 

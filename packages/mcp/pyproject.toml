@@ -11,8 +11,8 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "I-Ops Operations Intelligence, LLC", email = "hello@i-ops.dev" }]
 requires-python = ">=3.10"
 dependencies = [
-  "assurance-core>=0.13.2",
-  "assurance-cli>=0.5.13",
+  "assurance-core>=0.14.0",
+  "assurance-cli>=0.6.0",
   "mcp>=1.0",
 ]
 

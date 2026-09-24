@@ -1,8 +1,6 @@
-# Unreleased
+# 0.5.0
 
 - **`--version`** prints `assurance-mcp <version>` and exits 0 before the server starts.
-
-# 0.5.0
 
 **The folder tools read only inside folders you grant in the server's config.** Breaking, on purpose.
 

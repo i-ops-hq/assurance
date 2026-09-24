@@ -1,4 +1,4 @@
-# Unreleased
+# 0.2.0
 
 - **The project config file can only lower a limit.** User file and `ASSURANCE_MAX_*` env vars may
   raise or lower; `<cwd>/.assurance/config.toml` applies as `min(current, project)`. A project ask
@@ -22,8 +22,6 @@
   `assurance audit` with no path finds the latest session for the current directory under
   `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`).
 - **`--version`** prints `assurance-budget <version>` and exits 0.
-
-# 0.1.4
 
 - **A line that names neither a `kind` nor an action is no longer a tool call.** Every line
   defaulted to `kind: tool`, so a Claude Code transcript — user turns, system events, queue
