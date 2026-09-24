@@ -1,6 +1,6 @@
 r"""Per-run limits that a model cannot talk its way past, and detection of a run going nowhere.
 
-the strategy docs §4 makes this a HARD RULE:
+This is a HARD RULE:
 
 > **A model may reason about a budget. Only code may enforce one.**
 
@@ -10,15 +10,15 @@ two agents entering an **11-day loop** that produced a **$47,000** bill against 
 Per-run caps with hard termination would have stopped it at $50. What enterprises cannot forecast is
 variance, and variance is what a hard cap removes.
 
-**A second number, from a real incident** (`RESEARCH_2026-08-24.md` §1): a Cursor agent destroyed a
+**A second number, from a real incident** (PocketOS, April 2026): a Cursor agent destroyed a
 production database and its backups in **nine seconds**. Not every runaway is expensive; some are
 fast. A wall-clock bound is not only about cost — it is the only cap that can bite before a
 count-based one has anything to count.
 
 ## What was already here, and what was not
 
-`agent_runtime` has had `max_iterations = 8` for a long time — but as a **parameter with a default**,
-which any caller may pass 1000 to. A limit a caller can raise is a suggestion. `usage_meter` enforces
+Agent runtimes commonly have `max_iterations = 8` — but as a **parameter with a default**,
+which any caller may pass 1000 to. A limit a caller can raise is a suggestion. Usage meters enforce
 real budgets, but they are MONTHLY per-agent action counts: they would not have stopped the 11-day
 loop, because the loop happens inside one run.
 
@@ -29,8 +29,7 @@ is the test that keeps that true.
 ## Why there is no dollar limit
 
 The doc lists `MAX_RUN_COST`. It is deliberately **not implemented**, because a dollar figure needs a
-per-token price table and we do not have one — `usage_meter.METERED_RATE_USD` is a flat comparison
-rate for the UI, not real pricing. A stale price table would produce a cap that reads like money and
+per-token price table, and prices change per model, per provider and per week. A stale price table would produce a cap that reads like money and
 is not, and a control that lies about its units is worse than a control that names its units
 honestly. `frontier_calls` is the cost proxy: it is the thing that actually bills, we can count it
 exactly, and it is the number to multiply by a real price when one exists.
@@ -65,7 +64,7 @@ MAX_SECONDS = 600.0
 MAX_RETRIES = 3
 
 # The window `ProgressWatch` looks back over. Three identical rounds is a loop; two is a retry, and
-# retries are legitimate — `_MIN_RETRY_SECONDS` exists elsewhere in the codebase for that reason.
+# retries are legitimate.
 STALL_WINDOW = 3
 
 

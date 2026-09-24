@@ -312,4 +312,4 @@ Diagnostics go to **stderr**, results to **stdout**, so `--json` stays pipeable.
 [assurance-core](https://pypi.org/project/assurance-core/) — the pure arithmetic, zero dependencies ·
 [assurance-mcp](https://pypi.org/project/assurance-mcp/) — the same checks as MCP tools
 
-Upstream is [I-Ops](https://i-ops.dev); this repo is a publication, never a source. Apache-2.0.
+Part of [I-Ops](https://i-ops.dev), and developed in this repository. Apache-2.0.

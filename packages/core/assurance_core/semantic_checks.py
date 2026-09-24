@@ -14,7 +14,7 @@ output — deterministically, with no judge model:
 
 Same honesty rule as run_quality: these are rule-based heuristics, labelled as exactly
 that. A clean pass means "no flags", not "the answer is good" — the model-graded semantic
-judgement remains the next tier (the product design → "L4 eval roadmap").
+judgement remains a separate, later tier.
 
 Pure + typed + unit-tested; NO app imports (core must not depend on services). This module
 is the canonical home of the numeric-token patterns — services.numeric_sanitizer imports
@@ -53,7 +53,7 @@ def extract_numeric_tokens(text: str) -> set[str]:
 # evidence block. `subagents.render`'s own comment says the artifact's timestamped filename is kept
 # OUT of `facts` for exactly this reason; the SOURCE filename was never given the same treatment.
 #
-# Found 2026-08-21 by a fresh-context reviewer on the product design, which proposed
+# Found 2026-08-21 by a fresh-context reviewer on the design, which proposed
 # a per-row provenance column and would have multiplied this by the number of files in a run.
 # Every extension any part of the product treats as a document. **A file type missing here keeps the
 # bug**: `.rtf` is in `orchestrator.DOCUMENT_EXT` and was absent from the first version of this list,

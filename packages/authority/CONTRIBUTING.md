@@ -6,8 +6,8 @@ Pull requests welcome.
 
 **No branch may return `PROCEED` on the strength of a principal other than the initiator.** That is
 the invariant this package exists to make visible, and it lives in `assurance_core.principal.resolve`
-rather than here. If you believe it needs to change, the change belongs upstream and needs an
-argument, not a patch.
+rather than here. If you believe it needs to change, open an issue with the
+argument first — this needs an argument, not a patch.
 
 Do not reimplement the rule here for convenience. A rule with two implementations disagrees on the
 day it matters.

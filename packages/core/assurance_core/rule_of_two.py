@@ -1,8 +1,7 @@
 r"""The Agents Rule of Two, computed per session instead of written down.
 
-`docs/design/SECURITY_POSTURE_2026-08.md` §4 named this as owed, and
-`docs/strategy/AGENTIC_SYSTEMS_RESEARCH_2026-08.md` argues it is **the single most defensible security
-primitive available today, because it does not depend on detecting injections.** Meta's formulation: an
+It is arguably **the single most defensible security primitive available today, because it does not
+depend on detecting injections.** Meta's formulation: an
 agent session must satisfy no more than two of
 
     (A) processes untrustworthy input
@@ -17,7 +16,7 @@ granted.
 
 ## The incident this is for — PocketOS, 25 April 2026
 
-Corroborated across six outlets; `docs/strategy/RESEARCH_2026-08-24.md` §1. A Cursor agent running
+Corroborated across six outlets. A Cursor agent running
 Claude Opus 4.6 deleted a company's production database **and every volume-level backup** in nine
 seconds. It had been given a routine STAGING task, hit a credential mismatch, **did not stop to ask**,
 scanned the codebase for a way forward, and found an API token in an unrelated file that carried
@@ -38,8 +37,8 @@ operation or force an approval gate*, not "log a warning".
 
 ## Fail closed, because the last gate here did not
 
-`mcp_host.requires_approval` was an allowlist of action verbs with everything unmatched running
-**unapproved** — `pay`, `transfer` and `execute` among the things it let through. So `for_capability`
+An earlier approval gate in the runtime this was cut from was an allowlist of action verbs with
+everything unmatched running **unapproved** — `pay`, `transfer` and `execute` among the things it let through. So `for_capability`
 treats an unrecognised capability as holding **all three** properties. A capability this module has
 never heard of is exactly the case where guessing "probably harmless" is how the gate fails.
 The properties are DERIVED from what a capability does, by `properties_from(table)`, so they are
@@ -58,8 +57,7 @@ refused a call, not whether the bytes coming back are trustworthy. Routing does 
 **Not counted: a file inside a folder the user explicitly granted.** Strictly, a PDF someone emailed
 you and you filed in `Work/` is untrusted content. Counting it would put nearly every run into the
 trifecta, and a gate that fires on every run is one people click through — approval fatigue, which
-`MEASUREMENT_AND_SIMULATION.md` treats as a measurable failure and `CONTEXT_ASSURANCE.md` names as the
-way oversight is bypassed in practice. **This is a deliberate under-count and it is the weakest line in
+is a measurable failure and the way oversight is bypassed in practice. **This is a deliberate under-count and it is the weakest line in
 this module.** It is written here so that the next person changing it is arguing with a stated
 position rather than discovering an accident.
 
@@ -356,7 +354,7 @@ def decide_third_party_call(
 def third_party_call_needs_approval(assessment: Assessment, *, is_third_party: bool) -> bool:
     """Under the trifecta, EVERY third-party tool call needs a person — read verbs included.
 
-    This is the gap verb classification cannot see. `mcp_host.requires_approval` returns False for
+    This is the gap verb classification cannot see. A verb allowlist returns False for
     `search_documents`, `get_file`, `query_database` and every other read-shaped verb, which is right
     as far as it goes: reading does not mutate. But a read call to a third-party server **sends its
     arguments off this machine**. Under the trifecta that is the whole exfiltration path — untrusted

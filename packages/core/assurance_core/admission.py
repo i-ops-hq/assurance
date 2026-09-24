@@ -1,8 +1,8 @@
 r"""Whether a retrieved source may inform an answer — computed from provenance, never from content.
 
-Leg of the strategy docs §7: between binary grant admission and post-hoc
+Between binary grant admission and post-hoc
 groundedness, nothing said *which* retrieved chunk may shape the answer or why one beat another.
-This module is that layer. It reads `workspace_files` columns only — `grant_id`, `mtime`,
+This module is that layer. It reads provenance fields only — `grant_id`, `mtime`,
 `content_hash`, `period_year/month`, `removed_at` — and never a byte of text. Same principle as
 `rule_of_two.assess`: *"nothing here inspects a document… it cannot be evaded by an injection that
 reads well."*
@@ -14,7 +14,7 @@ admit because refusing an unranked source means the product answers nothing. The
 replaces default-deny here is that **every `REVIEW` and `EXCLUDED` must carry a reason a person can
 read and disagree with.**
 
-Pure: no I/O, no model, no `app.services` import. `tests/test_admission.py` gates it.
+Pure: no I/O, no model, no service import. `tests/test_admission.py` gates it.
 """
 
 from __future__ import annotations

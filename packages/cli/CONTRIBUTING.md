@@ -1,30 +1,26 @@
 # Contributing
 
-This repository is a **publication** of the CLI layer from I-Ops —
-folder assurance checks (coverage, staleness, baselines, MCP pin gates) that anyone can run without
-the product.
+`assurance-cli` is the `assurance` command: coverage over a folder or any two sets of keys,
+baselines, MCP tool pinning, drift, and the `deps` gate. **This repository is its source of truth**,
+and pull requests are welcome.
 
-**I-Ops is upstream.** Changes are made there and copied out here. Do not treat this repo as the
-source of truth for new features.
+## The lines it may not cross
 
-## What we welcome
-
-- Corrections to logic, edge cases, or documentation clarity
-- Tests that prove a claim the README makes
-- Scrub passes that remove accidental internal references
-
-## What belongs upstream
-
-- New capabilities, orchestration, services, UI, or anything that needs a database, filesystem, or
-  model beyond what this CLI already exposes
-- Feature requests for the product
-
-Pull requests that add runtime wiring will be closed with a pointer upstream.
+- **Never invent a denominator.** A folder whose cadence cannot be established is refused, with the
+  one thing that would answer it anyway (`--expect` with `--from`/`--to`). "0 of 36" for a folder the
+  command did not understand is the defect this package exists not to have.
+- **"Could not check" is not a pass.** It exits 1, the same as a finding, and says why.
+- **Writes only what it is asked to write**: the `.assurance.json` baseline on `init`, and the pin
+  snapshot on `pin --save`. A CI step runs the read-only tests by name on every change.
+- **Diagnostics on stderr, results on stdout**, so `--json` stays pipeable.
+- **The decision lives in `assurance-core`.** This package reads files and formats sentences; a rule
+  implemented here as well as there will disagree on the day it matters.
 
 ## Before you open a PR
 
 ```bash
-python -m pytest -q
+python -m pytest -q packages/cli
+cd packages/cli && python -m mypy --strict assurance_cli
 ```
 
-Every gate must pass against `assurance_cli`, not against any private package name.
+Then the repository-wide [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

@@ -1,13 +1,11 @@
 """Whether the world actually looks the way the contract said it would.
 
-Leg 2 of the strategy docs, Phase B of the build plan.
-
 `TaskContract` declares postconditions before the run. This module is the vocabulary for what a
 verifier found when it went and looked afterwards — **outside the run, and not as the worker that
 did the work.**
 
-Pure: no I/O, no model, no `app.services` import. The verifiers themselves live in
-`app/services/verifiers.py`, because they are the half that touches the world.
+Pure: no I/O, no model, no service import. The verifiers themselves belong to the embedding
+runtime, because they are the half that touches the world.
 
 
 ## The rule this module is written against, and it is the one most likely to be broken

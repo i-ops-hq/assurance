@@ -249,7 +249,7 @@ that can be counted and not produced, are the same defect."""
 def outcome_for(context: Mapping[str, Any]) -> Outcome:
     """Read what the pipeline accumulated and say what actually happened.
 
-    Pure: no I/O, no imports from `app.services`, no database. It reads the same `context` dict the
+    Pure: no I/O, no service imports, no database. It reads the same `context` dict the
     capabilities have been writing into all along, which is what makes it unit-testable without
     running a plan — and what keeps it out of `run_plan`, a generator with several early returns
     whose control flow is the highest-blast-radius thing in the repo to edit.

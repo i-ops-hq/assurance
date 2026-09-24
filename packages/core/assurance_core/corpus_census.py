@@ -1,6 +1,6 @@
 """What a folder's filenames say before a single byte is opened.
 
-Pure: no I/O, no model, no `app.services` import. Input is deliberately impoverished — a list of
+Pure: no I/O, no model, no service import. Input is deliberately impoverished — a list of
 `(name, size_bytes)` and nothing else — so a local scan, an S3 `LIST`, and a Graph query all
 produce the same shape. The census sits in front of retrieval and touches none of it.
 """

@@ -1,20 +1,18 @@
 """What "done" means for this task, declared BEFORE the run.
 
-Leg 1 of the strategy docs, Phase A of the build plan.
-
 A `Plan` says what will be DONE. A `TaskContract` says what would count as HAVING BEEN done, and the
 difference is the whole product: the acting worker does not get to declare its own task complete, so
 something other than the worker has to have written down what completion means, before the worker
 started.
 
-Pure, like `run_outcome.py` and `coverage.py`: no I/O, no model, no `app.services` import. The
+Pure, like `run_outcome.py` and `coverage.py`: no I/O, no model, no service import. The
 contract is derived from the plan by code — `orchestrator.contract_for` — for the same reason the
 plan itself is deterministic wherever a fact decides it. A definition of done that a model wrote is
 a definition of done the model can move.
 
 **Postconditions are machine-readable on purpose, and that is the point of the whole file.** The
-build plan's acceptance criterion for this phase is "postconditions are machine-readable enough to
-verify", because in v0.38 a `Verifier` reads them and checks the world. A postcondition written as
+acceptance criterion is "postconditions are machine-readable enough to verify", because a
+`Verifier` reads them and checks the world. A postcondition written as
 prose — "the report should look right" — is one that can only ever be checked by asking a model,
 which is the thing this vocabulary exists to stop.
 
@@ -78,8 +76,7 @@ class ContextRequirement:
 
     `acceptable` is a list, not a confidence threshold, and that is the design. "The salesperson
     thinks the discount was approved" and "an approved finance record" are not the same evidence at
-    two confidence levels; they are different kinds of thing, and only one of them counts. See
-    the context assurance doctrine §1.
+    two confidence levels; they are different kinds of thing, and only one of them counts.
     """
 
     key: str

@@ -152,6 +152,6 @@ intersection. **If you build `Coverage(...)` directly, move to `Coverage.of(...)
 [assurance-cli](https://pypi.org/project/assurance-cli/) — same checks as a command, for CI ·
 [assurance-mcp](https://pypi.org/project/assurance-mcp/) — same checks as MCP tools
 
-Upstream is [I-Ops](https://i-ops.dev); this repo is a publication, never a source.
+Part of [I-Ops](https://i-ops.dev), and developed in this repository.
 Apache-2.0 · [Contributing](https://github.com/i-ops-hq/assurance/blob/main/packages/core/CONTRIBUTING.md) ·
 [Security](https://github.com/i-ops-hq/assurance/blob/main/packages/core/SECURITY.md)

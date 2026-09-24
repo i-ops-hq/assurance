@@ -1,3 +1,15 @@
+# Unreleased
+
+- **This repository is now the source of truth for `assurance-core`.** It was generated from a
+  private runtime until today, so pull requests against it could not land; they can now.
+  `CONTRIBUTING.md` states the package's invariants instead of pointing upstream.
+- **About forty docstring pointers to documents and modules nobody outside could open are gone** —
+  `NORTH_STAR` §5, `docs/strategy/RESEARCH_2026-08-24.md`, `mcp_host.requires_approval`,
+  `app/services/verifiers.py` and the like. Each rationale is now stated where it is used.
+  `tests/test_no_pointers_to_private_documents.py` refuses new ones.
+- `policy` imported `NEVER_PRODUCED, Effect` twice.
+- No behaviour change: every edit is to a docstring, a comment, or a duplicate import.
+
 # 0.13.2
 
 - **`sequence`: an ISO year is 52 or 53 weeks, not always 53.** `_weeks_between` incremented the

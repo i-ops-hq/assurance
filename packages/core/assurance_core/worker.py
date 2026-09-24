@@ -1,7 +1,6 @@
 r"""What a worker lets us do — and therefore what we may still promise about it.
 
-`docs/strategy/RUNTIME_ARCHITECTURE_2026-08-20.md` §3 names `WorkerDefinition` and
-`WorkerIntegrationLevel`; `NORTH_STAR_2026-08-20.md` §5 states the rule they exist for:
+`WorkerDefinition` and `WorkerIntegrationLevel` exist for one rule:
 
 > **Guarantees must degrade honestly with integration depth.** The honest thing to say about a
 > black-box worker is that we verified the outcome, not that we governed the run.
@@ -10,7 +9,7 @@ Until now that was prose. Here it is arithmetic.
 
 ## The level is DERIVED, and that is the whole design
 
-`RUNTIME_ARCHITECTURE` lists `integration_level` as a field on `WorkerDefinition`. It is not one here,
+An obvious design makes `integration_level` a field on `WorkerDefinition`. It is not one here,
 for the same reason `outcome` is carried beside `status` rather than replacing it:
 
 > **A hand-set enum is a claim. A derived level is a measurement.**
@@ -20,19 +19,17 @@ downstream would then be asserted rather than held. So a definition declares onl
 integration** — which surfaces the worker actually exposes — and both the level and the set of
 guarantees we can honour follow from those facts by code.
 
-That correction came from reading OpenBot's policy engine (`docs/design/OPENBOT_GATEWAY_STUDY.md`):
+That correction came from reading a published agent gateway's policy engine:
 describe what a thing DOES and let the labels derive, because a label chosen by hand is evaded by the
 first case nobody thought of.
 
 ## What stays constant, and why it is the load-bearing leg
 
-`NORTH_STAR` §5:
-
 > Note what stays constant across all three levels: **independent verification of the resulting
 > state.** It is the only assurance that does not depend on controlling the worker's runtime.
 
 `OUTCOME_VERIFICATION` below requires only that the world be readable afterwards. It survives a black
-box, which is exactly why `COMPLETION_DOCTRINE.md` builds on postconditions and coverage rather than
+box, which is exactly why completion is judged on postconditions and coverage rather than
 on supervising the run. Everything else here degrades; that one does not.
 """
 
@@ -51,7 +48,7 @@ class WorkerSurface(str, Enum):
 
     TOOL_CALLS_ROUTED = "tool_calls_routed"
     """Every tool call passes through us before it reaches anything. The resource boundary. Without
-    it any control we run is advisory — `docs/design/DISTRIBUTION_BOUNDARY.md`."""
+    it any control we run is advisory."""
 
     STEP_EVENTS = "step_events"
     """We are told what happened, as it happens. Weaker than routing: we can observe and record, and
@@ -95,7 +92,7 @@ REQUIRES: dict[Guarantee, frozenset[WorkerSurface]] = {
     Guarantee.RULE_OF_TWO: frozenset({WorkerSurface.TOOL_CALLS_ROUTED}),
     Guarantee.APPROVAL_GATE: frozenset({WorkerSurface.TOOL_CALLS_ROUTED}),
     # The load-bearing one. Reading the world afterwards needs nothing from the run itself, which is
-    # why it survives a black box and why the completion doctrine rests on it.
+    # why it survives a black box and why completion claims rest on it.
     Guarantee.OUTCOME_VERIFICATION: frozenset(
         {WorkerSurface.STATE_READABLE, WorkerSurface.ARTIFACTS_READABLE}
     ),
@@ -109,7 +106,7 @@ class WorkerIntegrationLevel(str, Enum):
     EXTERNAL_SUPERVISED = "external_supervised"
     BLACK_BOX = "black_box"
     UNUSABLE = "unusable"
-    """Exposes nothing readable afterwards. Not one of the three in `RUNTIME_ARCHITECTURE`, and it has
+    """Exposes nothing readable afterwards. Not one of the usual three levels, and it has
     to exist: a worker whose outcome we cannot check is not a supervised worker at a lower level, it
     is one this product has nothing to say about. Naming it stops it being filed as `black_box`,
     which would claim a verification we cannot perform."""
@@ -139,7 +136,7 @@ class WorkerDefinition:
 
     @property
     def summary(self) -> str:
-        """One sentence in `NORTH_STAR` §5's terms — what we may claim, and what we may not."""
+        """One sentence: what we may claim about this worker, and what we may not."""
         held = sorted(g.value for g in self.guarantees)
         lost = sorted(g.value for g in Guarantee if g not in self.guarantees)
         line = f"{self.display_name}: {self.integration_level.value}"
@@ -158,7 +155,7 @@ def guarantees_for(surfaces: frozenset[WorkerSurface]) -> frozenset[Guarantee]:
 def level_for(surfaces: frozenset[WorkerSurface]) -> WorkerIntegrationLevel:
     """The label, derived from the same facts the guarantees are.
 
-    Boundaries follow `NORTH_STAR` §5:
+    Boundaries:
 
     - **native** — we choose the steps AND every tool call passes through us.
     - **external_supervised** — it runs its own loop and we can still route or observe.
@@ -177,7 +174,7 @@ def level_for(surfaces: frozenset[WorkerSurface]) -> WorkerIntegrationLevel:
 def claim_refused(worker: WorkerDefinition, guarantee: Guarantee) -> str | None:
     """The sentence to show instead of a guarantee this worker cannot support, or None if it can.
 
-    Written once, here, so a refusal cannot be phrased optimistically at a call site. `NORTH_STAR` §5:
+    Written once, here, so a refusal cannot be phrased optimistically at a call site. The rule:
     *do not claim full policy enforcement, preflight, or recovery for a black-box worker unless the runtime
     actually controls those boundaries.*
     """

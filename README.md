@@ -130,7 +130,7 @@ rejected, because that is the part worth checking.
 ## Layout
 
 ```
-packages/core/       assurance-core        — generated; see below
+packages/core/       assurance-core
 packages/cli/        assurance-cli
 packages/mcp/        assurance-mcp
 packages/budget/     assurance-budget
@@ -138,10 +138,9 @@ packages/authority/  assurance-authority
 skills/              agent skills that use the tools above
 ```
 
-**`packages/core/` is generated and must not be hand-edited.** It is scrubbed out of a private
-upstream by a publisher that rewrites the whole tree, so an edit made here is destroyed on the next
-run and never reaches anyone. Everything else in this repo is ordinary hand-written code, and pull
-requests are welcome against it.
+**Every package here, `core` included, is developed in this repository**, and pull requests are
+welcome against all of them. Until 2026-09-24 `packages/core/` was generated from a private runtime
+and hand edits were overwritten; that is no longer the case.
 
 ## Honest limits
 

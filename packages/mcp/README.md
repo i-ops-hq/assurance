@@ -99,4 +99,4 @@ can argue with. Works from a cold start: no state, no database, no key.
 [assurance-core](https://pypi.org/project/assurance-core/) — the pure arithmetic, zero dependencies ·
 [assurance-cli](https://pypi.org/project/assurance-cli/) — the same checks as a command
 
-Upstream is [I-Ops](https://i-ops.dev); this repo is a publication, never a source. Apache-2.0.
+Part of [I-Ops](https://i-ops.dev), and developed in this repository. Apache-2.0.
