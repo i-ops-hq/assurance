@@ -176,6 +176,7 @@ def build_report(
         "user_turns": session.user_turns,
         "records": dict(session.records),
         "not_read": session.not_read,
+        "not_read_reasons": dict(session.not_read_reasons),
         "unmatched_results": session.unmatched_results,
         "edited_without_read": list(unread_edits),
         "after_last_edit": after,
@@ -267,8 +268,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         f"{_count_phrase(session.user_turns, 'user turn', 'user turns')}, "
         f"{_count_phrase(bookkeeping, 'bookkeeping record', 'bookkeeping records')}."
     )
-    not_read = session.not_read
-    body.append(f"Not read: {not_read} {'line' if not_read == 1 else 'lines'}.")
+    body.append(_not_read_line(session.not_read, session.not_read_reasons))
 
     if session.unmatched_results == 1:
         body.append("1 tool result matched no tool call.")
@@ -344,9 +344,36 @@ def _short_input(call: ToolCall) -> str:
     return hashlib.sha256(dumped.encode("utf-8")).hexdigest()[:12]
 
 
+def _not_read_line(not_read: int, reasons: dict[str, int] | Any) -> str:
+    """`Not read: 0 lines.` unchanged; otherwise name the top reasons."""
+    if not_read == 0:
+        return "Not read: 0 lines."
+    unit = "line" if not_read == 1 else "lines"
+    counts = dict(reasons or {})
+    if not counts:
+        return f"Not read: {not_read} {unit}."
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    top = ranked[:3]
+    rest = ranked[3:]
+    parts = [f"{name} {count}" for name, count in top]
+    other = sum(count for _, count in rest)
+    if other == 1:
+        parts.append("1 other kind")
+    elif other:
+        parts.append(f"{other} other kinds")
+    return f"Not read: {not_read} {unit} — {', '.join(parts)}."
+
+
 def _duration_phrase(seconds: float | None) -> str:
     if seconds is None:
         return ""
+    # Resumed sessions spanning days are not continuous hours of work.
+    if seconds >= 48 * 3600:
+        days = int(seconds // 86400)
+        return f"spanning {days} day" if days == 1 else f"spanning {days} days"
+    if seconds >= 24 * 3600:
+        hours = int((seconds - 86400) // 3600)
+        return f"spanning 1 day {hours}h"
     if seconds < 60:
         return f"{int(seconds)}s"
     minutes = int(round(seconds / 60.0))

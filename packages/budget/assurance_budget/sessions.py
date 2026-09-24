@@ -13,7 +13,7 @@ import os
 import re
 import shlex
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -39,24 +39,85 @@ _WRITE_TOOLS = frozenset({"Write"})
 _CHANGE_TOOLS = _EDIT_TOOLS | _WRITE_TOOLS
 _READ_TOOLS = frozenset({"Read"})
 _LIMITS_FILE_SUFFIX = ".assurance/config.toml"
-_LIMITS_BASH_MARKERS = (">", ">>", "tee", "sed -i", "cp", "mv")
-# Path-like tokens in a Bash command that name a limits file (relative or absolute).
-_LIMITS_PATH_IN_CMD = re.compile(r"""([^\s;|&'"]*\.assurance/config\.toml)""")
 
-BashKind = Literal["test", "check", "read", "unclassified"]
+_SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+_NEUTRAL_COMMANDS = frozenset(
+    {
+        "cd",
+        "pushd",
+        "popd",
+        "export",
+        "set",
+        "unset",
+        "source",
+        ".",
+        "true",
+        "false",
+        "sleep",
+        "wait",
+        "if",
+        "then",
+        "else",
+        "elif",
+        "fi",
+        "for",
+        "while",
+        "until",
+        "do",
+        "done",
+        "case",
+        "esac",
+        "{",
+        "}",
+        ")",
+        "(",
+    }
+)
+# Leading keywords that introduce a following command in the same segment (`do pytest`).
+_LEADING_CONTROL = frozenset({"do", "then", "else", "elif"})
+_WRAPPER_NO_ARG = frozenset({"time", "sudo", "command", "exec", "xargs", "env"})
+_RUNNER_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("pnpm", "exec"),
+    ("pnpm", "dlx"),
+    ("uv", "run"),
+    ("poetry", "run"),
+    ("pipenv", "run"),
+    ("pdm", "run"),
+    ("hatch", "run"),
+    ("uvx",),
+    ("npx",),
+    ("bunx",),
+)
+_PYTHON_NAMES = frozenset({"python", "python3", "pypy3"}) | {
+    f"python3.{i}" for i in range(8, 15)
+}
+_PIP_NAMES = frozenset({"pip", "pip3"})
+
+BashKind = Literal["test", "check", "read", "unclassified", "neutral"]
 
 # Longest prefixes first so `npm run test` wins over `npm test` over bare names.
 _TEST_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("python", "-m", "pytest"),
+    ("python", "-m", "unittest"),
     ("npm", "run", "test"),
+    ("pnpm", "run", "test"),
+    ("yarn", "run", "test"),
     ("pnpm", "test"),
     ("yarn", "test"),
     ("npm", "test"),
+    ("bun", "test"),
+    ("deno", "test"),
+    ("dotnet", "test"),
+    ("swift", "test"),
     ("go", "test"),
     ("cargo", "test"),
     ("mvn", "test"),
     ("gradle", "test"),
+    ("make", "test"),
+    ("make", "check"),
     ("pytest",),
+    ("nosetests",),
+    ("ctest",),
     ("jest",),
     ("vitest",),
     ("rspec",),
@@ -65,9 +126,20 @@ _TEST_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("nox",),
 )
 _CHECK_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("npm", "run", "typecheck"),
+    ("npm", "run", "type-check"),
+    ("npm", "run", "lint"),
+    ("pnpm", "lint"),
+    ("yarn", "lint"),
+    ("python", "-m", "mypy"),
+    ("python", "-m", "ruff"),
+    ("python", "-m", "pyflakes"),
+    ("black", "--check"),
+    ("prettier", "--check"),
     ("cargo", "clippy"),
     ("go", "vet"),
-    ("npm", "run", "lint"),
+    ("golangci-lint",),
+    ("shellcheck",),
     ("mypy",),
     ("ruff",),
     ("eslint",),
@@ -80,6 +152,16 @@ _READ_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("git", "log"),
     ("git", "diff"),
     ("git", "show"),
+    ("git", "branch"),
+    ("git", "rev-parse"),
+    ("git", "remote"),
+    ("git", "ls-files"),
+    ("git", "blame"),
+    ("git", "stash", "list"),
+    ("pip", "list"),
+    ("pip", "show"),
+    ("pip", "freeze"),
+    ("npm", "ls"),
     ("ls",),
     ("cat",),
     ("head",),
@@ -91,6 +173,35 @@ _READ_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("pwd",),
     ("echo",),
     ("which",),
+    ("sort",),
+    ("uniq",),
+    ("cut",),
+    ("tr",),
+    ("jq",),
+    ("diff",),
+    ("stat",),
+    ("file",),
+    ("tree",),
+    ("du",),
+    ("df",),
+    ("printenv",),
+    ("date",),
+    ("uname",),
+    ("whoami",),
+    ("hostname",),
+    ("type",),
+    ("less",),
+    ("more",),
+    ("nl",),
+    ("od",),
+    ("xxd",),
+    ("realpath",),
+    ("dirname",),
+    ("basename",),
+)
+
+_HEREDOC_OP = re.compile(
+    r"""<<-?\s*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([^\s\n]+))"""
 )
 
 
@@ -125,6 +236,7 @@ class Session:
     lines: int
     not_read: int
     unmatched_results: int
+    not_read_reasons: Mapping[str, int] = field(default_factory=dict)
 
 
 def read_claude_code(path: Path) -> Session:
@@ -150,9 +262,15 @@ def read_claude_code(path: Path) -> Session:
     assistant_turns = 0
     record_counts: Counter[str] = Counter()
     not_read = 0
+    not_read_reasons: Counter[str] = Counter()
     lines = 0
     unmatched_results = 0
     saw_session = False
+
+    def _mark(reason: str) -> None:
+        nonlocal not_read
+        not_read += 1
+        not_read_reasons[reason] += 1
 
     for raw in raw_lines:
         if not raw.strip():
@@ -161,10 +279,10 @@ def read_claude_code(path: Path) -> Session:
         try:
             record = json.loads(raw)
         except json.JSONDecodeError:
-            not_read += 1
+            _mark("invalid JSON")
             continue
         if not isinstance(record, dict):
-            not_read += 1
+            _mark("not an object")
             continue
 
         sid = record.get("sessionId")
@@ -187,14 +305,15 @@ def read_claude_code(path: Path) -> Session:
 
         message = record.get("message")
         if not isinstance(message, dict):
-            not_read += 1
+            label = f"type={kind}" if isinstance(kind, str) and kind else "not an object"
+            _mark(label)
             continue
         content = message.get("content")
 
         if kind == "assistant":
             blocks = content if isinstance(content, list) else None
             if blocks is None:
-                not_read += 1
+                _mark("assistant block missing")
                 continue
             tool_blocks = [
                 block
@@ -207,7 +326,7 @@ def read_claude_code(path: Path) -> Session:
                     name = str(block.get("name") or "")
                     tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
                     if not tool_id:
-                        not_read += 1
+                        _mark("tool_use without id")
                         continue
                     pending[tool_id] = {"name": name, "input": tool_input, "at": at}
                     order.append(tool_id)
@@ -215,7 +334,19 @@ def read_claude_code(path: Path) -> Session:
             if _assistant_turn_only(blocks):
                 assistant_turns += 1
                 continue
-            not_read += 1
+            marked = False
+            for block in blocks:
+                if not isinstance(block, dict):
+                    _mark("assistant block <non-dict>")
+                    marked = True
+                    break
+                btype = block.get("type")
+                if btype not in _ASSISTANT_ONLY and btype != "tool_use":
+                    _mark(f"assistant block {btype}")
+                    marked = True
+                    break
+            if not marked:
+                _mark("assistant block unknown")
             continue
 
         if kind == "user":
@@ -223,7 +354,8 @@ def read_claude_code(path: Path) -> Session:
                 user_turns += 1
                 continue
             if not isinstance(content, list):
-                not_read += 1
+                ctype = type(content).__name__ if content is not None else "None"
+                _mark(f"user content {ctype}")
                 continue
             saw_result = False
             for block in content:
@@ -246,7 +378,11 @@ def read_claude_code(path: Path) -> Session:
             user_turns += 1
             continue
 
-        not_read += 1
+        if isinstance(kind, str) and kind:
+            _mark(f"unknown type={kind}")
+        else:
+            _mark("unknown type=")
+        continue
 
     if not saw_session:
         raise LogError(f"{target} has no sessionId on any line — not a Claude Code session transcript")
@@ -297,6 +433,7 @@ def read_claude_code(path: Path) -> Session:
         lines=lines,
         not_read=not_read,
         unmatched_results=unmatched_results,
+        not_read_reasons=dict(not_read_reasons),
     )
 
 
@@ -306,11 +443,13 @@ def changed_limits_file(session: Session) -> bool:
     The path must resolve against the session `cwd` to exactly `<cwd>/.assurance/config.toml`.
     A write to `/tmp/other/.assurance/config.toml` does not count. Relative
     `.assurance/config.toml` / `./.assurance/config.toml` and the absolute project path do.
-    Write/Edit/MultiEdit/NotebookEdit use their path; Bash needs a write marker
-    (`>`, `>>`, `tee`, `sed -i`, `cp`, `mv`) and a matching path token in the command.
+    Write/Edit/MultiEdit/NotebookEdit use their path; Bash needs the limits path as the target of
+    a write in a segment (`>`, `>>`, `tee`, `sed -i`, `cp`/`mv`/`install`, curl/wget `-o`).
     """
     for call in session.tool_calls:
         if call.name in _CHANGE_TOOLS:
+            if call.error:
+                continue
             path = _call_path(call)
             if path is not None and _is_session_limits_file(path, session.cwd):
                 return True
@@ -318,12 +457,120 @@ def changed_limits_file(session: Session) -> bool:
             command = call.input.get("command")
             if not isinstance(command, str):
                 continue
-            if not any(marker in command for marker in _LIMITS_BASH_MARKERS):
-                continue
-            for token in _LIMITS_PATH_IN_CMD.findall(command.replace("\\", "/")):
-                if _is_session_limits_file(token, session.cwd):
-                    return True
+            if _bash_writes_session_limits(command, session.cwd):
+                return True
     return False
+
+
+def _bash_writes_session_limits(command: str, cwd: str) -> bool:
+    """Whether any segment writes this project's limits file (after heredoc strip + split)."""
+    stripped = strip_heredoc_bodies(command)
+    try:
+        segments = split_shell_segments(stripped)
+    except ValueError:
+        return False
+    left_cwd = False
+    for segment in segments:
+        try:
+            tokens = _tokenize_segment(segment)
+        except ValueError:
+            return False
+        if not tokens:
+            continue
+        if _segment_cds_away(tokens, cwd):
+            left_cwd = True
+        for target in _write_targets(tokens):
+            if left_cwd and not _is_absolute_path_token(target):
+                continue
+            if _is_session_limits_file(target, cwd):
+                return True
+    return False
+
+
+def _segment_cds_away(tokens: list[str], cwd: str) -> bool:
+    """True when this segment's `cd` destination is not the session cwd (literal compare)."""
+    argv = list(tokens)
+    _drop_paren_tokens(argv)
+    if not argv or argv[0] != "cd" or len(argv) < 2:
+        return False
+    dest = argv[1]
+    if "$" in dest or dest.startswith("~"):
+        return True
+    if dest in (".", ""):
+        return False
+    return _norm_path(dest, cwd) != os.path.normpath(str(Path(cwd).expanduser()))
+
+
+def _is_absolute_path_token(path: str) -> bool:
+    return path.startswith("/") or (len(path) > 1 and path[1] == ":")
+
+
+def _write_targets(tokens: list[str]) -> list[str]:
+    """Paths that are write targets in a shell segment's tokens."""
+    targets: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in (">", ">>") and i + 1 < len(tokens):
+            targets.append(tokens[i + 1])
+            i += 2
+            continue
+        i += 1
+
+    # Rebuild argv without redirection operators for command-based targets.
+    argv: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] in (">", ">>") and i + 1 < len(tokens):
+            i += 2
+            continue
+        if tokens[i] in ("<", "<<") and i + 1 < len(tokens):
+            i += 2
+            continue
+        argv.append(tokens[i])
+        i += 1
+    _drop_paren_tokens(argv)
+    if not argv:
+        return targets
+
+    cmd = os.path.basename(argv[0])
+    if cmd == "tee":
+        for arg in argv[1:]:
+            if not arg.startswith("-"):
+                targets.append(arg)
+    elif cmd == "sed" and _has_sed_in_place(argv):
+        if len(argv) >= 2:
+            targets.append(argv[-1])
+    elif cmd in ("cp", "mv", "install") and len(argv) >= 3:
+        targets.append(argv[-1])
+    elif cmd in ("curl", "wget"):
+        targets.extend(_curl_wget_outputs(argv))
+    return targets
+
+
+def _has_sed_in_place(argv: list[str]) -> bool:
+    for arg in argv[1:]:
+        if arg == "-i" or arg.startswith("-i"):
+            return True
+    return False
+
+
+def _curl_wget_outputs(argv: list[str]) -> list[str]:
+    out: list[str] = []
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-o", "--output", "--output-document"):
+            if i + 1 < len(argv):
+                out.append(argv[i + 1])
+                i += 2
+                continue
+        if arg.startswith("--output=") or arg.startswith("--output-document="):
+            out.append(arg.split("=", 1)[1])
+        if arg.startswith("-o") and arg != "-o" and not arg.startswith("--"):
+            out.append(arg[2:])
+        i += 1
+    return out
 
 
 def _is_session_limits_file(path: str, cwd: str) -> bool:
@@ -335,28 +582,37 @@ def _is_session_limits_file(path: str, cwd: str) -> bool:
 
 
 def edited_without_read(session: Session) -> list[str]:
-    """Paths changed by Edit/MultiEdit/NotebookEdit with no earlier Read of the same path.
+    """Paths changed by Edit/MultiEdit/NotebookEdit with no earlier Read or successful Write.
 
-    `Write` creates or replaces whole files and does not need a prior read. Paths are compared after
-    `os.path.normpath`, with relative paths resolved against the session `cwd`. Returned paths are
-    relative to `cwd` when they fall inside it.
+    `Write` creates or replaces whole files — the agent already knows the content. Failed edits
+    change nothing. Paths are compared after `os.path.normpath`, with relative paths resolved
+    against the session `cwd`. Returned paths are relative to `cwd` when they fall inside it.
     """
-    read_paths: set[str] = set()
+    known_paths: set[str] = set()
     missing: list[str] = []
     seen: set[str] = set()
     for call in session.tool_calls:
         if call.name in _READ_TOOLS:
             path = _call_path(call)
             if path is not None:
-                read_paths.add(_norm_path(path, session.cwd))
+                known_paths.add(_norm_path(path, session.cwd))
+            continue
+        if call.name in _WRITE_TOOLS:
+            if call.error:
+                continue
+            path = _call_path(call)
+            if path is not None:
+                known_paths.add(_norm_path(path, session.cwd))
             continue
         if call.name not in _EDIT_TOOLS:
+            continue
+        if call.error:
             continue
         path = _call_path(call)
         if path is None:
             continue
         key = _norm_path(path, session.cwd)
-        if key in read_paths or key in seen:
+        if key in known_paths or key in seen:
             continue
         seen.add(key)
         missing.append(_display_path(key, session.cwd))
@@ -364,16 +620,27 @@ def edited_without_read(session: Session) -> list[str]:
 
 
 def after_last_edit(session: Session) -> dict[str, Any] | None:
-    """Test/check commands that ran after the latest Edit/MultiEdit/Write/NotebookEdit.
+    """Test/check commands that ran after the latest in-cwd Edit/MultiEdit/Write/NotebookEdit.
 
-    Returns `None` when the session has no such edits. `at` is the edit's timestamp (epoch seconds).
+    Returns `None` when the session has no such edits inside `cwd`. Scratch edits outside `cwd`
+    do not restart the clock; they are counted as `outside_cwd_edits`.
     """
     last_i: int | None = None
     last_at: float | None = None
+    outside = 0
     for i, call in enumerate(session.tool_calls):
-        if call.name in _CHANGE_TOOLS:
-            last_i = i
-            last_at = call.at
+        if call.name not in _CHANGE_TOOLS:
+            continue
+        if call.error:
+            continue
+        path = _call_path(call)
+        if path is None:
+            continue
+        if not _path_inside_cwd(path, session.cwd):
+            outside += 1
+            continue
+        last_i = i
+        last_at = call.at
     if last_i is None:
         return None
 
@@ -396,7 +663,6 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
             test_runs.append({"command": command, "failed": failed})
         elif kind == "check":
             checks += 1
-    # `test_labels` kept for JSON consumers: grouped display strings in first-seen order.
     return {
         "at": last_at,
         "tests": tests,
@@ -404,7 +670,20 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
         "checks": checks,
         "test_runs": test_runs,
         "test_labels": _group_test_labels(test_runs),
+        "outside_cwd_edits": outside,
     }
+
+
+def _path_inside_cwd(path: str, cwd: str) -> bool:
+    if not cwd or not path:
+        return False
+    normed = _norm_path(path, cwd)
+    base = os.path.normpath(str(Path(cwd).expanduser()))
+    try:
+        Path(normed).relative_to(base)
+        return True
+    except ValueError:
+        return False
 
 
 def _group_test_labels(test_runs: list[dict[str, Any]]) -> list[str]:
@@ -449,26 +728,88 @@ def unclassified_bash_count(session: Session) -> int:
     return n
 
 
-def classify_bash(command: str) -> BashKind:
-    """Classify a shell command by the first words of each `&&` / `;` / `|` segment.
+def strip_heredoc_bodies(command: str) -> str:
+    """Drop heredoc body lines; keep the command line that opens the heredoc.
 
-    On a `shlex` parse error the whole command is unclassified. Across segments: any test wins,
-    else any check, else any unclassified, else read.
+    Handles `<<EOF`, `<<'EOF'`, `<<"EOF"`, and `<<-EOF`. The body is data, not shell commands.
     """
-    kinds: set[BashKind] = set()
-    for segment in re.split(r"&&|;|\|", command):
-        segment = segment.strip()
-        if not segment:
+    lines = command.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        match = _HEREDOC_OP.search(line)
+        if match is None:
+            out.append(line)
+            i += 1
             continue
+        terminator = match.group(1) or match.group(2) or match.group(3) or ""
+        strip_tabs = line[match.start() : match.start() + 3] == "<<-"
+        out.append(line)
+        i += 1
+        while i < len(lines):
+            body = lines[i]
+            i += 1
+            # <<- strips leading tabs from the terminator line.
+            compare = body.lstrip("\t") if strip_tabs else body
+            if compare == terminator:
+                break
+    return "\n".join(out)
+
+
+def split_shell_segments(command: str) -> list[str]:
+    """Split on newlines and `&&` `||` `;` `|` `&`, only outside quotes.
+
+    Raises `ValueError` when a line cannot be tokenized — callers treat that as unclassified.
+    """
+    segments: list[str] = []
+    for physical in command.split("\n"):
+        physical = physical.strip()
+        if not physical:
+            continue
+        tokens = _tokenize_segment(physical)
+        current: list[str] = []
+        for tok in tokens:
+            if tok in _SHELL_SEPARATORS:
+                piece = " ".join(current).strip()
+                if piece:
+                    segments.append(piece)
+                current = []
+            else:
+                current.append(tok)
+        piece = " ".join(current).strip()
+        if piece:
+            segments.append(piece)
+    return segments
+
+
+def _tokenize_segment(segment: str) -> list[str]:
+    lexer = shlex.shlex(segment, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
+def classify_bash(command: str) -> BashKind:
+    """Classify a shell command after heredoc strip, quote-aware split, and argv normalisation.
+
+    On a parse error the whole command is unclassified. Across segments: any test wins, else any
+    check, else any unclassified, else read. Neutral-only commands are not unclassified.
+    """
+    stripped = strip_heredoc_bodies(command)
+    try:
+        segments = split_shell_segments(stripped)
+    except ValueError:
+        return "unclassified"
+    kinds: set[BashKind] = set()
+    for segment in segments:
         try:
-            argv = shlex.split(segment)
+            kind = _classify_segment(segment)
         except ValueError:
             return "unclassified"
-        if not argv:
-            continue
-        kinds.add(_classify_argv(argv))
+        if kind != "neutral":
+            kinds.add(kind)
     if not kinds:
-        return "unclassified"
+        return "read" if segments else "unclassified"
     if "test" in kinds:
         return "test"
     if "check" in kinds:
@@ -476,6 +817,125 @@ def classify_bash(command: str) -> BashKind:
     if "unclassified" in kinds:
         return "unclassified"
     return "read"
+
+
+def _classify_segment(segment: str) -> BashKind:
+    tokens = _tokenize_segment(segment)
+    argv = _normalise_argv(tokens)
+    if argv is None:
+        return "neutral"
+    if not argv:
+        return "neutral"
+    if argv[0] in _NEUTRAL_COMMANDS:
+        return "neutral"
+    return _classify_argv(argv, tokens)
+
+
+def _normalise_argv(tokens: list[str]) -> list[str] | None:
+    """Drop assignments, wrappers and runners; basename argv[0]. None → assignment-only (neutral)."""
+    argv = list(tokens)
+    _drop_paren_tokens(argv)
+    # Drop leading VAR=value.
+    while argv and _is_assignment(argv[0]):
+        argv = argv[1:]
+    if not argv:
+        return None
+
+    # Drop wrappers.
+    changed = True
+    while changed and argv:
+        changed = False
+        head = os.path.basename(argv[0].lstrip("("))
+        if head != argv[0]:
+            argv[0] = head
+        if argv[0] == "timeout" and len(argv) >= 3:
+            argv = argv[2:]
+            changed = True
+            continue
+        if argv[0] == "nice":
+            if len(argv) >= 3 and argv[1] == "-n":
+                argv = argv[3:]
+                changed = True
+                continue
+            if len(argv) >= 2:
+                argv = argv[1:]
+                changed = True
+                continue
+        if argv[0] == "env":
+            argv = argv[1:]
+            while argv and _is_assignment(argv[0]):
+                argv = argv[1:]
+            changed = True
+            continue
+        if argv[0] in _WRAPPER_NO_ARG and len(argv) >= 2:
+            argv = argv[1:]
+            changed = True
+            continue
+
+    if not argv:
+        return None
+
+    # Strip one leading '(' from argv[0].
+    if argv[0].startswith("("):
+        argv[0] = argv[0][1:]
+        if not argv[0]:
+            argv = argv[1:]
+    if not argv:
+        return None
+
+    # Drop leading control words that introduce a body command.
+    while argv and argv[0] in _LEADING_CONTROL:
+        argv = argv[1:]
+    if not argv:
+        return None
+
+    # Runner prefixes.
+    for prefix in _RUNNER_PREFIXES:
+        if _startswith(argv, prefix):
+            argv = argv[len(prefix) :]
+            break
+    if not argv:
+        return None
+
+    # Basename + python/pip alias.
+    base = os.path.basename(argv[0])
+    if base in _PYTHON_NAMES or base.startswith("python3."):
+        argv[0] = "python"
+    elif base in _PIP_NAMES:
+        argv[0] = "pip"
+    else:
+        argv[0] = base
+    return argv
+
+
+def _drop_paren_tokens(argv: list[str]) -> None:
+    while argv:
+        if argv[0] in ("(", "{"):
+            argv.pop(0)
+            continue
+        if argv[0].startswith("("):
+            argv[0] = argv[0][1:]
+            if not argv[0]:
+                argv.pop(0)
+            continue
+        break
+    while argv:
+        if argv[-1] in (")", "}"):
+            argv.pop()
+            continue
+        if argv[-1].endswith(")"):
+            argv[-1] = argv[-1][:-1]
+            if not argv[-1]:
+                argv.pop()
+            continue
+        break
+
+
+def _is_assignment(token: str) -> bool:
+    if "=" not in token or token.startswith("="):
+        return False
+    name, _sep, _val = token.partition("=")
+    return bool(name) and name.replace("_", "a").isalnum() and not name[0].isdigit()
 
 
 def find_latest_session(cwd: Path, projects_dir: Path | None = None) -> Path | None:
@@ -512,7 +972,20 @@ def _assistant_turn_only(blocks: list[Any]) -> bool:
     return True
 
 
-def _classify_argv(argv: list[str]) -> BashKind:
+def _classify_argv(argv: list[str], raw_tokens: list[str] | None = None) -> BashKind:
+    if _is_version_query(argv):
+        return "read"
+    if argv == ["env"]:
+        return "read"
+    # git tag -l
+    if len(argv) >= 3 and argv[0] == "git" and argv[1] == "tag" and "-l" in argv[2:]:
+        return "read"
+    # sed -n without -i
+    if argv[0] == "sed" and _sed_is_read(argv):
+        return "read"
+    # awk without a > redirect in the segment
+    if argv[0] == "awk" and raw_tokens is not None and ">" not in raw_tokens and ">>" not in raw_tokens:
+        return "read"
     for prefix in _TEST_PREFIXES:
         if _startswith(argv, prefix):
             return "test"
@@ -523,6 +996,22 @@ def _classify_argv(argv: list[str]) -> BashKind:
         if _startswith(argv, prefix):
             return "read"
     return "unclassified"
+
+
+def _is_version_query(argv: list[str]) -> bool:
+    if len(argv) == 2 and argv[1] in ("--version", "-V"):
+        return True
+    return False
+
+
+def _sed_is_read(argv: list[str]) -> bool:
+    has_n = False
+    for arg in argv[1:]:
+        if arg == "-i" or arg.startswith("-i"):
+            return False
+        if arg == "-n" or (arg.startswith("-") and not arg.startswith("--") and "n" in arg[1:]):
+            has_n = True
+    return has_n
 
 
 def _startswith(argv: list[str], prefix: tuple[str, ...]) -> bool:

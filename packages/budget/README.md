@@ -70,8 +70,8 @@ assert spend.tool_calls <= 20
 ## What it checks
 
 - Tool calls, failures, and loops in a Claude Code session (`assurance audit`)
-- Edits without a prior Read; whether a test or check ran after the last edit
-- Shell commands it could not classify (named at the same weight as findings)
+- Edits without a prior Read or Write; whether a test or check ran after the last in-project edit
+- Shell commands it could not classify (named at the same weight as findings); `Not read:` lines name why
 - Which runs in a JSONL log hit a ceiling or stalled with nothing new read
 - Which configured limits the log never exercised (silence, not a pass)
 

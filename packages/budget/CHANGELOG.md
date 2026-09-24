@@ -1,5 +1,24 @@
 # 0.2.1
 
+- **`assurance audit` classifies real shell commands.** Heredoc bodies are stripped before
+  parsing; segments split only outside quotes; `TZ=UTC pytest`, `/path/to/venv/bin/python -m pytest`,
+  `cd x && uv run pytest`, and `timeout N` / `uv run` / `poetry run` wrappers count as tests. Neutral
+  words (`cd`, `true`, `export`, …) no longer force a command unclassified. New read/check/test
+  entries cover `make test`, `python -m mypy`, `git branch`, `sed -n`, `pip list`, `--version`, and
+  more — while `curl`, `rm`, `git commit`, and `python -c` stay honestly unclassified.
+- **A file the session wrote is not "edited without reading".** A successful `Write` counts as
+  knowing the path; a failed `Edit` changed nothing and is not reported.
+- **Limits-file changes require a real write target.** A heredoc whose *body* mentions
+  `.assurance/config.toml`, or a write after `cd $W` away from the session folder, no longer
+  counts. `>`, `>>`, `tee`, `sed -i`, `cp`/`mv`/`install`, and curl/wget `-o` to this project's
+  file still do.
+- **Scratch edits outside the project do not restart the after-last-edit clock.** Only
+  Edit/Write/MultiEdit/NotebookEdit paths inside the session `cwd` set the last-edit point.
+  JSON adds `outside_cwd_edits`.
+- **`Not read:` names why.** Reasons are counted (`type=progress`, `assistant block …`, …) and the
+  top three print on the text line; JSON carries every reason. `Not read: 0 lines.` is unchanged.
+- **Sessions spanning a day or more say so.** Forty-eight hours or more prints `spanning N days`
+  instead of hundreds of hours; 24–48 hours prints `spanning 1 day Nh`. Under 24 hours is unchanged.
 - **`assurance audit` only reports a change to this project's limits file.** A write to
   `/tmp/…/.assurance/config.toml` was treated as changing the project file because any path ending
   in that name counted. Paths now resolve against the session `cwd` and must be exactly

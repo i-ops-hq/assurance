@@ -327,6 +327,6 @@ def test_not_read_singular_and_classified_zero(
     monkeypatch.chdir(tmp_path)
     assert audit_main([str(path)]) == 0
     out = capsys.readouterr().out
-    assert "Not read: 1 line." in out
+    assert "Not read: 1 line — invalid JSON 1." in out
     assert "Every shell command was classified." in out
     assert "Not classified: 0 shell commands" not in out
