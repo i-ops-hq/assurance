@@ -18,6 +18,8 @@ from assurance_cli.profile import profile_file as profile_csv  # noqa: F401
 from assurance_core.retrieval import ChunkWithoutDocument, retrieval_coverage
 from assurance_cli.setdiff import diff_sets_from_lists
 
+from assurance_mcp.boundary import current as _boundary
+
 
 # Errors this package can explain. Anything else keeps escaping, because a message we did not
 # write is not a message we can promise is safe to hand an agent.
@@ -43,7 +45,7 @@ def _refused(message: str) -> dict[str, Any]:
 def list_dated_files(folder: str) -> dict[str, Any]:
     """List dated or numbered files in a folder."""
     try:
-        return _list_dated_files(folder)
+        return _list_dated_files(_boundary().confine(folder))
     except _EXPLAINABLE as exc:
         return _refused(str(exc))
 
@@ -51,7 +53,7 @@ def list_dated_files(folder: str) -> dict[str, Any]:
 def check_coverage(folder: str, period_range: str | None = None) -> dict[str, Any]:
     """Check folder coverage for dated or numbered files."""
     try:
-        return _check_coverage(folder, period_range)
+        return _check_coverage(_boundary().confine(folder), period_range)
     except _EXPLAINABLE as exc:
         return _refused(str(exc))
 
@@ -65,7 +67,7 @@ def check_staleness(
 ) -> dict[str, Any]:
     """Check whether a document's recorded facts still match its source file."""
     try:
-        return _check_staleness(folder, document, source, recorded_facts=recorded_facts)
+        return _check_staleness(_boundary().confine(folder), document, source, recorded_facts=recorded_facts)
     except _EXPLAINABLE as exc:
         return _refused(str(exc))
 

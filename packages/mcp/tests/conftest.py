@@ -7,6 +7,20 @@ from pathlib import Path
 
 import pytest
 
+from assurance_mcp import boundary
+
+
+@pytest.fixture(autouse=True)
+def granted(tmp_path: Path):
+    """Every test's tmp_path is granted, the way an operator's `--root` would grant it.
+
+    The folder tools refuse without a grant (see `assurance_mcp.boundary`), so a test that means to
+    exercise coverage has to be explicit about which folder the server may read — as a user is.
+    """
+    boundary.configure(boundary.Boundary.from_config([str(tmp_path)]))
+    yield tmp_path
+    boundary.configure(boundary.Boundary.from_config([]))
+
 
 @pytest.fixture
 def monthly_folder(tmp_path: Path) -> Path:

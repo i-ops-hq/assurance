@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import importlib
+import sys
 from typing import Any, cast
 
 from assurance_mcp import __version__
+from assurance_mcp.boundary import configure, parse
 from assurance_mcp.checks import (
     check_coverage,
     check_retrieval_coverage,
@@ -31,6 +33,25 @@ def _load_fastmcp() -> type[Any]:
 
 FastMCP = _load_fastmcp()
 
+
+def _read_only_tool() -> Any:
+    """`@mcp.tool()` with the annotations that let a client auto-approve a read.
+
+    Without them a client has to treat every call as possibly destructive and ask each time, which
+    is how approval prompts get clicked through. Older SDKs take no `annotations`, so they fall back.
+    """
+    try:
+        from mcp.types import ToolAnnotations
+
+        # The wire names, validated: mcp 1.x declares these fields camelCase and 2.x snake_case
+        # with camelCase aliases, and both accept this.
+        annotations = ToolAnnotations.model_validate(
+            {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
+        )
+        return mcp.tool(annotations=annotations)
+    except (ImportError, TypeError):
+        return mcp.tool()
+
 # The version reaches the client in the initialize handshake and is what Cursor shows next to the
 # server. It came back as an empty string until 0.2.3 — the handshake is the first thing a client
 # sees, and a blank version there reads as a server nobody maintains.
@@ -40,17 +61,18 @@ except TypeError:  # older SDKs take no version argument
     mcp = FastMCP("assurance-mcp")
 
 
-@mcp.tool()
-def check_coverage_tool(folder: str, period_range: str | None = None) -> dict[str, Any]:
+@_read_only_tool()
+def check_coverage_tool(folder: str = "", period_range: str | None = None) -> dict[str, Any]:
     """Check whether every month in a folder span is present.
 
-    Read-only. Names a folder and optionally a period range such as
+    Read-only. `folder` must be inside a folder this server was granted; a relative name is read
+    against the granted folders, and empty means the only one. Optionally a period range such as
     'January 2024 to December 2025' or 'last 12 months'.
     """
     return check_coverage(folder, period_range)
 
 
-@mcp.tool()
+@_read_only_tool()
 def check_staleness_tool(
     folder: str,
     document: str,
@@ -65,8 +87,8 @@ def check_staleness_tool(
     return check_staleness(folder, document, source, recorded_facts=recorded_facts)
 
 
-@mcp.tool()
-def list_dated_files_tool(folder: str) -> dict[str, Any]:
+@_read_only_tool()
+def list_dated_files_tool(folder: str = "") -> dict[str, Any]:
     """List which reporting periods a folder holds from dated filenames.
 
     Read-only. Helps an agent decide what to ask next.
@@ -74,7 +96,7 @@ def list_dated_files_tool(folder: str) -> dict[str, Any]:
     return list_dated_files(folder)
 
 
-@mcp.tool()
+@_read_only_tool()
 def check_set_coverage_tool(
     expected: list[str],
     found: list[str],
@@ -102,7 +124,7 @@ def check_set_coverage_tool(
     return check_set_coverage(expected, found, scope=scope, where=where, derivation=derivation)
 
 
-@mcp.tool()
+@_read_only_tool()
 def check_retrieval_coverage_tool(
     expected_documents: list[str],
     retrieved_chunks: list[Any],
@@ -133,7 +155,12 @@ def check_retrieval_coverage_tool(
 
 
 def main() -> None:
-    """Run the MCP server entrypoint."""
+    """Run the MCP server. `--root DIR` (repeatable) grants the folders the tools may read."""
+    boundary = parse(sys.argv[1:])
+    configure(boundary)
+    # stderr, because stdout is the protocol. Clients show a server's stderr in their MCP log, which
+    # is where somebody looks when a folder tool refuses.
+    print(boundary.describe(), file=sys.stderr)
     mcp.run()
 
 

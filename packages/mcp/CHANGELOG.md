@@ -1,3 +1,28 @@
+# 0.5.0
+
+**The folder tools read only inside folders you grant in the server's config.** Breaking, on purpose.
+
+- **Before, the model chose the boundary.** Every folder tool took `folder` and read whatever it
+  named. The `..` and symlink checks confined a document to that folder, but nothing confined the
+  folder: `/etc`, `~/.aws` and `/` were all answered. `check_staleness_tool` with `recorded_facts`
+  returned the row count and numeric column totals of any CSV or XLSX on the machine, and `/` walked
+  the filesystem until a `PermissionError` ended the call. Under prompt injection that is a read
+  channel an attacker steers. Found 2026-09-24 driving the published server with a real MCP client.
+- **Now:** `--root DIR` in the server's `args` (repeatable), or `ASSURANCE_MCP_ROOTS` in its `env`.
+  A folder outside every root is refused with the roots that were granted. With none, the folder
+  tools refuse and name the config line to add; `check_set_coverage_tool` and
+  `check_retrieval_coverage_tool` touch no filesystem and keep working. A filesystem root (`/`,
+  `C:\`) is refused even when granted.
+- **Not the working directory, and not MCP roots.** Clients start servers from wherever the client
+  started, which can be `/`. The 2026-07-28 MCP specification deprecates roots (SEP-2577) and names
+  server configuration as the replacement.
+- `folder` may be relative to a granted root, or empty when exactly one is granted.
+- **Every tool now carries `readOnlyHint: true`, `destructiveHint: false`, `openWorldHint: false`**,
+  so a client can let them run without an approval prompt each time. Verified on mcp 1.30 and 2.2.
+- **Requires `assurance-cli>=0.5.13`**, which names an unreadable directory instead of crashing.
+
+**To upgrade:** add `"--root", "/path/to/your/folder"` to the server's `args`.
+
 # 0.4.8
 
 - **Requires `assurance-cli>=0.5.12`.** No code change here; the floor moves because that is the

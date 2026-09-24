@@ -12,7 +12,7 @@ Each one opens by naming the invariant that package may not break. Read it befor
 | [`packages/authority`](packages/authority/CONTRIBUTING.md) | no branch returns `PROCEED` on the strength of a principal other than the initiator |
 | [`packages/core`](packages/core/CONTRIBUTING.md) | no I/O, no model, no third-party dependency — it decides, callers bring the data |
 | [`packages/cli`](packages/cli/CONTRIBUTING.md) | never invent a denominator; "could not check" is not a pass |
-| [`packages/mcp`](packages/mcp/CONTRIBUTING.md) | read-only by construction: no tool writes, deletes or opens the network |
+| [`packages/mcp`](packages/mcp/CONTRIBUTING.md) | read-only by construction, and the model never chooses the boundary |
 
 All six are developed here. `packages/core` used to be generated from a private runtime; since
 2026-09-24 this repository is its source of truth, and pull requests against it land like any other.
