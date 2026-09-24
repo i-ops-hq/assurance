@@ -98,3 +98,61 @@ def test_it_refuses_rather_than_guessing(row: dict[str, object], fragment: str) 
 def test_an_empty_log_is_refused() -> None:
     with pytest.raises(LogError):
         parse("\n\n")
+
+
+# --- lines that are not events ---------------------------------------------------------------------
+#
+# Found 2026-09-24 pointing this at a real Claude Code transcript with its run key renamed: every
+# line defaulted to `kind: tool`, so user turns, system events and queue operations were counted as
+# tool calls — 177 for a session that had made 35 — and the run was reported as stopped by the
+# 40-call ceiling. ISO timestamps were dropped in silence, so the clock read as never tested.
+
+
+def _transcript_shaped() -> str:
+    """The shape of a Claude Code transcript: `sessionId`, ISO timestamps, most lines not tool calls."""
+    rows: list[dict[str, object]] = [
+        {"type": "queue-operation", "sessionId": "s1", "timestamp": "2026-09-24T01:41:21.968Z"},
+        {"type": "user", "sessionId": "s1", "timestamp": "2026-09-24T01:41:22Z", "message": {"role": "user"}},
+    ]
+    rows += [
+        {"type": "assistant", "sessionId": "s1", "timestamp": f"2026-09-24T{2 + i // 60:02d}:{i % 60:02d}:00Z"}
+        for i in range(0, 90, 2)
+    ]
+    rows.append({"type": "summary", "summary": "no session on this line"})
+    return _log(rows)
+
+
+def test_a_line_that_is_not_an_event_is_not_a_tool_call() -> None:
+    result = audit(parse(_transcript_shaped()))
+    row = result.runs[0]
+
+    assert row.tool_calls == 0
+    assert row.exhausted is None, "45 non-events must not trip a 40-call ceiling"
+    assert row.unclassified == 47
+    assert result.unattributed == 1
+    assert "tool_calls" in result.unexercised
+
+
+def test_iso_timestamps_measure_the_run() -> None:
+    result = audit(parse(_transcript_shaped()))
+
+    assert result.runs[0].duration is not None
+    assert result.runs[0].duration > 3000
+    assert "seconds" not in result.unexercised
+
+
+def test_a_line_with_an_action_and_no_kind_is_still_a_tool_call() -> None:
+    """The documented default, kept: an action is evidence of a call; its absence is not."""
+    row = audit(parse(_log([{"run": "r", "tool": "fetch"} for _ in range(3)]))).runs[0]
+
+    assert row.tool_calls == 3
+    assert row.unclassified == 0
+
+
+def test_the_report_says_what_it_did_not_count() -> None:
+    from assurance_budget.cli import render
+
+    text = render(audit(parse(_transcript_shaped())))
+
+    assert "Not counted: 47 lines named neither a kind nor an action; 1 line carried no run identifier" in text
+    assert "tool_calls" in text

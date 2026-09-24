@@ -67,6 +67,23 @@ def render(result: Audit) -> str:
             lines.append(f"      {row.stalled.message}")
     if len(lines) == 2:
         lines.append("  Nothing hit a limit and nothing stalled.")
+    not_counted = []
+    if result.unclassified:
+        not_counted.append(
+            f"{result.unclassified} {'line' if result.unclassified == 1 else 'lines'} named neither a "
+            "kind nor an action"
+        )
+    if result.unattributed:
+        not_counted.append(
+            f"{result.unattributed} {'line' if result.unattributed == 1 else 'lines'} carried no run "
+            "identifier"
+        )
+    if not_counted:
+        lines += [
+            "",
+            f"  Not counted: {'; '.join(not_counted)}. They are not tool calls or any other kind "
+            "of event this reads, so nothing above includes them.",
+        ]
     if result.unexercised:
         lines += [
             "",
