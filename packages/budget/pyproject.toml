@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-budget"
-version = "0.1.4"
+version = "0.2.0"
 description = "Where an agent run's budget went, and where the loop went nowhere. Ceilings a caller cannot raise."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 dependencies = [
-  "assurance-core>=0.13.2",
+  "assurance-core>=0.14.0",
 ]
 keywords = ["ai-agents", "observability", "cost-control", "guardrails", "assurance", "llm-ops"]
 classifiers = [

@@ -1,4 +1,4 @@
-# Unreleased
+# 0.6.0
 
 - **Operator ceilings** for `assurance budget` / `assurance audit` (config files and `ASSURANCE_MAX_*`),
   forwarded through `assurance-budget`.
@@ -6,8 +6,6 @@
   `N directories skipped (.git, node_modules, …)` instead of folding them into
   `N files not opened`.
 - **`assurance audit`** is forwarded to `assurance-budget` (Claude Code session reader).
-
-# 0.5.13
 
 **First run.** `assurance` with no arguments prints a short start-here screen instead of an argparse
 error. `--version` prints the installed version. `assurance check` with no folder uses the current

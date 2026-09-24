@@ -1,4 +1,4 @@
-# Unreleased
+# 0.14.0
 
 - **`Ceilings.origins` / `project_asked_more`:** metadata for callers that load operator config.
   Core still never reads files or the environment.
