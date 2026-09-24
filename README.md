@@ -25,10 +25,9 @@ you, in plain sentences, what was done, what was skipped, and what it **could no
 Run this in any project where you've used Claude Code:
 
 ```bash
-uvx assurance audit
+uvx assurance audit                        # with uv  (brew install uv, or pipx install uv)
+pip install assurance && assurance audit   # without uv
 ```
-
-<sub>No uv? `pip install assurance && assurance audit`</sub>
 
 Here is the real output on [a sample session](examples/audit/sample-session.jsonl) in this repo. The
 agent was asked to fix a rounding bug *"and make sure the tests pass"*, and ended with
