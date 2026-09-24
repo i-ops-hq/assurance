@@ -7,6 +7,7 @@ import hashlib
 import json
 import sys
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -16,8 +17,11 @@ from assurance_budget.events import LogError
 from assurance_budget.sessions import (
     Session,
     ToolCall,
+    after_last_edit,
+    edited_without_read,
     find_latest_session,
     read_claude_code,
+    unclassified_bash_count,
 )
 
 EXIT_OK = 0
@@ -43,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-on-loop",
         action="store_true",
         help=f"Exit {EXIT_GATE} when a loop was found",
+    )
+    parser.add_argument(
+        "--fail-on-unverified",
+        action="store_true",
+        help=f"Exit {EXIT_GATE} when there were edits and no test or check ran after the last one",
     )
     return parser
 
@@ -74,12 +83,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_UNREADABLE
 
     loops = detect_loops(session.tool_calls)
-    report = build_report(session, loops)
+    unread_edits = edited_without_read(session)
+    after = after_last_edit(session)
+    unclassified = unclassified_bash_count(session)
+    report = build_report(session, loops, unread_edits, after, unclassified)
     if args.as_json:
         print(json.dumps(report, indent=2))
     else:
         print(format_report(session, loops, report))
 
+    if args.fail_on_unverified and after is not None and after["tests"] == 0 and after["checks"] == 0:
+        return EXIT_GATE
     if args.fail_on_loop and loops:
         return EXIT_GATE
     return EXIT_OK
@@ -103,7 +117,13 @@ def detect_loops(calls: tuple[ToolCall, ...] | list[ToolCall]) -> list[Stalled]:
     return found
 
 
-def build_report(session: Session, loops: list[Stalled]) -> dict[str, Any]:
+def build_report(
+    session: Session,
+    loops: list[Stalled],
+    unread_edits: list[str],
+    after: dict[str, Any] | None,
+    unclassified: int,
+) -> dict[str, Any]:
     by_tool = dict(Counter(call.name for call in session.tool_calls))
     failed = sum(1 for call in session.tool_calls if call.error)
     duration = None
@@ -121,13 +141,27 @@ def build_report(session: Session, loops: list[Stalled]) -> dict[str, Any]:
             {"rounds": loop.rounds, "action": loop.action, "error": loop.error}
             for loop in loops
         ],
+        "assistant_turns": session.assistant_turns,
+        "user_turns": session.user_turns,
+        "records": dict(session.records),
         "not_read": session.not_read,
         "unmatched_results": session.unmatched_results,
+        "edited_without_read": list(unread_edits),
+        "after_last_edit": after,
+        "unclassified_commands": unclassified,
     }
 
 
 def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]) -> str:
-    if not session.tool_calls and session.not_read == 0 and session.unmatched_results == 0:
+    empty = (
+        not session.tool_calls
+        and session.not_read == 0
+        and session.unmatched_results == 0
+        and session.assistant_turns == 0
+        and session.user_turns == 0
+        and not session.records
+    )
+    if empty:
         return "No tool calls in this session."
 
     sid = session.session_id[:8] if session.session_id else "?"
@@ -145,35 +179,67 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     if n or failed:
         fail_bit = f", {failed} failed" if failed else ""
         breakdown = _tool_breakdown(report["by_tool"])
-        lines.append(f"{n} tool calls{fail_bit} — {breakdown}" if breakdown else f"{n} tool calls{fail_bit}")
+        lines.append(
+            f"{n} tool calls{fail_bit} — {breakdown}" if breakdown else f"{n} tool calls{fail_bit}"
+        )
 
+    body: list[str] = []
     if loops:
-        lines.append("")
         for loop in loops:
-            lines.append(f"  {_loop_line(loop)}")
+            body.append(_loop_line(loop))
 
-    footnotes: list[str] = []
-    if session.not_read:
-        footnotes.append(
-            f"Not read: {session.not_read} lines that are not a tool call, a tool result or a user turn."
-        )
-    if session.unmatched_results:
-        noun = "result" if session.unmatched_results == 1 else "results"
-        verb = "matched" if session.unmatched_results == 1 else "matched"
-        footnotes.append(
-            f"{session.unmatched_results} tool {noun} {verb} no tool call."
-            if session.unmatched_results != 1
-            else "1 tool result matched no tool call."
-        )
-    if footnotes:
+    unread_edits = report.get("edited_without_read") or []
+    if unread_edits:
+        body.append(f"Edited without reading it first: {', '.join(unread_edits)}")
+
+    after = report.get("after_last_edit")
+    if after is not None:
+        body.append(_after_last_edit_line(after))
+
+    unclassified = int(report.get("unclassified_commands") or 0)
+    body.append(
+        f"Not classified: {unclassified} shell commands, so whether they read, wrote or "
+        "tested anything is unknown."
+    )
+
+    bookkeeping = sum(session.records.values())
+    body.append(
+        f"Also in the transcript: {session.assistant_turns} assistant turns, "
+        f"{session.user_turns} user turns, {bookkeeping} bookkeeping records."
+    )
+    body.append(f"Not read: {session.not_read} lines.")
+
+    if session.unmatched_results == 1:
+        body.append("1 tool result matched no tool call.")
+    elif session.unmatched_results:
+        body.append(f"{session.unmatched_results} tool results matched no tool call.")
+
+    if body:
         lines.append("")
-        lines.extend(f"  {note}" for note in footnotes)
+        lines.extend(f"  {note}" for note in body)
 
-    if not session.tool_calls and not loops:
-        # Only not_read / unmatched — still say so rather than inventing activity.
-        if len(lines) == 1:
-            lines.append("No tool calls in this session.")
+    if not session.tool_calls and not loops and len(lines) == 1:
+        lines.append("No tool calls in this session.")
     return "\n".join(lines)
+
+
+def _after_last_edit_line(after: dict[str, Any]) -> str:
+    when = _clock(after.get("at"))
+    prefix = f"After the last edit ({when}):" if when else "After the last edit:"
+    tests = int(after.get("tests") or 0)
+    checks = int(after.get("checks") or 0)
+    if tests == 0 and checks == 0:
+        return f"{prefix} no test or check command ran"
+    labels = list(after.get("test_labels") or [])
+    if tests == 1 and labels:
+        test_bit = f"1 test run ({labels[0]})"
+    elif tests == 1:
+        test_bit = "1 test run"
+    elif labels:
+        test_bit = f"{tests} test runs ({'; '.join(labels)})"
+    else:
+        test_bit = f"{tests} test runs"
+    return f"{prefix} {test_bit}, {checks} checks"
 
 
 def _loop_line(loop: Stalled) -> str:
@@ -229,6 +295,12 @@ def _duration_phrase(seconds: float | None) -> str:
     if rem:
         return f"{hours}h {rem} min"
     return f"{hours}h"
+
+
+def _clock(at: float | None) -> str:
+    if at is None:
+        return ""
+    return datetime.fromtimestamp(at).strftime("%H:%M")
 
 
 def _looked_in() -> Path:
