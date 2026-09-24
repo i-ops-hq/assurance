@@ -1,3 +1,13 @@
+# 0.2.4
+
+- **`prepare` on a registry dependency is no longer reported as install-time code.** npm runs
+  `prepare` for the project itself, a git dependency and a local directory — not for a package it
+  installs from a registry tarball, which arrives already packed. On a real project (esbuild, sharp,
+  `@modelcontextprotocol/sdk`) six packages were reported as executing at install; four were registry
+  dependencies whose only script was `prepare`. npm's own `hasInstallScript` said two, and now so does
+  this. A package whose source the lockfile does not establish as a registry tarball keeps its
+  `prepare` counted, because missing an install script is the failure that matters.
+
 # 0.2.3
 
 **An encrypted wheel crashed the tool.** A METADATA entry with the zip encryption bit set raised

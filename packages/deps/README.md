@@ -56,7 +56,9 @@ Against package-lock.json: the same set of names, so the lock is not stale.
 the whole transitive tree offline. `node_modules` then supplies the script bodies for whatever is
 installed, and the two are counted apart — knowing a package *has* an install script is not the same
 as having read it. `prepare` is on the list too, which is the one people forget: it runs on `npm ci`
-and on every git dependency.
+and on every git or local-directory dependency. It is **not** counted for a package installed from a
+registry tarball, because npm does not run it there — counting it overstated a real project's
+install-time code threefold.
 
 ## The part that is not a feature
 
