@@ -17,18 +17,25 @@ from assurance_core.tool_pinning import PinChange, diff, needs_reapproval, pin
 
 PINS_DIR = ".assurance"
 PINS_FILE = "mcp-pins.json"
+_ALLOW_HELP = (
+    "Exit 0 even when a configured server could not be checked (an HTTP server, or one that did "
+    "not start). It is still named. Default: exit 1, because an unchecked server is not a pass"
+)
 MCP_MISSING_MESSAGE = "assurance pin requires the mcp package. Run: pip install 'assurance-cli[mcp]'"
 
 _CONFIG_CANDIDATES: tuple[str | Path, ...] = (
     ".mcp.json",
     ".cursor/mcp.json",
     Path.home() / ".cursor" / "mcp.json",
-    Path.home()
-    / "Library"
-    / "Application Support"
-    / "Claude"
-    / "claude_desktop_config.json",
+    # Claude Desktop keeps its config in a different place on each platform.
+    Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+    Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Claude" / "claude_desktop_config.json",
+    Path.home() / ".config" / "Claude" / "claude_desktop_config.json",
 )
+
+#: How long one server may take to start and list its tools. A server that hangs would otherwise
+#: hang the CI job that runs `pin --check`, which is worse than a gate that says it could not reach it.
+SERVER_TIMEOUT_SECONDS = 30.0
 
 _MISSING = object()
 
@@ -133,8 +140,19 @@ async def _list_tools_async(server: StdioServer) -> list[tuple[str, str | None, 
 
 
 def list_tools(server: StdioServer) -> list[tuple[str, str | None, dict[str, Any] | None]]:
-    """List tools from one live stdio MCP server."""
-    return asyncio.run(_list_tools_async(server))
+    """List tools from one live stdio MCP server, or raise if it cannot be reached in time."""
+    return asyncio.run(asyncio.wait_for(_list_tools_async(server), SERVER_TIMEOUT_SECONDS))
+
+
+def _why(exc: BaseException) -> str:
+    """One line on why a server could not be reached, including through an `ExceptionGroup`."""
+    inner = getattr(exc, "exceptions", None)
+    if inner:
+        return _why(inner[0])
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return f"did not list its tools within {SERVER_TIMEOUT_SECONDS:.0f}s"
+    text = str(exc).strip() or type(exc).__name__
+    return text.splitlines()[0][:200]
 
 
 def _server_snapshot(
@@ -158,8 +176,15 @@ def _load_pins_file(path: Path) -> dict[str, Any]:
 
 def _write_pins_file(path: Path, config_path: Path, servers: dict[str, dict[str, dict[str, str]]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Relative to the project when the config is inside it. The pin file is committed like a
+    # lockfile, and an absolute path carried one developer's home directory into every clone.
+    project = path.parent.parent.resolve()
+    try:
+        shown = config_path.resolve().relative_to(project).as_posix()
+    except ValueError:
+        shown = str(config_path)
     payload = {
-        "config": str(config_path),
+        "config": shown,
         "servers": servers,
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -167,12 +192,37 @@ def _write_pins_file(path: Path, config_path: Path, servers: dict[str, dict[str,
 
 def _collect_live(
     servers: list[StdioServer],
-) -> dict[str, dict[str, dict[str, str]]]:
+) -> tuple[dict[str, dict[str, dict[str, str]]], dict[str, str]]:
+    """Every server's tools, and — separately — the servers that could not be reached, with why.
+
+    One server that failed to start used to raise out of the whole command, so `--save` pinned
+    nothing for the servers that were fine and `--check` verified none of them. Found 2026-09-24
+    with a config holding one healthy server and one stale command path.
+    """
     live: dict[str, dict[str, dict[str, str]]] = {}
+    unreachable: dict[str, str] = {}
     for server in servers:
-        tools = list_tools(server)
+        try:
+            tools = list_tools(server)
+        except Exception as exc:  # noqa: BLE001 — every failure is reported by name, none is a pass
+            unreachable[server.name] = _why(exc)
+            continue
         live[server.name] = _server_snapshot(tools)
-    return live
+    return live, unreachable
+
+
+def _not_verified(skipped: list[str] | None, unreachable: dict[str, str]) -> list[str]:
+    return [*(skipped or []), *(f"{name}: could not be reached — {why}" for name, why in sorted(unreachable.items()))]
+
+
+def _report_not_verified(lines: list[str], *, allow: bool) -> None:
+    if not lines:
+        return
+    print("Not verified:", file=sys.stderr)
+    for line in lines:
+        print(f"  {line}", file=sys.stderr)
+    if allow:
+        print("  Passing anyway because --allow-unverified is set.", file=sys.stderr)
 
 
 def save_pins(
@@ -181,19 +231,32 @@ def save_pins(
     *,
     cwd: Path | None = None,
     skipped: list[str] | None = None,
+    allow_unverified: bool = False,
 ) -> int:
-    """Snapshot tool definitions from every stdio server into `.assurance/mcp-pins.json`."""
-    for line in skipped or []:
-        print(line, file=sys.stderr)
+    """Snapshot tool definitions from every stdio server into `.assurance/mcp-pins.json`.
+
+    Servers that could not be reached are named and left out; the file is still written for the
+    rest. Exit 1 when any configured server went unpinned, because a lockfile missing a server looks
+    exactly like one that covers it.
+    """
     if not servers:
+        for line in skipped or []:
+            print(line, file=sys.stderr)
         print("assurance: no stdio MCP servers to pin", file=sys.stderr)
         return 2
-    live = _collect_live(servers)
+    live, unreachable = _collect_live(servers)
+    not_verified = _not_verified(skipped, unreachable)
+    if not live:
+        _report_not_verified(not_verified, allow=False)
+        print("assurance: no server could be reached, so nothing was pinned", file=sys.stderr)
+        return 2
     out = pins_path(cwd)
     _write_pins_file(out, config_path, live)
     total = sum(len(tools) for tools in live.values())
-    print(f"Pinned {total} tool(s) from {len(live)} server(s) to {out}")
-    return 0
+    configured = len(servers) + len(skipped or [])
+    print(f"Pinned {total} tool(s) from {len(live)} of {configured} server(s) to {out}")
+    _report_not_verified(not_verified, allow=allow_unverified)
+    return 1 if not_verified and not allow_unverified else 0
 
 
 def _description_diff(old: str, new: str) -> str:
@@ -242,11 +305,13 @@ def check_pins(
     *,
     cwd: Path | None = None,
     skipped: list[str] | None = None,
+    allow_unverified: bool = False,
 ) -> int:
-    """Compare live tool definitions against the saved pin file."""
-    for line in skipped or []:
-        print(line, file=sys.stderr)
+    """Compare live tool definitions against the saved pin file.
 
+    Always ends with one line saying how much was verified. `--check` used to print nothing and
+    exit 0 when a configured server was skipped, which is a gate reporting silence as a pass.
+    """
     stored_path = pins_path(cwd)
     try:
         stored = _load_pins_file(stored_path)
@@ -255,16 +320,20 @@ def check_pins(
         return 2
 
     if not servers:
+        for line in skipped or []:
+            print(line, file=sys.stderr)
         print("assurance: no stdio MCP servers to check", file=sys.stderr)
         return 2
 
-    live = _collect_live(servers)
+    live, unreachable = _collect_live(servers)
     stored_servers: dict[str, dict[str, dict[str, str]]] = stored.get("servers") or {}
 
     all_changes: list[tuple[str, PinChange]] = []
     report_lines: list[str] = []
 
     for server in servers:
+        if server.name in unreachable:
+            continue
         approved_tools = stored_servers.get(server.name) or {}
         current_tools = live.get(server.name) or {}
         approved_pins = {name: entry["pin"] for name, entry in approved_tools.items()}
@@ -297,12 +366,24 @@ def check_pins(
         print("\n\n".join(report_lines))
 
     flat_changes = [change for _, change in all_changes]
+    not_verified = _not_verified(skipped, unreachable)
+    checked_tools = sum(len(tools) for tools in live.values())
+    configured = len(servers) + len(skipped or [])
+    changed = sum(1 for change in flat_changes if change.kind != "removed")
+    verdict = f"{changed} changed" if changed else "no definition changed"
+    print(
+        f"{checked_tools} tool(s) checked across {len(live)} of {configured} server(s) — {verdict}"
+        + (f" — {len(not_verified)} not verified" if not_verified else "")
+    )
+    _report_not_verified(not_verified, allow=allow_unverified)
     if needs_reapproval(flat_changes):
         return 1
-    return 0
+    return 1 if not_verified and not allow_unverified else 0
 
 
-def run_pin_action(*, save: bool, check: bool, config: str | None = None) -> int:
+def run_pin_action(
+    *, save: bool, check: bool, config: str | None = None, allow_unverified: bool = False
+) -> int:
     """Run ``assurance pin --save`` or ``--check``."""
     try:
         config_path = discover_config_path(config)
@@ -322,9 +403,9 @@ def run_pin_action(*, save: bool, check: bool, config: str | None = None) -> int
 
     stdio_servers, skipped = parse_stdio_servers(raw_config)
     if save:
-        return save_pins(config_path, stdio_servers, skipped=skipped)
+        return save_pins(config_path, stdio_servers, skipped=skipped, allow_unverified=allow_unverified)
     if check:
-        return check_pins(config_path, stdio_servers, skipped=skipped)
+        return check_pins(config_path, stdio_servers, skipped=skipped, allow_unverified=allow_unverified)
     print("assurance: one of --save or --check is required", file=sys.stderr)
     return 2
 
@@ -343,5 +424,8 @@ def run_pin(argv: list[str] | None = None) -> int:
         help="Exit 1 if any definition changed since the snapshot",
     )
     parser.add_argument("--config", metavar="PATH", help="Explicit MCP config instead of discovery")
+    parser.add_argument("--allow-unverified", action="store_true", help=_ALLOW_HELP)
     args = parser.parse_args(argv)
-    return run_pin_action(save=args.save, check=args.check, config=args.config)
+    return run_pin_action(
+        save=args.save, check=args.check, config=args.config, allow_unverified=args.allow_unverified
+    )
