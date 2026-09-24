@@ -1,3 +1,10 @@
+# 0.1.2
+
+- **Requires `assurance-budget` 0.2.2 and `assurance-cli` 0.6.1:** `assurance audit --hook` runs the
+  audit after every Claude Code turn (and with `--nudge` sends Claude back to run the tests it
+  skipped), `assurance audit --demo` shows a report on a bundled sample, the unclassified line names
+  what it could not classify, and `assurance --version` names every installed part.
+
 # 0.1.1
 
 - **Requires `assurance-budget` 0.2.1**, so `uvx assurance audit` gets its fixes: paths shown relative

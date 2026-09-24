@@ -1,3 +1,7 @@
+# 0.5.1
+
+- Requires `assurance-cli` 0.6.1. No change to the server or its tools.
+
 # 0.5.0
 
 - **`--version`** prints `assurance-mcp <version>` and exits 0 before the server starts.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-budget"
-version = "0.2.1"
+version = "0.2.2"
 description = "Where an agent run's budget went, and where the loop went nowhere. Ceilings a caller cannot raise."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -37,7 +37,7 @@ Source = "https://github.com/i-ops-hq/assurance"
 include = ["assurance_budget*"]
 
 [tool.setuptools.package-data]
-assurance_budget = ["py.typed"]
+assurance_budget = ["py.typed", "data/*.jsonl"]
 
 [tool.mypy]
 strict = true

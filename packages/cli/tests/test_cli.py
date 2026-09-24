@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+
 import csv
 import json
 from pathlib import Path
@@ -846,7 +848,26 @@ def test_version_flag(capsys) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["--version"])
     assert exc.value.code == 0
-    assert capsys.readouterr().out.strip().startswith("assurance ")
+    out = capsys.readouterr().out
+    assert out.startswith("assurance ")
+    # Every installed part is named, on one unwrapped line: `pip install assurance` is one version
+    # over several packages, and printing only the cli's told a 0.1.1 user "0.6.0".
+    assert out.count("\n") == 1
+    assert f"cli {importlib.metadata.version('assurance-cli')}" in out
+    assert f"core {importlib.metadata.version('assurance-core')}" in out
+
+
+def test_help_lists_audit_first(capsys) -> None:
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    usage = capsys.readouterr().out.splitlines()[1]
+    assert usage.strip().startswith("{audit,")
+
+
+def test_start_here_leads_with_audit_and_the_demo(capsys) -> None:
+    assert main([]) == 0
+    listed = [line.split()[1] for line in capsys.readouterr().out.splitlines() if line.startswith("  assurance ")]
+    assert listed[:2] == ["audit", "audit"]
 
 
 def test_budget_version_flag(capsys) -> None:

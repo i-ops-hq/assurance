@@ -28,18 +28,58 @@ FORWARDED: dict[str, tuple[str, str]] = {
 }
 
 _START_HERE = """\
-assurance — what an agent run covered, spent, may do, and is about to install.
+assurance — your AI agent says it's done. This tells you what it didn't check.
+No model, no network, no account.
 
-  assurance diff --expected A --found B   what was required vs. what was actually read
-  assurance check [FOLDER]                a folder of dated or numbered files: what is absent
+  assurance audit                         what the Claude Code session in this folder did, and skipped
+  assurance audit --demo                  the same report on a bundled sample session
+  assurance diff --expected A --found B   was everything that should have been read, read?
   assurance pin --save | --check          did an MCP server change a tool after you approved it?
-  assurance deps requirements.txt         what an install will execute, read without running it
-  assurance budget runs.jsonl             where an agent run's budget went
+  assurance deps package.json             what an install will execute, read without running it
+  assurance budget runs.jsonl             where an agent run's budget went, and where it looped
   assurance authority --example           may a task proceed for the person who asked?
-  assurance audit [TRANSCRIPT]            what a Claude Code session did, and what it could not classify
+  assurance check [FOLDER]                a folder of dated or numbered files: what is absent
 
+Run it after every Claude Code session: https://github.com/i-ops-hq/assurance#run-it-after-every-session
 assurance <command> --help for more.
 """
+
+
+#: Every distribution the `assurance` command can reach, in the order `--version` names them.
+_DISTRIBUTIONS = (
+    ("assurance-cli", "cli"),
+    ("assurance-budget", "budget"),
+    ("assurance-deps", "deps"),
+    ("assurance-authority", "authority"),
+    ("assurance-mcp", "mcp"),
+    ("assurance-core", "core"),
+)
+
+
+def _version_line() -> str:
+    """`assurance 0.1.2 (cli 0.6.1, budget 0.2.2, …)` — every installed part, so a bug report
+    names what actually ran. `pip install assurance` is one version number over several packages;
+    printing only the cli's used to say 0.6.0 to someone who had installed 0.1.1."""
+    parts = []
+    for dist, short in _DISTRIBUTIONS:
+        try:
+            parts.append(f"{short} {importlib.metadata.version(dist)}")
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    try:
+        front = f"assurance {importlib.metadata.version('assurance')}"
+    except importlib.metadata.PackageNotFoundError:
+        front = "assurance"
+    return f"{front} ({', '.join(parts)})" if parts else front
+
+
+class _PrintVersion(argparse.Action):
+    """argparse's own version action rewraps the text to the terminal width, splitting a version
+    number across lines. This prints the line as it is."""
+
+    def __call__(self, parser: argparse.ArgumentParser, namespace: object, values: object, option_string: str | None = None) -> None:
+        print(_version_line())
+        parser.exit()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,17 +98,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="assurance",
         description=(
-            "Did the job cover everything it was supposed to cover? Arithmetic, not models. "
-            "`diff` is the general command — it compares any two sets of keys. `check` is the "
-            "special case for a folder of dated or numbered files."
+            "Your AI agent says it's done. Assurance tells you what it didn't check. Every answer "
+            "is arithmetic over what happened; no model decides anything."
         ),
     )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {importlib.metadata.version('assurance-cli')}",
-    )
+    parser.add_argument("--version", action=_PrintVersion, nargs=0, help="Show every installed part's version")
     sub = parser.add_subparsers(dest="command", required=True)
+    # First, because it is the one most people install this for. `main` forwards it before
+    # argparse runs; it is listed here so `assurance --help` shows it.
+    sub.add_parser(
+        "audit", add_help=False,
+        help="What the Claude Code session in this folder did, and what it skipped (--demo for a sample)",
+    )
 
     init_parser = sub.add_parser("init", help="Write .assurance.json baseline")
     init_parser.add_argument("folder", help="Folder to baseline")
@@ -191,10 +232,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "authority", add_help=False,
         help="Whether a task may proceed for the person who asked (assurance-authority)",
-    )
-    sub.add_parser(
-        "audit", add_help=False,
-        help="What a Claude Code session did, and what could not be classified (assurance-budget)",
     )
 
     args = parser.parse_args(argv)

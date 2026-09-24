@@ -32,7 +32,7 @@ Claude Code session a1b2c3d4 — 1h 5 min in /workspace/demo-app
 82 tool calls, 1 failed — Bash 74, Edit 5, Read 2, Write 1
 
   After the last edit (11:05): 3 test runs (pytest -q tests/, python -m pytest tests/test_app.py -q, pytest -q), 0 checks
-  Not classified: 2 shell commands, so whether they read, wrote or tested anything is unknown.
+  Not classified: 2 shell commands (python -c ×2), so whether they read, wrote or tested anything is unknown.
   This session changed .assurance/config.toml — the limits file for this project.
   Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
   Not read: 3 lines — type=progress 2, assistant block server_tool_use 1.\

@@ -11,7 +11,7 @@
 
 No model · No network · No account
 
-[Quick start](#quick-start) · [Commands](#commands) · [MCP](#use-it-from-an-mcp-client) · [Limits](#limits-the-agent-cant-raise) · [Feedback](#tell-us-where-its-wrong)
+[Quick start](#quick-start) · [After every session](#run-it-after-every-session) · [Commands](#commands) · [MCP](#use-it-from-an-mcp-client) · [Limits](#limits-the-agent-cant-raise) · [Feedback](#tell-us-where-its-wrong)
 
 </div>
 
@@ -29,6 +29,8 @@ uvx assurance audit                        # with uv  (brew install uv, or pipx 
 pip install assurance && assurance audit   # without uv
 ```
 
+Not using Claude Code yet? `uvx assurance audit --demo` shows the report on a bundled sample session.
+
 Here is the real output on [a sample session](examples/audit/sample-session.jsonl) in this repo. The
 agent was asked to fix a rounding bug *"and make sure the tests pass"*, and ended with
 *"All done — the totals are correct now."*
@@ -40,7 +42,7 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 
   Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
   After the last edit (14:09): no test or check command ran
-  Not classified: 2 shell commands, so whether they read, wrote or tested anything is unknown.
+  Not classified: 2 shell commands (make lint-fix, python script), so whether they read, wrote or tested anything is unknown.
   Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
   Not read: 0 lines.
 ```
@@ -49,7 +51,27 @@ What "All done" left out:
 
 - ❌ The tests failed **three times in a row**, the same way each time.
 - ❌ **Nothing was tested** after the last edit.
-- ❔ Two commands it **can't vouch for either way**, so it says so. Silence is not a pass.
+- ❔ Two commands it **can't vouch for either way**, so it names them. Silence is not a pass.
+
+## Run it after every session
+
+Add a Stop hook, and Claude Code runs the audit each time Claude says it's finished. It stays quiet
+when the last edit was followed by a passing test or check. When it wasn't, it tells you, and with
+`--nudge` it tells Claude too, so Claude runs the tests before it stops:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "uvx assurance audit --hook --nudge" }] }
+    ]
+  }
+}
+```
+
+Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
+`--nudge` to be told without Claude being asked. It nudges at most once per turn, and it never fails
+or blocks a session: if it can't read the transcript it says so and lets Claude finish.
 
 ## Commands
 

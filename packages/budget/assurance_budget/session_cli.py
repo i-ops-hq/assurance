@@ -26,6 +26,7 @@ from assurance_budget.sessions import (
     find_latest_session,
     read_claude_code,
     unclassified_bash_count,
+    unclassified_by_command,
 )
 
 EXIT_OK = 0
@@ -36,6 +37,69 @@ EXIT_UNREADABLE = 2
 
 #: Transcript sources whose harness refuses an edit to a file the model has not read.
 _READ_BEFORE_EDIT_ENFORCED = frozenset({"claude-code"})
+
+#: The session `--demo` audits: the same file as examples/audit/sample-session.jsonl in the repo.
+SAMPLE_SESSION = Path(__file__).resolve().parent / "data" / "sample-session.jsonl"
+
+
+def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
+    """Claude Code Stop hook. Reads the hook input, audits the transcript, and always exits 0.
+
+    Speaks only when the session's last edit inside the project was not followed by a passing test
+    or check: then it shows you one line (`systemMessage`), and with `nudge` also tells Claude
+    (`additionalContext`) so it can run them before it stops. It does not nudge twice in one turn
+    (`stop_hook_active`). A hook that cannot read its input says so and lets the session end; an
+    audit tool must never be the reason a session breaks.
+    """
+    try:
+        data = json.loads(stdin_text) if stdin_text.strip() else {}
+    except json.JSONDecodeError:
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("transcript_path"), str):
+        _hook_print({"systemMessage": "assurance: the Stop hook input had no transcript_path; nothing audited."})
+        return EXIT_OK
+    try:
+        session = read_claude_code(Path(data["transcript_path"]).expanduser())
+        finding = _hook_finding(after_last_edit(session))
+    except LogError as exc:
+        _hook_print({"systemMessage": f"assurance: could not read this session ({exc}); nothing audited."})
+        return EXIT_OK
+    except Exception as exc:  # noqa: BLE001 — a bug in the audit must not become a broken session
+        _hook_print({"systemMessage": f"assurance: the audit failed ({type(exc).__name__}: {exc}); nothing audited."})
+        return EXIT_OK
+
+    if finding is None:
+        return EXIT_OK
+    out: dict[str, Any] = {"systemMessage": f"assurance: {finding}."}
+    if nudge and not data.get("stop_hook_active"):
+        out["hookSpecificOutput"] = {
+            "hookEventName": "Stop",
+            "additionalContext": (
+                f"Assurance audit of this session: {finding}. Before you say the work is done, run "
+                "the project's tests or checks for what you changed, or say plainly why they cannot "
+                "be run here."
+            ),
+        }
+    _hook_print(out)
+    return EXIT_OK
+
+
+def _hook_finding(after: dict[str, Any] | None) -> str | None:
+    if after is None:
+        return None
+    when = _clock(after.get("at"))
+    since = f" (last edit {when})" if when else ""
+    if int(after.get("tests") or 0) == 0 and int(after.get("checks") or 0) == 0:
+        return f"files were edited and no test or check ran after the last edit{since}"
+    runs = list(after.get("test_runs") or [])
+    if runs and runs[-1].get("failed"):
+        label = str(runs[-1].get("label") or runs[-1].get("command") or "")
+        return f"the last test run after the last edit failed{since}: {label}"
+    return None
+
+
+def _hook_print(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload))
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -61,11 +125,36 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=f"Exit {EXIT_GATE} when there were edits and no test or check ran after the last one",
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Audit a sample session bundled with assurance, to see what a report looks like",
+    )
+    parser.add_argument(
+        "--hook",
+        action="store_true",
+        help=(
+            "Run as a Claude Code Stop hook: read the hook's JSON on stdin and tell you when the "
+            "session's edits were not followed by a passing test or check. Never fails the session"
+        ),
+    )
+    parser.add_argument(
+        "--nudge",
+        action="store_true",
+        help="With --hook: also tell Claude, so it runs the tests before it finishes (once per turn)",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(list(argv) if argv is not None else None)
+    parser = build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.hook:
+        return run_hook(sys.stdin.read(), nudge=args.nudge)
+    if args.nudge:
+        parser.error("--nudge only applies with --hook")
+    if args.demo and args.transcript:
+        parser.error("--demo audits the bundled sample; leave out the transcript path")
     try:
         ceilings = load_ceilings(Path.cwd(), os.environ)
     except ConfigError as exc:
@@ -73,7 +162,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_UNREADABLE
 
     path: Path | None
-    if args.transcript:
+    if args.demo:
+        path = SAMPLE_SESSION
+    elif args.transcript:
         path = Path(args.transcript).expanduser()
     else:
         cwd = Path.cwd()
@@ -82,7 +173,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             looked = _looked_in()
             print(
                 f"assurance audit: no Claude Code session recorded for {cwd}. "
-                f"Looked in {looked}. Pass a transcript path.",
+                f"Looked in {looked}. Run it inside a project where you have used Claude Code, "
+                "pass a transcript path, or see a sample report with: assurance audit --demo",
                 file=sys.stderr,
             )
             return EXIT_UNREADABLE
@@ -116,6 +208,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(report, indent=2))
     else:
         print(format_report(session, loops, report))
+        if args.demo:
+            print(
+                "\n(A sample session bundled with assurance. Run `assurance audit` inside a project "
+                "where you have used Claude Code to audit your own.)"
+            )
 
     if args.fail_on_unverified and after is not None and after["tests"] == 0 and after["checks"] == 0:
         return EXIT_GATE
@@ -196,6 +293,7 @@ def build_report(
         "edited_without_read": list(unread_edits),
         "after_last_edit": after,
         "unclassified_commands": unclassified,
+        "unclassified_by_command": unclassified_by_command(session),
         "bash_kinds": kinds,
         "over_configured_limit": over_limit,
         "ceilings_source": None if caps is None or caps.source == "built-in defaults" else caps.source,
@@ -257,15 +355,18 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         body.append(_after_last_edit_line(after))
 
     unclassified = int(report.get("unclassified_commands") or 0)
+    which = _unclassified_breakdown(report.get("unclassified_by_command") or {})
+    which = f" ({which})" if which else ""
     if unclassified == 0:
         body.append("Every shell command was classified.")
     elif unclassified == 1:
         body.append(
-            "Not classified: 1 shell command, so whether it read, wrote or tested anything is unknown."
+            f"Not classified: 1 shell command{which}, so whether it read, wrote or tested anything "
+            "is unknown."
         )
     else:
         body.append(
-            f"Not classified: {unclassified} shell commands, so whether they read, wrote or "
+            f"Not classified: {unclassified} shell commands{which}, so whether they read, wrote or "
             "tested anything is unknown."
         )
 
@@ -303,6 +404,18 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     if not session.tool_calls and not loops and len(lines) == 1:
         lines.append("No tool calls in this session.")
     return "\n".join(lines)
+
+
+def _unclassified_breakdown(by_command: dict[str, int]) -> str:
+    """`python -c ×53, curl ×33, python - ×48, 21 more kinds` — the top three, largest first."""
+    if not by_command:
+        return ""
+    ranked = sorted(by_command.items(), key=lambda item: (-item[1], item[0]))
+    parts = [name if count == 1 else f"{name} ×{count}" for name, count in ranked[:3]]
+    rest = len(ranked) - 3
+    if rest > 0:
+        parts.append("1 more kind" if rest == 1 else f"{rest} more kinds")
+    return ", ".join(parts)
 
 
 def _count_phrase(n: int, singular: str, plural: str) -> str:

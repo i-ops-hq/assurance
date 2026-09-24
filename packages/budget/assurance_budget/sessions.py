@@ -321,6 +321,8 @@ def read_claude_code(path: Path) -> Session:
         raw_lines = target.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         raise LogError(f"cannot read {target}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise LogError(f"{target} is not UTF-8 text, so not a Claude Code transcript ({exc.reason})") from exc
 
     pending: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -815,6 +817,58 @@ def unclassified_bash_count(session: Session) -> int:
         if classify_bash(command) == "unclassified":
             n += 1
     return n
+
+
+#: Commands whose second word says what they did (`git push`, `make lint`), so it is kept.
+_TWO_WORD_LABELS = frozenset(
+    {"git", "gh", "npm", "pnpm", "yarn", "bun", "uv", "make", "docker", "cargo", "go", "kubectl", "brew"}
+)
+
+
+def unclassified_by_command(session: Session) -> dict[str, int]:
+    """What the unclassified Bash commands were, by a short label: `python -c`, `curl`, `make lint`.
+
+    One label per command, from its first unclassified segment. The label is the program name, plus
+    the subcommand for tools like git or make, plus the mode for python (`-c`, `-`, `-m pkg`,
+    `script`). A command that cannot be parsed at all is `(unparsed)`. Never the full text.
+    """
+    counts: Counter[str] = Counter()
+    for call in session.tool_calls:
+        if call.name != "Bash":
+            continue
+        command = call.input.get("command")
+        if not isinstance(command, str):
+            counts["(no command)"] += 1
+            continue
+        if classify_bash(command) != "unclassified":
+            continue
+        counts[_unclassified_label(command)] += 1
+    return dict(counts)
+
+
+def _unclassified_label(command: str) -> str:
+    try:
+        segments = split_shell_segments(strip_heredoc_bodies(command))
+    except ValueError:
+        return "(unparsed)"
+    for tokens in segments:
+        if _classify_segment(tokens) != "unclassified":
+            continue
+        argv = _normalise_argv(_drop_redirections(tokens)) or []
+        if not argv:
+            continue
+        head = argv[0]
+        if head == "python" and len(argv) > 1:
+            if argv[1] == "-m" and len(argv) > 2:
+                return f"python -m {argv[2]}"
+            if argv[1] in ("-c", "-"):
+                return f"python {argv[1]}"
+            return "python script"
+        if head in _TWO_WORD_LABELS and len(argv) > 1 and not argv[1].startswith("-"):
+            return f"{head} {argv[1]}"
+        return head
+    # Every segment classified on its own: the unknown part is inside a $( … ) substitution.
+    return "(inside $( ))"
 
 
 def bash_kinds_count(session: Session) -> dict[str, int]:
