@@ -7,28 +7,13 @@
 [![Python](https://img.shields.io/pypi/pyversions/assurance-mcp)](https://pypi.org/project/assurance-mcp/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/i-ops-hq/assurance/blob/main/packages/mcp/LICENSE)
 
-## For an agent that retrieves before it answers
-
-If your agent can list the folder it is reasoning about, **you probably do not need this.** We A/B'd
-exactly that inside Cursor and the run *without* these tools did better: it listed the directory,
-spotted the odd filename, and checked itself. That is the right behaviour and we are not going to
-pretend otherwise.
-
-Where it earns its place is where the agent **cannot** see the whole set. It performed a retrieval and
-holds `k` results, and nothing in those results says what the other set contained. It cannot list what
-it was not given, and neither can a better model.
-
-`check_retrieval_coverage_tool` answers that, in arithmetic, with **no model involved**.
-
-**Read-only by construction, inside folders you grant.** No writes, no deletes, no network, and a model cannot widen what it may read. Proven by
-`test_the_server_never_writes`: no tool opens a file for writing, and no `requests`, `urllib`,
-`shutil`, `os.remove`, `os.replace` or `symlink_to` call exists in the package.
+Coverage and staleness checks as MCP tools — arithmetic only, read-only inside folders you grant.
 
 ## Install
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
 pip install assurance-mcp
+# or: pip install assurance   # every tool
 ```
 
 ```json
@@ -42,71 +27,60 @@ pip install assurance-mcp
 }
 ```
 
-**`--root` is the boundary, and you set it — not the model.** The folder tools read only inside the
-folders named there (repeat `--root` for more than one, or set `ASSURANCE_MCP_ROOTS`). With none, they
-refuse and say which line to add; the two set-coverage tools need no folder and work regardless. A
-filesystem root (`/`, `C:\`) is refused even when granted. On Windows write the path as
-`"C:\\Users\\you\\reports"`.
+`--root` is required for folder tools (repeat for more roots, or set `ASSURANCE_MCP_ROOTS`). A filesystem root (`/`, `C:\`) is refused. Restart the client after editing the config.
 
-The working directory is deliberately not a default: clients launch servers from wherever the client
-started, which can be `/`. MCP roots are not used either — the 2026-07-28 specification deprecates
-them in favour of exactly this, server configuration.
+## Quick start
 
-Cursor (`~/.cursor/mcp.json`), Claude Desktop, or any MCP client. Restart it, and you get four tools.
-
-## The one that fits your problem
-
-`check_set_coverage_tool` takes two lists the agent already holds. **No folder, no filesystem.**
+Five tools. Real output from `check_set_coverage` (no folder needed):
 
 ```
-You:    Before you answer, check what you retrieved against what the question spans.
-
-Agent:  check_set_coverage_tool(
-          expected = ["msa.md", "amendment-1.md", "amendment-2.md", "amendment-3.md"],
-          found    = ["msa.md", "amendment-1.md", "globex/msa.md"],
-          scope    = "documents this question spans",
-          where    = "the retrieved set")
-
-        → complete: false · read 2 of 4
-          "2 of 4 documents this question spans — not in the retrieved set:
-           amendment-2.md, amendment-3.md"
-          unexpected: ["globex/msa.md"]
-
-Agent:  I've read 2 of the 4 documents this question spans. Amendment 2 and 3 weren't retrieved and
-        the terms may have changed in them, so I shouldn't answer yet. I also pulled in a Globex
-        document, which I've discarded.
+complete: false · read 2 of 4
+"2 of 4 documents this question spans — not in the retrieved set: amendment-2.md, amendment-3.md"
+unexpected: ["globex/msa.md"]
 ```
 
-That's a sentence no agent produces on its own, and it's the one that stops a wrong answer.
+That is what this call returns:
 
-**Use it for:** retrieved chunks vs. documents the question spans · files reviewed vs.
-`git diff --name-only` · controls with evidence vs. controls in scope · partitions loaded vs.
-declared · eval cases run vs. declared.
+```python
+from assurance_mcp.checks import check_set_coverage
 
-## All four tools
+result = check_set_coverage(
+    expected=["msa.md", "amendment-1.md", "amendment-2.md", "amendment-3.md"],
+    found=["msa.md", "amendment-1.md", "globex/msa.md"],
+    scope="documents this question spans",
+    where="the retrieved set",
+)
+assert result["complete"] is False
+assert result["read"] == 2
+assert "amendment-2.md" in result["summary"]
+```
 
-| | answers | needs a folder |
+## What it checks
+
+| tool | answers | needs `--root` |
 |---|---|---|
-| `check_set_coverage_tool` | did the run cover everything, over **any two sets**? | **no** |
-| `check_coverage_tool` | which periods are in this folder, and which aren't? | yes |
-| `check_staleness_tool` | do a document's figures still match a source **you name**? | yes |
+| `check_set_coverage_tool` | did any two sets cover each other? | no |
+| `check_retrieval_coverage_tool` | did retrieval hit every document the question spans? | no |
+| `check_coverage_tool` | which periods are in this folder? | yes |
+| `check_staleness_tool` | do figures still match a source you name? | yes |
 | `list_dated_files_tool` | which periods does this folder hold? | yes |
 
-`check_coverage_tool` handles monthly, quarterly, weekly, daily and numbered runs (`INV-0001`,
-`run_042`), and returns the **derivation** with the ratio so the agent can surface a denominator you
-can argue with. Works from a cold start: no state, no database, no key.
+## In CI
 
-## Honest limits
+The MCP server itself is not a CI gate. Use `assurance check` / `assurance diff` from `assurance-cli` for exit codes:
 
-- **`expected` is never inferred.** A denominator the tool invents is one nobody can argue with
-- **CSV and TSV only** for profiling — no XLSX dependency here
-- **Staleness needs recorded facts**, or the answer is `uncheckable` — never silence
-- **No cross-document inference.** It produced 21 false positives on a real corpus, so it's refused
-- **You name the folder boundary in the config**, not the model; paths can't escape it via `..` or a symlink
+| exit | means |
+|---|---|
+| `0` | checked clean (or not asked to fail) |
+| `1` | gap or unverifiable |
+| `2` | could not run |
 
-## Family
+## Limits
 
-[assurance-core](https://pypi.org/project/assurance-core/) — the pure arithmetic, zero dependencies ·
-[assurance-cli](https://pypi.org/project/assurance-cli/) — the same checks as a command
+- **`expected` is never inferred.** You name the denominator.
+- **CSV/TSV only** for profiling — no XLSX dependency here.
+- **Staleness needs recorded facts**, or the answer is `uncheckable`.
+- **No writes, no network.** A model cannot widen `--root`.
+- Folder tools refuse until `--root` (or `ASSURANCE_MCP_ROOTS`) is set.
 
-Part of [I-Ops](https://i-ops.dev), and developed in this repository. Apache-2.0.
+See the [root README](https://github.com/i-ops-hq/assurance#readme) and [CHANGELOG.md](CHANGELOG.md).

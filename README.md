@@ -29,9 +29,9 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 
   Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
   Edited without reading it first: src/billing/rates.py
-  After the last edit (14:09): no test or check command ran
+  After the last edit (07:09): no test or check command ran
   Not classified: 2 shell commands, so whether they read, wrote or tested anything is unknown.
-  Also in the transcript: 1 assistant turns, 1 user turns, 1 bookkeeping records.
+  Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
   Not read: 0 lines.
 ```
 
