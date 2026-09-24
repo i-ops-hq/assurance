@@ -134,6 +134,14 @@ def test_classify_new_table_entries() -> None:
     assert classify_bash("pip install requests") == "write"
 
 
+def test_condition_tests_and_checksums_found_in_a_real_session() -> None:
+    # From a real 7-hour session: polling loops test `[ $s != WAIT ]`, and release checks hash files.
+    assert classify_bash('for i in 1 2; do s=x; [ "$s" != WAIT ] && break; sleep 1; done') == "read"
+    assert classify_bash("sha256sum mcpp.tgz") == "read"
+    assert classify_bash("git ls-remote origin 2>&1") == "read"
+    assert classify_bash("ps aux | grep python") == "read"
+
+
 def test_neutral_segments_do_not_unclassify() -> None:
     assert classify_bash("cd src") == "read"  # neutral-only → not unclassified
     assert classify_bash("true") == "read"

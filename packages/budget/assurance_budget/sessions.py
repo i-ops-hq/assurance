@@ -44,6 +44,9 @@ _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
 _NEUTRAL_COMMANDS = frozenset(
     {
         "cd",
+        "[",
+        "[[",
+        "test",
         "pushd",
         "popd",
         "export",
@@ -202,6 +205,7 @@ _READ_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("git", "diff"),
     ("git", "show"),
     ("git", "rev-parse"),
+    ("git", "ls-remote"),
     ("git", "remote"),
     ("git", "ls-files"),
     ("git", "blame"),
@@ -248,6 +252,10 @@ _READ_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("realpath",),
     ("dirname",),
     ("basename",),
+    ("sha256sum",),
+    ("shasum",),
+    ("md5sum",),
+    ("ps",),
 )
 
 _HEREDOC_OP = re.compile(
@@ -1117,8 +1125,9 @@ def _normalise_argv(tokens: list[str]) -> list[str] | None:
     """Drop assignments, wrappers and runners; basename argv[0]. None → assignment-only (neutral)."""
     argv = list(tokens)
     _drop_paren_tokens(argv)
-    # Drop leading VAR=value.
-    while argv and _is_assignment(argv[0]):
+    # Drop leading control words and VAR=value, in any order: `do s=$(…)` is an assignment inside
+    # a loop body, not a command named `s=…`.
+    while argv and (argv[0] in _LEADING_CONTROL or _is_assignment(argv[0])):
         argv = argv[1:]
     if not argv:
         return None

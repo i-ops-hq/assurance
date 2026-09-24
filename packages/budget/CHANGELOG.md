@@ -14,6 +14,9 @@
   install` / `uv sync` and similar count as classified writes. `--json` gains `bash_kinds` with
   `test` / `check` / `read` / `write` / `unclassified` so the split is visible. `python -c`,
   `curl`, `make lint-fix`, and project binaries stay honestly unclassified.
+- **Loop bodies and condition tests.** `do s=$(…)` is an assignment inside a loop, and
+  `[ … ]` / `test` are conditions; neither leaves a command unclassified. `sha256sum`, `ps` and
+  `git ls-remote` are reads.
 - **`assurance audit` classifies real shell commands.** Heredoc bodies are stripped before
   parsing; segments split only outside quotes; `TZ=UTC pytest`, `/path/to/venv/bin/python -m pytest`,
   `cd x && uv run pytest`, and `timeout N` / `uv run` / `poetry run` wrappers count as tests. Neutral
