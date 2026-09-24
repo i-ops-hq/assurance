@@ -923,5 +923,6 @@ def test_check_skips_tool_directories_and_names_them(tmp_path: Path, capsys) -> 
     out = capsys.readouterr().out
     assert code == 0
     assert "3 of 4 months" in out
-    assert ".git/" in out and "skipped" in out
-    assert "node_modules/" in out
+    assert "2 directories skipped" in out
+    assert ".git" in out and "node_modules" in out
+    assert "files not opened (.git" not in out

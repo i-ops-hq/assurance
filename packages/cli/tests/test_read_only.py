@@ -59,4 +59,6 @@ def test_an_unreadable_directory_is_named_not_fatal(tmp_path, monkeypatch) -> No
     result = check_coverage(str(root))
 
     assert result["summary"].startswith("3 of 3 months")
-    assert any("locked/" in name for name in result["not_opened"]["names"]), result["not_opened"]
+    assert any(
+        "locked" in name for name in result["not_opened"]["directory_names"]
+    ), result["not_opened"]

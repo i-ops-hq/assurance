@@ -1,3 +1,10 @@
+# Unreleased
+
+- **Skipped directories are not files.** `assurance check` reports them as
+  `N directories skipped (.git, node_modules, …)` instead of folding them into
+  `N files not opened`.
+- **`assurance audit`** is forwarded to `assurance-budget` (Claude Code session reader).
+
 # 0.5.13
 
 **First run.** `assurance` with no arguments prints a short start-here screen instead of an argparse

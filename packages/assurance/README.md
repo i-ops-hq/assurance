@@ -13,6 +13,7 @@ pip install assurance        # or, without installing anything:  uvx assurance -
 | `assurance deps` | what will a `pip install` or `npm install` execute, read without executing it? |
 | `assurance budget` | where did an agent run's budget go, and where did it loop going nowhere? |
 | `assurance authority` | may this task proceed for the person who asked? |
+| `assurance audit` | what did a Claude Code session actually do — and what could not be classified? |
 | `assurance drift` | did a failure rate actually shift, or was the week noise? |
 
 Nothing here consults a model, opens the network, or reports a check it could not run as a pass.

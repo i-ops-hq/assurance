@@ -1,5 +1,9 @@
 # Unreleased
 
+- **`assurance audit`** reads a Claude Code session transcript and says what it did — tool calls,
+  failures, loops via `ProgressWatch`, and lines that could not be classified — at the same weight.
+  `assurance audit` with no path finds the latest session for the current directory under
+  `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`).
 - **`--version`** prints `assurance-budget <version>` and exits 0.
 
 # 0.1.4
