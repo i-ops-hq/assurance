@@ -22,9 +22,10 @@ which any caller may pass 1000 to. A limit a caller can raise is a suggestion. U
 real budgets, but they are MONTHLY per-agent action counts: they would not have stopped the 11-day
 loop, because the loop happens inside one run.
 
-So `CEILINGS` is the part that makes this a control. `Budget.allowing()` clamps every field to it, and
-there is no code path that produces a `Budget` above the ceiling. `test_no_caller_can_exceed_the_ceiling`
-is the test that keeps that true.
+So the operator's `Ceilings` are the part that makes this a control. `Budget.allowing()` clamps every
+field to them, and there is no code path that produces a `Budget` above the active ceilings. The
+built-in constants (`MAX_TOOL_CALLS`, …) are the defaults an operator has not overridden —
+`test_no_caller_can_exceed_the_ceiling` is the test that keeps the caller from raising them.
 
 ## Why there is no dollar limit
 
@@ -54,9 +55,10 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-# The absolute maxima. Not defaults — CEILINGS. `Budget.allowing` clamps to these, so no caller,
-# config file, or model-suggested value can produce a budget above them. Raising one of these numbers
-# is a deliberate edit to this file, which is the point.
+# The built-in defaults. Not absolute maxima any more — an operator may raise them via config —
+# but they are the ceilings when nobody has configured anything. `Budget.allowing` clamps every
+# caller-supplied value to the active `Ceilings`, so the agent (the caller) still cannot raise a
+# limit; only the operator who deploys the library can.
 MAX_ITERATIONS = 12
 MAX_TOOL_CALLS = 40
 MAX_FRONTIER_CALLS = 20
@@ -66,6 +68,30 @@ MAX_RETRIES = 3
 # The window `ProgressWatch` looks back over. Three identical rounds is a loop; two is a retry, and
 # retries are legitimate.
 STALL_WINDOW = 3
+
+
+@dataclass(frozen=True)
+class Ceilings:
+    """The limits the operator has set. The agent (the caller) can never raise them."""
+
+    iterations: int = MAX_ITERATIONS
+    tool_calls: int = MAX_TOOL_CALLS
+    frontier_calls: int = MAX_FRONTIER_CALLS
+    seconds: float = MAX_SECONDS
+    retries: int = MAX_RETRIES
+    source: str = "built-in defaults"
+
+
+def built_in_ceilings() -> Ceilings:
+    """The defaults, read from the constants at call time (not baked in at class definition)."""
+    return Ceilings(
+        iterations=MAX_ITERATIONS,
+        tool_calls=MAX_TOOL_CALLS,
+        frontier_calls=MAX_FRONTIER_CALLS,
+        seconds=MAX_SECONDS,
+        retries=MAX_RETRIES,
+        source="built-in defaults",
+    )
 
 
 @dataclass(frozen=True)
@@ -111,8 +137,9 @@ class Budget:
         frontier_calls: int | None = None,
         seconds: float | None = None,
         retries: int | None = None,
+        ceilings: Ceilings | None = None,
     ) -> "Budget":
-        """A budget no larger than the ceilings, whatever was asked for.
+        """A budget no larger than the active ceilings, whatever was asked for.
 
         Clamps rather than raising. A caller asking for 1000 iterations is not committing an error
         worth aborting a user's task over — it is expressing a preference the runtime declines. The
@@ -120,13 +147,18 @@ class Budget:
 
         Lower values pass through: a caller may always be *more* conservative than the ceiling, which
         is how a cheap plan or an untrusted worker gets a tighter leash.
+
+        `ceilings` is what the operator configured. When omitted, the built-in defaults apply. Core
+        never reads files or the environment — callers that want operator config load it themselves
+        and pass the result here.
         """
+        caps = ceilings if ceilings is not None else built_in_ceilings()
         return cls(
-            iterations=int(_clamp(iterations, MAX_ITERATIONS)),
-            tool_calls=int(_clamp(tool_calls, MAX_TOOL_CALLS)),
-            frontier_calls=int(_clamp(frontier_calls, MAX_FRONTIER_CALLS)),
-            seconds=float(_clamp(seconds, MAX_SECONDS)),
-            retries=int(_clamp(retries, MAX_RETRIES)),
+            iterations=int(_clamp(iterations, caps.iterations)),
+            tool_calls=int(_clamp(tool_calls, caps.tool_calls)),
+            frontier_calls=int(_clamp(frontier_calls, caps.frontier_calls)),
+            seconds=float(_clamp(seconds, caps.seconds)),
+            retries=int(_clamp(retries, caps.retries)),
         )
 
 

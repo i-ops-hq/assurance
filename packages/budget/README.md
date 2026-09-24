@@ -103,20 +103,41 @@ that.
 
 ## A limit a caller can raise is a suggestion
 
-The ceilings are constants in the library, and every budget is clamped to them at construction. Ask
-for more and you do not get more:
+The ceilings are set by the **operator** who deploys the library — never by the agent (the caller).
+Built-in defaults live in `assurance-core`; an operator raises them in a config file or environment
+variable. Every budget is clamped to the active ceilings at construction. Ask for more than the
+operator set and you do not get more:
 
 ```bash
 assurance-budget runs.jsonl --tool-calls 5000 --json | grep tool_calls
-#   "tool_calls": 40
+#   "tool_calls": 40          # built-in default, when nothing is configured
 ```
+
+With an operator ceiling of 400 and a flag asking for 300, you get 300 — the caller may always
+tighten, never loosen:
+
+```toml
+# ~/.config/assurance/config.toml  or  <project>/.assurance/config.toml
+[budget]
+tool_calls = 400
+seconds = 3600
+```
+
+```bash
+export ASSURANCE_MAX_TOOL_CALLS=500   # wins over the files, for one key
+assurance-budget runs.jsonl --tool-calls 300 --json | grep tool_calls
+#   "tool_calls": 300
+```
+
+Precedence, lowest to highest: built-in defaults → `~/.config/assurance/config.toml` (Windows:
+`%APPDATA%\assurance\config.toml`) → `<cwd>/.assurance/config.toml` → `ASSURANCE_MAX_*` environment
+variables. Unknown keys and non-positive values are refused with the file and key named. Every report
+that applies a limit names where it came from.
 
 It clamps rather than erroring, on purpose. A caller asking for 5000 is expressing a preference the
 runtime declines — that is not a reason to abort somebody's task. Lower values pass straight through,
 because a caller may always be *more* conservative: that is how a cheap plan or an untrusted worker
 gets a shorter leash.
-
-Raising a ceiling is a deliberate edit to a source file, which is the point.
 
 ## The log
 

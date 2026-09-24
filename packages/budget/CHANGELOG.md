@@ -1,5 +1,11 @@
 # Unreleased
 
+- **Operator-set ceilings.** Built-in defaults stay in `assurance-core`; an operator raises them via
+  `~/.config/assurance/config.toml`, `<cwd>/.assurance/config.toml`, or `ASSURANCE_MAX_*` env vars.
+  The agent (the caller) still cannot raise a limit — `Budget.allowing` clamps to the active
+  `Ceilings`. `assurance audit` reports overages only when a config or env var set a limit.
+- **Wording:** `Not read: 1 line.` (singular); at zero unclassified commands,
+  `Every shell command was classified.`
 - **`assurance audit` classifies the transcript.** Assistant text/thinking turns, user turns
   (including list-of-text content), and named bookkeeping record types are counted separately;
   `Not read:` is only for lines that still could not be classified — and the line is always printed,
