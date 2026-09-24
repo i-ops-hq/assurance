@@ -1,0 +1,766 @@
+"""Real-session audit fixes: shell classify, Write→Edit, limits path, cwd clock, not_read, duration."""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+
+import pytest
+
+from assurance_budget.session_cli import _duration_phrase, main
+from assurance_budget.sessions import (
+    after_last_edit,
+    bash_kinds_count,
+    bash_test_label,
+    changed_limits_file,
+    classify_bash,
+    edited_without_read,
+    read_claude_code,
+    split_shell_segments,
+    strip_heredoc_bodies,
+    unclassified_bash_count,
+)
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+REALISTIC = FIXTURES / "realistic-session.jsonl"
+
+# Pinned full text output of `TZ=UTC assurance audit` on the realistic fixture.
+# Regenerate with: TZ=UTC assurance audit packages/budget/tests/fixtures/realistic-session.jsonl
+EXPECTED_REALISTIC_AUDIT = """\
+Claude Code session a1b2c3d4 — 1h 5 min in /workspace/demo-app
+82 tool calls, 1 failed — Bash 74, Edit 5, Read 2, Write 1
+
+  After the last edit (11:05): 3 test runs (pytest -q tests/, python -m pytest tests/test_app.py -q, pytest -q), 0 checks
+  Not classified: 2 shell commands, so whether they read, wrote or tested anything is unknown.
+  This session changed .assurance/config.toml — the limits file for this project.
+  Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
+  Not read: 3 lines — type=progress 2, assistant block server_tool_use 1.\
+"""
+
+
+def _line(**fields: object) -> str:
+    return json.dumps(fields)
+
+
+def _tool_use(tool_id: str, name: str, **inp: object) -> dict[str, object]:
+    return {"type": "tool_use", "id": tool_id, "name": name, "input": inp}
+
+
+def _tool_result(tool_id: str, content: object, *, is_error: bool = False) -> dict[str, object]:
+    return {
+        "type": "tool_result",
+        "tool_use_id": tool_id,
+        "content": content,
+        "is_error": is_error,
+    }
+
+
+def _assistant(session: str, cwd: str, blocks: list[dict[str, object]], ts: str) -> str:
+    return _line(
+        type="assistant",
+        sessionId=session,
+        timestamp=ts,
+        cwd=cwd,
+        message={"role": "assistant", "content": blocks},
+    )
+
+
+def _user(session: str, cwd: str, content: object, ts: str) -> str:
+    return _line(
+        type="user",
+        sessionId=session,
+        timestamp=ts,
+        cwd=cwd,
+        message={"role": "user", "content": content},
+    )
+
+
+# ---------------------------------------------------------------------------
+# §1 Shell classification
+# ---------------------------------------------------------------------------
+
+
+def test_classify_venv_path_and_env_assignment_pytest() -> None:
+    assert classify_bash("/tmp/x/venv/bin/python -m pytest -q") == "test"
+    assert classify_bash("TZ=UTC pytest -q") == "test"
+    assert classify_bash("cd pkg && uv run pytest -q") == "test"
+    assert classify_bash("timeout 600 pytest") == "test"
+    assert classify_bash("nice -n 10 pytest") == "test"
+
+
+def test_classify_for_loop_and_quoted_pipe() -> None:
+    assert classify_bash("for f in a b; do pytest tests/$f.py; done") == "test"
+    # A | inside quotes must not split the command — and python -c stays unclassified.
+    assert classify_bash('python -c "print(1|2)"') == "unclassified"
+
+
+def test_classify_heredoc_body_is_not_commands() -> None:
+    cmd = "cat > notes.md <<'EOF'\necho should_not_be_a_command\npytest\nEOF"
+    stripped = strip_heredoc_bodies(cmd)
+    assert "echo should_not_be_a_command" not in stripped
+    assert "pytest" not in stripped
+    # Body's pytest must not make this a test; `cat > notes.md` wrote a file.
+    assert classify_bash(cmd) == "write"
+    # A write tool with only a heredoc body mentioning pytest stays honest.
+    assert classify_bash("tee out <<'EOF'\npytest -q\nEOF") != "test"
+
+
+def test_classify_new_table_entries() -> None:
+    assert classify_bash("make test") == "test"
+    assert classify_bash("make check") == "test"
+    assert classify_bash("bun test") == "test"
+    assert classify_bash("python -m unittest") == "test"
+    assert classify_bash("pnpm run test") == "test"
+    assert classify_bash("npm run typecheck") == "check"
+    assert classify_bash("python -m mypy .") == "check"
+    assert classify_bash("black --check .") == "check"
+    assert classify_bash("pnpm lint") == "check"
+    assert classify_bash("git branch") == "read"
+    assert classify_bash("git rev-parse HEAD") == "read"
+    assert classify_bash("sed -n '1,5p' a.py") == "read"
+    assert classify_bash("awk '{print}' a.py") == "read"
+    assert classify_bash("pip list") == "read"
+    assert classify_bash("python --version") == "read"
+    assert classify_bash("env") == "read"
+    # Still unclassified on purpose
+    assert classify_bash("curl http://example.com") == "unclassified"
+    assert classify_bash("python -c \"print(1)\"") == "unclassified"
+    # Known state changes are write, not unclassified
+    assert classify_bash("git commit -m x") == "write"
+    assert classify_bash("rm -rf build") == "write"
+    assert classify_bash("mkdir -p build") == "write"
+    assert classify_bash("pip install requests") == "write"
+
+
+def test_condition_tests_and_checksums_found_in_a_real_session() -> None:
+    # From a real 7-hour session: polling loops test `[ $s != WAIT ]`, and release checks hash files.
+    assert classify_bash('for i in 1 2; do s=x; [ "$s" != WAIT ] && break; sleep 1; done') == "read"
+    assert classify_bash("sha256sum mcpp.tgz") == "read"
+    assert classify_bash("git ls-remote origin 2>&1") == "read"
+    assert classify_bash("ps aux | grep python") == "read"
+
+
+def test_neutral_segments_do_not_unclassify() -> None:
+    assert classify_bash("cd src") == "read"  # neutral-only → not unclassified
+    assert classify_bash("true") == "read"
+    assert classify_bash("export FOO=1") == "read"
+    assert classify_bash("cd x && rm -rf y") == "write"  # rm is a known write
+
+
+def test_test_label_from_heredoc_then_pytest() -> None:
+    cmd = "python3 - <<'EOF'\nimport re\np=1\nEOF\n&& /tmp/v/bin/python -m pytest -q"
+    label = bash_test_label(cmd)
+    assert label == "python -m pytest -q"
+    assert "\n" not in label
+    assert classify_bash(cmd) == "test"
+
+
+def test_test_label_strips_env_and_venv_path() -> None:
+    assert bash_test_label("TZ=UTC /x/venv/bin/python -m pytest -q") == "python -m pytest -q"
+
+
+def test_test_label_truncates_at_60() -> None:
+    long_cmd = "pytest " + "a" * 80
+    label = bash_test_label(long_cmd)
+    assert len(label) == 60
+    assert label.endswith("…")
+
+
+def test_after_last_edit_groups_by_label_keeps_full_command(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    heredoc_then_pytest = (
+        "python3 - <<'EOF'\nprint(1)\nEOF\n&& /tmp/v/bin/python -m pytest -q"
+    )
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="a.py", old_string="a", new_string="b")],
+                    "2026-09-24T10:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T10:00:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("t1", "Bash", command=heredoc_then_pytest)],
+                    "2026-09-24T10:01:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("t1", "ok")], "2026-09-24T10:01:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("t2", "Bash", command="TZ=UTC /tmp/v/bin/python -m pytest -q")],
+                    "2026-09-24T10:02:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("t2", "ok")], "2026-09-24T10:02:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    after = after_last_edit(read_claude_code(path))
+    assert after is not None
+    assert after["tests"] == 2
+    assert after["test_labels"] == ["python -m pytest -q ×2"]
+    assert after["test_runs"][0]["command"] == heredoc_then_pytest
+    assert after["test_runs"][0]["label"] == "python -m pytest -q"
+    assert "\n" not in after["test_runs"][0]["label"]
+
+
+def test_quote_aware_tokenize_multiline_and_apostrophe() -> None:
+    # Spanning two real lines — classified, not a parse error.
+    assert classify_bash('python3 -c "import json\nprint(1)" | head') == "unclassified"
+    segs = split_shell_segments('python3 -c "import json\nprint(1)" | head')
+    assert segs == [["python3", "-c", "import json\nprint(1)"], ["head"]]
+    assert classify_bash('grep -n "it\'s here" f.txt') == "read"
+    assert classify_bash("grep -n \"it's here\" f.txt") == "read"
+    assert classify_bash('echo "a|b" | wc -l') == "read"
+    assert classify_bash("pytest -q 2>&1") == "test"
+    assert bash_test_label("pytest -q 2>&1") == "pytest -q"
+
+
+def test_write_kind_known_state_changes() -> None:
+    assert classify_bash("git add .") == "write"
+    assert classify_bash("git push origin HEAD") == "write"
+    assert classify_bash("git stash") == "write"
+    assert classify_bash("git stash list") == "read"
+    assert classify_bash("git tag") == "read"
+    assert classify_bash("git tag v1") == "write"
+    assert classify_bash("git branch") == "read"
+    assert classify_bash("git branch -a") == "read"
+    assert classify_bash("git branch -d old") == "write"
+    assert classify_bash("git branch feature") == "write"
+    assert classify_bash("uv sync") == "write"
+    assert classify_bash("uv add rich") == "write"
+    assert classify_bash("python -m pip install x") == "write"
+    assert classify_bash("python -m venv .venv") == "write"
+    assert classify_bash("npm install") == "write"
+    assert classify_bash("cargo add serde") == "write"
+    assert classify_bash("go get ./...") == "write"
+    assert classify_bash("tee out.txt") == "write"
+    assert classify_bash("sed -i 's/a/b/' f") == "write"
+    assert classify_bash("printf hi") == "read"
+    assert classify_bash("uvx --from ruff ruff check .") == "check"
+    # Still unclassified
+    assert classify_bash("python scripts/regen_fixtures.py") == "unclassified"
+    assert classify_bash("make lint-fix") == "unclassified"
+    assert classify_bash("docker build .") == "unclassified"
+
+
+def test_bash_kinds_json_split(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("b1", "Bash", command="pytest -q")],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("b1", "ok")], "2026-09-24T01:00:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("b2", "Bash", command="mkdir x")],
+                    "2026-09-24T01:00:02.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("b2", "ok")], "2026-09-24T01:00:03.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("b3", "Bash", command="python -c '1'")],
+                    "2026-09-24T01:00:04.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("b3", "ok")], "2026-09-24T01:00:05.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert bash_kinds_count(session) == {
+        "test": 1,
+        "check": 0,
+        "read": 0,
+        "write": 1,
+        "unclassified": 1,
+    }
+    assert main([str(path), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["bash_kinds"]["write"] == 1
+    assert payload["bash_kinds"]["unclassified"] == 1
+    assert payload["unclassified_commands"] == 1
+
+
+def test_realistic_fixture_unclassified_at_most_25_percent() -> None:
+    session = read_claude_code(REALISTIC)
+    bash_n = sum(1 for c in session.tool_calls if c.name == "Bash")
+    u = unclassified_bash_count(session)
+    assert bash_n > 0
+    assert u / bash_n <= 0.25, f"{u}/{bash_n} = {100 * u / bash_n:.1f}%"
+
+
+# ---------------------------------------------------------------------------
+# §2 Write then Edit / failed Edit
+# ---------------------------------------------------------------------------
+
+
+def test_write_then_edit_is_not_edited_without_read(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("w1", "Write", file_path="a.md", content="# hi")],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("w1", "ok")], "2026-09-24T01:00:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="a.md", old_string="hi", new_string="yo")],
+                    "2026-09-24T01:00:02.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T01:00:03.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert edited_without_read(read_claude_code(path)) == []
+
+
+def test_failed_edit_without_read_is_not_reported(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="b.py", old_string="a", new_string="b")],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user(
+                    "abc",
+                    cwd,
+                    [_tool_result("e1", "ENOENT", is_error=True)],
+                    "2026-09-24T01:00:01.000Z",
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert edited_without_read(read_claude_code(path)) == []
+
+
+def test_edit_without_read_or_write_is_still_reported(tmp_path: Path) -> None:
+    """Counterfactual for §2: a successful Edit with no prior Read/Write still reports."""
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="c.py", old_string="a", new_string="b")],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T01:00:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert edited_without_read(read_claude_code(path)) == ["c.py"]
+
+
+# ---------------------------------------------------------------------------
+# §3 Limits file — only real writes to the project file
+# ---------------------------------------------------------------------------
+
+
+def _bash_session(tmp_path: Path, command: str) -> Path:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("b1", "Bash", command=command)],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("b1", "ok")], "2026-09-24T01:00:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_heredoc_mentioning_limits_file_is_not_a_change(tmp_path: Path) -> None:
+    cmd = "cat > notes.md <<'EOF'\nSee .assurance/config.toml here.\nEOF"
+    assert changed_limits_file(read_claude_code(_bash_session(tmp_path, cmd))) is False
+
+
+def test_cd_via_variable_then_write_limits_is_not_this_project(tmp_path: Path) -> None:
+    cmd = "W=/tmp/x; cd $W && echo '[budget]' > .assurance/config.toml"
+    assert changed_limits_file(read_claude_code(_bash_session(tmp_path, cmd))) is False
+
+
+def test_echo_redirect_to_limits_file_counts(tmp_path: Path) -> None:
+    assert (
+        changed_limits_file(
+            read_claude_code(_bash_session(tmp_path, "echo '[budget]' > .assurance/config.toml"))
+        )
+        is True
+    )
+
+
+def test_tee_to_limits_file_counts(tmp_path: Path) -> None:
+    assert (
+        changed_limits_file(
+            read_claude_code(_bash_session(tmp_path, "printf x | tee ./.assurance/config.toml"))
+        )
+        is True
+    )
+
+
+def test_sed_i_limits_file_counts(tmp_path: Path) -> None:
+    assert (
+        changed_limits_file(
+            read_claude_code(
+                _bash_session(tmp_path, "sed -i 's/400/9999/' .assurance/config.toml")
+            )
+        )
+        is True
+    )
+
+
+def test_cp_to_absolute_limits_file_counts(tmp_path: Path) -> None:
+    dest = str(tmp_path / ".assurance" / "config.toml")
+    assert (
+        changed_limits_file(read_claude_code(_bash_session(tmp_path, f"cp /tmp/c.toml {dest}")))
+        is True
+    )
+
+
+# ---------------------------------------------------------------------------
+# §4 After last edit — only in-cwd edits
+# ---------------------------------------------------------------------------
+
+
+def test_scratch_edit_outside_cwd_does_not_restart_clock(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("e1", "Edit", file_path="src/a.py", old_string="a", new_string="b")],
+                    "2026-09-24T10:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T10:00:01.000Z"),
+                _assistant(
+                    "abc",
+                    cwd,
+                    [_tool_use("t1", "Bash", command="pytest -q")],
+                    "2026-09-24T10:01:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("t1", "ok")], "2026-09-24T10:01:01.000Z"),
+                # Scratch edit AFTER the test — must not clear the verified state / restart clock
+                _assistant(
+                    "abc",
+                    cwd,
+                    [
+                        _tool_use(
+                            "e2",
+                            "Edit",
+                            file_path="/tmp/scratch/notes.md",
+                            old_string="x",
+                            new_string="y",
+                        )
+                    ],
+                    "2026-09-24T10:02:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e2", "ok")], "2026-09-24T10:02:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    after = after_last_edit(read_claude_code(path))
+    assert after is not None
+    assert after["outside_cwd_edits"] == 1
+    # Last in-cwd edit is e1; pytest ran after it.
+    assert after["tests"] == 1
+    assert after["checks"] == 0
+
+
+def test_only_outside_cwd_edits_prints_no_after_line(tmp_path: Path, capsys) -> None:
+    cwd = str(tmp_path)
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    cwd,
+                    [
+                        _tool_use(
+                            "e1",
+                            "Edit",
+                            file_path="/tmp/scratch/notes.md",
+                            old_string="x",
+                            new_string="y",
+                        )
+                    ],
+                    "2026-09-24T10:00:00.000Z",
+                ),
+                _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T10:00:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert after_last_edit(read_claude_code(path)) is None
+    assert main([str(path)]) == 0
+    assert "After the last edit" not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# §5 Not-read reasons
+# ---------------------------------------------------------------------------
+
+
+def test_not_read_reasons_are_counted(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _line(type="progress", sessionId="abc", data={}),
+                _line(type="progress", sessionId="abc", data={}),
+                _line(
+                    type="assistant",
+                    sessionId="abc",
+                    cwd="/tmp/p",
+                    timestamp="2026-09-24T01:00:00.000Z",
+                    message={
+                        "role": "assistant",
+                        "content": [{"type": "server_tool_use", "name": "x", "input": {}}],
+                    },
+                ),
+                "not-json",
+                _user("abc", "/tmp/p", "hi", "2026-09-24T01:00:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert session.not_read == 4
+    assert session.not_read_reasons["type=progress"] == 2
+    assert session.not_read_reasons["assistant block server_tool_use"] == 1
+    assert session.not_read_reasons["invalid JSON"] == 1
+    assert main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "Not read: 4 lines —" in out
+    assert "type=progress 2" in out
+    assert main([str(path), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["not_read_reasons"]["type=progress"] == 2
+
+
+def test_not_read_zero_stays_exact(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    "/tmp/p",
+                    [_tool_use("t1", "Bash", command="echo hi")],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user("abc", "/tmp/p", [_tool_result("t1", "hi")], "2026-09-24T01:00:01.000Z"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main([str(path)]) == 0
+    assert "Not read: 0 lines." in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# §6 Long durations
+# ---------------------------------------------------------------------------
+
+
+def test_duration_spanning_days() -> None:
+    assert _duration_phrase(20 * 86400) == "spanning 20 days"
+    assert _duration_phrase(489 * 3600 + 36 * 60) == "spanning 20 days"
+    assert _duration_phrase(27 * 3600) == "spanning 1 day 3h"
+    assert _duration_phrase(13 * 60) == "13 min"
+    assert _duration_phrase(45.0) == "45s"
+
+
+# ---------------------------------------------------------------------------
+# §7 Realistic fixture — full pinned output
+# ---------------------------------------------------------------------------
+
+
+def test_realistic_fixture_audit_output_pinned(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TZ", "UTC")
+    if hasattr(time, "tzset"):
+        time.tzset()
+    else:
+        pytest.skip("cannot pin the timezone on this platform")
+    assert main([str(REALISTIC)]) == 0
+    printed = capsys.readouterr().out.strip()
+    assert printed == EXPECTED_REALISTIC_AUDIT.strip()
+
+
+# ---------------------------------------------------------------------------
+# Found on a real 20-day session and a real 7-hour one (review of #72)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "kind"),
+    [
+        # Quoted pieces and substitutions are part of the word they touch.
+        ("git log --format='%H' -1", "read"),
+        ("X=$(ps aux | awk '{print $NF}') && echo $X", "read"),
+        # The commands inside a substitution ran, and count.
+        ("sha=$(git rev-parse origin/main)", "read"),
+        ("X=$(curl -s https://example.com)", "unclassified"),
+        ('echo "result: $(python -m pytest -q)"', "test"),
+        ("for f in $(ls); do cat $f; done", "read"),
+        ("echo `date`", "read"),
+        # Single quotes are literal, and $(( )) is arithmetic, not a command.
+        ("echo 'lit $(rm -rf /)'", "read"),
+        ("echo $((1+2))", "read"),
+        # git options before the subcommand, and more git reads.
+        ("git -C repo status", "read"),
+        ("git --no-pager log -1", "read"),
+        ("git -C repo commit -m x", "write"),
+        ("git grep TODO", "read"),
+        # sed without -i only prints.
+        ("sed 's/x/y/' f.txt", "read"),
+        ("sed -i '' 's/x/y/' f.txt", "write"),
+        # gh: views read, verbs that change something write, api by method.
+        ("gh pr view 3", "read"),
+        ("gh run list", "read"),
+        ("gh pr merge 3 --squash", "write"),
+        ("gh api repos/o/r/pulls", "read"),
+        ("gh api -X POST repos/o/r/issues", "write"),
+        ("gh api repos/o/r/issues -f title=x", "write"),
+        # Processes.
+        ("pgrep -f server", "read"),
+        ("pkill -f server", "write"),
+        # Output redirected to a file is a write; to /dev/null it is not.
+        ("cat a.txt > b.txt", "write"),
+        ("echo done >> log.txt", "write"),
+        ("ls missing 2>/dev/null", "read"),
+        ("grep x f &>/dev/null", "read"),
+        ("python -m pytest -q > out.txt", "test"),
+    ],
+)
+def test_real_session_command_shapes(command: str, kind: str) -> None:
+    assert classify_bash(command) == kind
+
+
+def _attachment(session: str, cwd: str, kind: str, filename: str, ts: str) -> str:
+    return _line(
+        type="attachment",
+        sessionId=session,
+        timestamp=ts,
+        cwd=cwd,
+        attachment={"type": kind, "filename": filename},
+    )
+
+
+def _edit_session(tmp_path: Path, attachment_first: bool) -> Path:
+    cwd = str(tmp_path)
+    edit = [
+        _assistant(
+            "abc",
+            cwd,
+            [_tool_use("e1", "Edit", file_path=f"{cwd}/src/app.py", old_string="a", new_string="b")],
+            "2026-09-24T01:00:02.000Z",
+        ),
+        _user("abc", cwd, [_tool_result("e1", "ok")], "2026-09-24T01:00:03.000Z"),
+    ]
+    attached = [
+        _attachment("abc", cwd, "compact_file_reference", f"{cwd}/src/app.py", "2026-09-24T01:00:01.000Z")
+    ]
+    path = tmp_path / "s.jsonl"
+    lines = attached + edit if attachment_first else edit + attached
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def test_a_file_carried_across_a_compaction_counts_as_read(tmp_path: Path) -> None:
+    # After a compaction Claude Code re-attaches the files it had read; an edit that follows is not
+    # an edit without reading. The same attachment *after* the edit does not excuse it.
+    assert edited_without_read(read_claude_code(_edit_session(tmp_path, attachment_first=True))) == []
+    later = tmp_path / "later"
+    later.mkdir()
+    assert edited_without_read(read_claude_code(_edit_session(later, attachment_first=False))) == [
+        "src/app.py"
+    ]
+
+
+def test_claude_code_sessions_do_not_print_edited_without_reading(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Claude Code refuses an edit to an unread file, so an unseen read is the reader's blind spot,
+    # not the agent's. The text stays quiet; --json still carries it.
+    later = tmp_path / "later"
+    later.mkdir()
+    path = _edit_session(later, attachment_first=False)
+    assert main([str(path)]) == 0
+    assert "Edited without reading" not in capsys.readouterr().out
+    assert main(["--json", str(path)]) == 0
+    assert json.loads(capsys.readouterr().out)["edited_without_read"] == ["src/app.py"]
+
+
+def test_title_link_and_agent_records_are_bookkeeping(tmp_path: Path) -> None:
+    cwd = str(tmp_path)
+    kinds = ["custom-title", "ai-title", "pr-link", "agent-name", "file-history-delta"]
+    path = tmp_path / "s.jsonl"
+    path.write_text(
+        "\n".join(_line(type=k, sessionId="abc", cwd=cwd, timestamp="2026-09-24T01:00:00.000Z") for k in kinds),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert session.not_read == 0
+    assert sum(session.records.values()) == len(kinds)
+
+
+def test_other_kinds_counts_kinds_and_lines_separately(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A real session printed "132 other kinds" for 2 kinds covering 132 lines.
+    cwd = str(tmp_path)
+    counts = {"type=a": 5, "type=b": 4, "type=c": 3, "type=d": 2, "type=e": 1}
+    lines = [_line(type="user", sessionId="abc", cwd=cwd, timestamp="2026-09-24T01:00:00.000Z", message={"role": "user", "content": "hi"})]
+    for name, n in counts.items():
+        lines += [_line(type=name.split("=")[1] + "-unknown", sessionId="abc", cwd=cwd) for _ in range(n)]
+    path = tmp_path / "s.jsonl"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    assert main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "2 other kinds (3 lines)" in out

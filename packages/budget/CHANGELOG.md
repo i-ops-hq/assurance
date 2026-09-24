@@ -1,5 +1,60 @@
 # 0.2.1
 
+- **`assurance audit` shortens test labels and groups by them.** After the last edit, each test
+  run keeps the full raw command under JSON `command` and adds a `label`: the first test segment
+  after wrapper / assignment / runner normalisation, rebuilt with `shlex.join`, truncated to 60
+  characters with an ellipsis. Grouping uses the label, so a heredoc-then-pytest line prints as
+  `python -m pytest -q` rather than the whole heredoc.
+- **Shell commands are tokenized once, quote-aware.** Physical newlines no longer split before
+  quotes are understood, so a multi-line `python3 -c "…"` is classified instead of becoming a
+  parse error. Tokens are never rejoined and re-split — `grep -n "it's here"` stays readable.
+  `2>&1` stays one redirection token and is dropped from classification argv; limits-file write
+  detection still sees `>` / `>>` / `tee` / `sed -i` targets.
+- **Known state changes are `write`, not unclassified.** `mkdir` / `rm` / `git commit` / `pip
+  install` / `uv sync` and similar count as classified writes. `--json` gains `bash_kinds` with
+  `test` / `check` / `read` / `write` / `unclassified` so the split is visible. `python -c`,
+  `curl`, `make lint-fix`, and project binaries stay honestly unclassified.
+- **No "edited without reading" line for Claude Code sessions.** Claude Code refuses to edit a
+  file the model has not read, so an edit with no visible read means the read reached the model some
+  way the transcript reader did not see, never that the agent skipped it. The text output no longer
+  reports it; `--json` keeps `edited_without_read`. Files the harness attaches are now counted as
+  read: an @-mentioned file, a file carried across a compaction (`compact_file_reference`), and a
+  file changed outside the session (`edited_text_file`). On a real 7-hour session that had
+  compacted twice, every edit the old check flagged was explained by one of these.
+- **Words are read the way the shell reads them.** `--format='%H'` and `X=$(git rev-parse HEAD)`
+  are one word each, and the commands inside `$( … )` and backticks are classified too.
+  `$(( … ))` is arithmetic, not a command.
+- **More commands have a known kind:** `git -C dir …` / `git --no-pager …` classify by their
+  subcommand; `git grep` and other inspection subcommands are reads; `sed` without `-i` is a read;
+  `gh` views and lists are reads, `gh` verbs that change something are writes, and `gh api` goes by
+  its method; `pgrep` / `lsof` / `cmp` are reads, `kill` / `pkill` are writes; output redirected to
+  a file (`cat a > b`) is a write.
+- **`custom-title`, `ai-title`, `pr-link`, `agent-name` and `file-history-delta` records are
+  bookkeeping.** A real 20-day session had 1662 lines of them under "Not read".
+- **"N other kinds" counts kinds.** It printed "132 other kinds" for 2 kinds covering 132 lines;
+  it now reads "2 other kinds (132 lines)".
+- **Loop bodies and condition tests.** `do s=$(…)` is an assignment inside a loop, and
+  `[ … ]` / `test` are conditions; neither leaves a command unclassified. `sha256sum`, `ps` and
+  `git ls-remote` are reads.
+- **`assurance audit` classifies real shell commands.** Heredoc bodies are stripped before
+  parsing; segments split only outside quotes; `TZ=UTC pytest`, `/path/to/venv/bin/python -m pytest`,
+  `cd x && uv run pytest`, and `timeout N` / `uv run` / `poetry run` wrappers count as tests. Neutral
+  words (`cd`, `true`, `export`, …) no longer force a command unclassified. New read/check/test
+  entries cover `make test`, `python -m mypy`, `git branch`, `sed -n`, `pip list`, `--version`, and
+  more — while `curl`, `python -c`, and unknown project binaries stay honestly unclassified.
+- **A file the session wrote is not "edited without reading".** A successful `Write` counts as
+  knowing the path; a failed `Edit` changed nothing and is not reported.
+- **Limits-file changes require a real write target.** A heredoc whose *body* mentions
+  `.assurance/config.toml`, or a write after `cd $W` away from the session folder, no longer
+  counts. `>`, `>>`, `tee`, `sed -i`, `cp`/`mv`/`install`, and curl/wget `-o` to this project's
+  file still do.
+- **Scratch edits outside the project do not restart the after-last-edit clock.** Only
+  Edit/Write/MultiEdit/NotebookEdit paths inside the session `cwd` set the last-edit point.
+  JSON adds `outside_cwd_edits`.
+- **`Not read:` names why.** Reasons are counted (`type=progress`, `assistant block …`, …) and the
+  top three print on the text line; JSON carries every reason. `Not read: 0 lines.` is unchanged.
+- **Sessions spanning a day or more say so.** Forty-eight hours or more prints `spanning N days`
+  instead of hundreds of hours; 24–48 hours prints `spanning 1 day Nh`. Under 24 hours is unchanged.
 - **`assurance audit` only reports a change to this project's limits file.** A write to
   `/tmp/…/.assurance/config.toml` was treated as changing the project file because any path ending
   in that name counted. Paths now resolve against the session `cwd` and must be exactly

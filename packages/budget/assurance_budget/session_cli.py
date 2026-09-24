@@ -20,6 +20,7 @@ from assurance_budget.sessions import (
     Session,
     ToolCall,
     after_last_edit,
+    bash_kinds_count,
     changed_limits_file,
     edited_without_read,
     find_latest_session,
@@ -31,6 +32,10 @@ EXIT_OK = 0
 EXIT_GATE = 1
 EXIT_UNREADABLE = 2
 
+
+
+#: Transcript sources whose harness refuses an edit to a file the model has not read.
+_READ_BEFORE_EDIT_ENFORCED = frozenset({"claude-code"})
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -95,9 +100,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     unread_edits = edited_without_read(session)
     after = after_last_edit(session)
     unclassified = unclassified_bash_count(session)
+    bash_kinds = bash_kinds_count(session)
     limits_changed = changed_limits_file(session)
     report = build_report(
-        session, loops, unread_edits, after, unclassified, ceilings, limits_changed=limits_changed
+        session,
+        loops,
+        unread_edits,
+        after,
+        unclassified,
+        ceilings,
+        limits_changed=limits_changed,
+        bash_kinds=bash_kinds,
     )
     if args.as_json:
         print(json.dumps(report, indent=2))
@@ -138,6 +151,7 @@ def build_report(
     ceilings: Ceilings | None = None,
     *,
     limits_changed: bool = False,
+    bash_kinds: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     by_tool = dict(Counter(call.name for call in session.tool_calls))
     failed = sum(1 for call in session.tool_calls if call.error)
@@ -160,6 +174,7 @@ def build_report(
                     "limit": caps.tool_calls,
                     "source": origin,
                 }
+    kinds = bash_kinds if bash_kinds is not None else bash_kinds_count(session)
     payload: dict[str, Any] = {
         "session_id": session.session_id,
         "source": session.source,
@@ -176,10 +191,12 @@ def build_report(
         "user_turns": session.user_turns,
         "records": dict(session.records),
         "not_read": session.not_read,
+        "not_read_reasons": dict(session.not_read_reasons),
         "unmatched_results": session.unmatched_results,
         "edited_without_read": list(unread_edits),
         "after_last_edit": after,
         "unclassified_commands": unclassified,
+        "bash_kinds": kinds,
         "over_configured_limit": over_limit,
         "ceilings_source": None if caps is None or caps.source == "built-in defaults" else caps.source,
         "changed_limits_file": limits_changed,
@@ -226,8 +243,13 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         for loop in loops:
             body.append(_loop_line(loop))
 
+    # Claude Code refuses to edit a file the model has not read, so in its transcripts an edit with
+    # no visible read means the read reached the model some way this reader does not see, not
+    # that the agent skipped it. Printing it would report our blind spot as the agent's fault.
+    # It stays in --json for anyone checking the reader, and prints for sources whose harness
+    # does not enforce the read.
     unread_edits = report.get("edited_without_read") or []
-    if unread_edits:
+    if unread_edits and report.get("source") not in _READ_BEFORE_EDIT_ENFORCED:
         body.append(f"Edited without reading it first: {', '.join(unread_edits)}")
 
     after = report.get("after_last_edit")
@@ -267,8 +289,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         f"{_count_phrase(session.user_turns, 'user turn', 'user turns')}, "
         f"{_count_phrase(bookkeeping, 'bookkeeping record', 'bookkeeping records')}."
     )
-    not_read = session.not_read
-    body.append(f"Not read: {not_read} {'line' if not_read == 1 else 'lines'}.")
+    body.append(_not_read_line(session.not_read, session.not_read_reasons))
 
     if session.unmatched_results == 1:
         body.append("1 tool result matched no tool call.")
@@ -344,9 +365,35 @@ def _short_input(call: ToolCall) -> str:
     return hashlib.sha256(dumped.encode("utf-8")).hexdigest()[:12]
 
 
+def _not_read_line(not_read: int, reasons: dict[str, int] | Any) -> str:
+    """`Not read: 0 lines.` unchanged; otherwise name the top reasons."""
+    if not_read == 0:
+        return "Not read: 0 lines."
+    unit = "line" if not_read == 1 else "lines"
+    counts = dict(reasons or {})
+    if not counts:
+        return f"Not read: {not_read} {unit}."
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    top = ranked[:3]
+    rest = ranked[3:]
+    parts = [f"{name} {count}" for name, count in top]
+    if rest:
+        lines = sum(count for _, count in rest)
+        kinds = "1 other kind" if len(rest) == 1 else f"{len(rest)} other kinds"
+        parts.append(f"{kinds} ({lines} {'line' if lines == 1 else 'lines'})")
+    return f"Not read: {not_read} {unit} — {', '.join(parts)}."
+
+
 def _duration_phrase(seconds: float | None) -> str:
     if seconds is None:
         return ""
+    # Resumed sessions spanning days are not continuous hours of work.
+    if seconds >= 48 * 3600:
+        days = int(seconds // 86400)
+        return f"spanning {days} day" if days == 1 else f"spanning {days} days"
+    if seconds >= 24 * 3600:
+        hours = int((seconds - 86400) // 3600)
+        return f"spanning 1 day {hours}h"
     if seconds < 60:
         return f"{int(seconds)}s"
     minutes = int(round(seconds / 60.0))

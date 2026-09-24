@@ -40,7 +40,6 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 10 tool calls, 3 failed — Bash 6, Edit 2, Grep 1, Read 1
 
   Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
-  Edited without reading it first: src/billing/rates.py
   After the last edit (14:09): no test or check command ran
   Not classified: 2 shell commands, so whether they read, wrote or tested anything is unknown.
   Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
@@ -49,8 +48,7 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 
 What "All done" left out:
 
-- ❌ The tests failed **three times in a row**.
-- ❌ A file was changed **without being read**.
+- ❌ The tests failed **three times in a row**, the same way each time.
 - ❌ **Nothing was tested** after the last edit.
 - ❔ Two commands it **can't vouch for either way**, so it says so. Silence is not a pass.
 
