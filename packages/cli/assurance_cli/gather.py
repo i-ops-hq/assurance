@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from datetime import date
 from pathlib import Path
 from typing import Any, NamedTuple, cast
@@ -627,7 +629,15 @@ def _indexed_files(root: Path) -> _Indexed:
     unread: list[str] = []
     skipped: list[str] = []
     skipped_total = 0
-    for path in sorted(root.rglob("*")):
+    files, unreadable = _walk_files(root)
+    # A directory that could not be listed is a part of the folder nobody looked at. It used to be a
+    # `PermissionError` out of `rglob` that ended the whole check — and over MCP, a tool error that
+    # told the agent nothing (reported 2026-09-24 against `/`). It is named with what was not opened.
+    for name in unreadable:
+        skipped_total += 1
+        if len(skipped) < MAX_UNREAD:
+            skipped.append(name)
+    for path in files:
         if not path.is_file():
             continue
         if path.name == ".assurance.json":
@@ -660,6 +670,30 @@ def _indexed_files(root: Path) -> _Indexed:
         key = point_key(point)
         found.setdefault(key, []).append(path)
     return _Indexed(found, unread[:MAX_UNREAD], skipped, skipped_total)
+
+
+def _walk_files(root: Path) -> tuple[list[Path], list[str]]:
+    """Every file under `root`, sorted, and the directories that could not be listed.
+
+    `os.walk` rather than `Path.rglob`: the same traversal (symlinked directories are not descended
+    into), but an unreadable directory arrives at `onerror` instead of raising out of the iterator.
+    """
+    unreadable: list[str] = []
+
+    def _note(error: OSError) -> None:
+        where = Path(error.filename) if error.filename else root
+        try:
+            label = str(where.relative_to(root))
+        except ValueError:
+            label = str(where)
+        unreadable.append(f"{label}/ (could not be listed)")
+
+    files = [
+        Path(directory) / name
+        for directory, _, names in os.walk(root, onerror=_note)
+        for name in names
+    ]
+    return sorted(files), unreadable
 
 
 def readable_kinds() -> str:

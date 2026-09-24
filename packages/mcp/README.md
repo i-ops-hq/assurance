@@ -20,7 +20,7 @@ it was not given, and neither can a better model.
 
 `check_retrieval_coverage_tool` answers that, in arithmetic, with **no model involved**.
 
-**Read-only by construction.** No writes, no deletes, no network. Proven by
+**Read-only by construction, inside folders you grant.** No writes, no deletes, no network, and a model cannot widen what it may read. Proven by
 `test_the_server_never_writes`: no tool opens a file for writing, and no `requests`, `urllib`,
 `shutil`, `os.remove`, `os.replace` or `symlink_to` call exists in the package.
 
@@ -36,11 +36,21 @@ pip install assurance-mcp
   "mcpServers": {
     "assurance": {
       "command": "/absolute/path/to/.venv/bin/python",
-      "args": ["-m", "assurance_mcp.server"]
+      "args": ["-m", "assurance_mcp.server", "--root", "/absolute/path/to/your/reports"]
     }
   }
 }
 ```
+
+**`--root` is the boundary, and you set it — not the model.** The folder tools read only inside the
+folders named there (repeat `--root` for more than one, or set `ASSURANCE_MCP_ROOTS`). With none, they
+refuse and say which line to add; the two set-coverage tools need no folder and work regardless. A
+filesystem root (`/`, `C:\`) is refused even when granted. On Windows write the path as
+`"C:\\Users\\you\\reports"`.
+
+The working directory is deliberately not a default: clients launch servers from wherever the client
+started, which can be `/`. MCP roots are not used either — the 2026-07-28 specification deprecates
+them in favour of exactly this, server configuration.
 
 Cursor (`~/.cursor/mcp.json`), Claude Desktop, or any MCP client. Restart it, and you get four tools.
 
@@ -92,7 +102,7 @@ can argue with. Works from a cold start: no state, no database, no key.
 - **CSV and TSV only** for profiling — no XLSX dependency here
 - **Staleness needs recorded facts**, or the answer is `uncheckable` — never silence
 - **No cross-document inference.** It produced 21 false positives on a real corpus, so it's refused
-- **The caller names the folder boundary**; paths can't escape it via `..` or a symlink
+- **You name the folder boundary in the config**, not the model; paths can't escape it via `..` or a symlink
 
 ## Family
 

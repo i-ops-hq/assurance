@@ -42,7 +42,7 @@ process, no telemetry. Nothing in this repository phones home, and nothing in it
 |---|---|---|---|
 | `assurance-core` | nothing — pure functions over values you pass in | nothing | never |
 | `assurance-cli` | files in the folder you name; for `pin`, your MCP config (project, `~/.cursor`, Claude Desktop) | two files, each only when you ask: the `.assurance.json` baseline, and a pin snapshot at the path you give `pin` | never itself — but `pin` **starts the stdio servers your MCP config names**, and they may |
-| `assurance-mcp` | files in the folder you name | nothing | stdio to its client only |
+| `assurance-mcp` | files inside the folders granted with `--root` in its config — never a folder the model names outside them | nothing | stdio to its client only |
 | `assurance-deps` | a manifest you name, and archives already on disk | nothing | never |
 | `assurance-budget` | one log file you name | nothing | never |
 | `assurance-authority` | one JSON file you name | nothing | never |
@@ -59,7 +59,8 @@ string in a listing here, not a file anywhere.
 
 ## What we would most like to be told
 
-- **A path escape.** `assurance check` and the MCP server confine themselves to the folder you name.
+- **A path escape.** `assurance check` confines itself to the folder you name, and the MCP server to
+  the folders its config grants — a tool argument cannot widen that.
   A symlink, a `..` segment or an archive member that reaches outside it is the report we most want.
 - **Anything that makes `assurance-deps` execute, import or extract.** See above; that is the
   premise of the package rather than a preference.

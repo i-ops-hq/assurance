@@ -1,4 +1,4 @@
-# Unreleased
+# 0.5.13
 
 **`pin` no longer reports silence as a pass.**
 
@@ -16,6 +16,11 @@
 
 Found 2026-09-24 with a real `.mcp.json` holding a healthy stdio server, an HTTP server and a stale
 command path.
+
+**A directory `check` cannot list is named, not fatal.** The walk used `Path.rglob`, which raised
+`PermissionError` on the first unlistable directory and ended the whole check — over MCP the agent
+was told only "Error executing tool". Now the directory is reported with the files that were not
+opened, and everything readable is still counted.
 
 # 0.5.12
 

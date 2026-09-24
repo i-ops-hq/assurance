@@ -31,7 +31,7 @@ def test_mcp_stdio_check_coverage(monthly_folder: Path):
 
         params = StdioServerParameters(
             command=sys.executable,
-            args=["-m", "assurance_mcp.server"],
+            args=["-m", "assurance_mcp.server", "--root", str(monthly_folder)],
             env=None,
         )
         async with stdio_client(params) as (read, write):
