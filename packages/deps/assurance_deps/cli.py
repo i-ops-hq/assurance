@@ -8,6 +8,7 @@ read, which includes the case where the report is mostly about what could not be
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import sys
 from pathlib import Path
 
@@ -25,6 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Read what an install is about to execute, and name what could not be read. "
             "Offline: no network, no advisory database, and nothing in the packages is run."
         ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {importlib.metadata.version('assurance-deps')}",
     )
     parser.add_argument(
         "manifest",

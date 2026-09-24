@@ -1,3 +1,7 @@
+# Unreleased
+
+- **`--version`** prints `assurance-authority <version>` and exits 0.
+
 # 0.1.3
 
 - **`--example` runs the whole thing with no file at all.** This package needed a declaration of

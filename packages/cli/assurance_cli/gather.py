@@ -673,10 +673,13 @@ def _indexed_files(root: Path) -> _Indexed:
 
 
 def _walk_files(root: Path) -> tuple[list[Path], list[str]]:
-    """Every file under `root`, sorted, and the directories that could not be listed.
+    """Every file under `root`, sorted, and the directories that could not be listed or were skipped.
 
     `os.walk` rather than `Path.rglob`: the same traversal (symlinked directories are not descended
     into), but an unreadable directory arrives at `onerror` instead of raising out of the iterator.
+
+    Tool directories (`.git`, `node_modules`, `__pycache__`, …, and any other name starting with `.`)
+    are pruned from the walk and named as skipped — what was not looked at is always said.
     """
     unreadable: list[str] = []
 
@@ -688,12 +691,35 @@ def _walk_files(root: Path) -> tuple[list[Path], list[str]]:
             label = str(where)
         unreadable.append(f"{label}/ (could not be listed)")
 
-    files = [
-        Path(directory) / name
-        for directory, _, names in os.walk(root, onerror=_note)
-        for name in names
-    ]
+    files: list[Path] = []
+    for directory, dirnames, names in os.walk(root, onerror=_note):
+        kept: list[str] = []
+        for name in dirnames:
+            if name in _PRUNE_DIR_NAMES or name.startswith("."):
+                where = Path(directory) / name
+                try:
+                    label = str(where.relative_to(root))
+                except ValueError:
+                    label = str(where)
+                unreadable.append(f"{label}/ (skipped)")
+            else:
+                kept.append(name)
+        dirnames[:] = kept
+        files.extend(Path(directory) / name for name in names)
     return sorted(files), unreadable
+
+
+#: Directories `check` never enters. Names starting with `.` are pruned too, even when not listed.
+_PRUNE_DIR_NAMES = frozenset({
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+})
 
 
 def readable_kinds() -> str:

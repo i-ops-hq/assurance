@@ -8,6 +8,7 @@ demonstrate: a limit a caller can raise is a suggestion, not a control.
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import sys
 from typing import Sequence
@@ -31,6 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
             "which were repeating themselves with nothing new read, and which limits the log "
             "could not test at all."
         ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {importlib.metadata.version('assurance-budget')}",
     )
     parser.add_argument("log", help="Path to a JSONL run log")
     parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the audit as JSON")

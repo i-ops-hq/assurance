@@ -8,6 +8,7 @@ differently is the whole point of running this in a pipeline.
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import sys
 from pathlib import Path
@@ -31,6 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Context acquisition never raises the asker's own authorisation: a task they may not "
             "have changes owner, and the answer does not travel back to them."
         ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {importlib.metadata.version('assurance-authority')}",
     )
     # Optional, because `--example` is the answer to having nothing to point this at yet.
     parser.add_argument(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.metadata
 import json
 import sys
 from typing import Any
@@ -25,6 +26,19 @@ FORWARDED: dict[str, tuple[str, str]] = {
     "authority": ("assurance_authority.cli", "pip install assurance-authority"),
 }
 
+_START_HERE = """\
+assurance — what an agent run covered, spent, may do, and is about to install.
+
+  assurance diff --expected A --found B   what was required vs. what was actually read
+  assurance check [FOLDER]                a folder of dated or numbered files: what is absent
+  assurance pin --save | --check          did an MCP server change a tool after you approved it?
+  assurance deps requirements.txt         what an install will execute, read without running it
+  assurance budget runs.jsonl             where an agent run's budget went
+  assurance authority --example           may a task proceed for the person who asked?
+
+assurance <command> --help for more.
+"""
+
 
 def main(argv: list[str] | None = None) -> int:
     """Command-line entry for assurance checks."""
@@ -35,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     tail = list(sys.argv[1:] if argv is None else argv)
     if tail and tail[0] in FORWARDED:
         return _run_forwarded(tail[0], tail[1:])
+    if not tail:
+        print(_START_HERE, end="")
+        return 0
 
     parser = argparse.ArgumentParser(
         prog="assurance",
@@ -43,6 +60,11 @@ def main(argv: list[str] | None = None) -> int:
             "`diff` is the general command — it compares any two sets of keys. `check` is the "
             "special case for a folder of dated or numbered files."
         ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {importlib.metadata.version('assurance-cli')}",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -55,7 +77,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Special case: a folder of DATED or NUMBERED files (tabular). For anything else use `diff`",
     )
     check_parser.add_argument(
-        "folder", help=f"Folder to check. Only {readable_kinds()} files are opened"
+        "folder",
+        nargs="?",
+        default=".",
+        help=f"Folder to check (default: .). Only {readable_kinds()} files are opened",
     )
     # Every one of these was `add_argument` and nothing else, so `--help` listed five flags and
     # explained none of them — including the two that only work as a pair.

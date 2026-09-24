@@ -1,3 +1,7 @@
+# Unreleased
+
+- **`--version`** prints `assurance-budget <version>` and exits 0.
+
 # 0.1.4
 
 - **A line that names neither a `kind` nor an action is no longer a tool call.** Every line

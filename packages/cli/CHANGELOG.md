@@ -1,5 +1,10 @@
 # 0.5.13
 
+**First run.** `assurance` with no arguments prints a short start-here screen instead of an argparse
+error. `--version` prints the installed version. `assurance check` with no folder uses the current
+directory. Tool directories (`.git`, `node_modules`, `__pycache__`, …) are skipped on the walk and
+named under "not opened" as `<name>/ (skipped)`, so what was not looked at is still said.
+
 **One command reaches every tool.** `assurance budget …` and `assurance authority …` forward to
 those packages whole, the way `assurance deps …` already did, and `assurance --help` lists them.
 This is what `pip install assurance` — the new front-door package — relies on. A sibling that is not

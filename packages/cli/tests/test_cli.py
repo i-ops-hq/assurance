@@ -840,3 +840,88 @@ def test_help_lists_every_forwarded_command(capsys) -> None:
     out = capsys.readouterr().out
     for name in ("deps", "budget", "authority"):
         assert name in out
+
+
+def test_version_flag(capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip().startswith("assurance ")
+
+
+def test_budget_version_flag(capsys) -> None:
+    from assurance_budget.cli import main as budget_main
+
+    with pytest.raises(SystemExit) as exc:
+        budget_main(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip().startswith("assurance-budget ")
+
+
+def test_authority_version_flag(capsys) -> None:
+    from assurance_authority.cli import main as authority_main
+
+    with pytest.raises(SystemExit) as exc:
+        authority_main(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip().startswith("assurance-authority ")
+
+
+def test_deps_version_flag(capsys) -> None:
+    from assurance_deps.cli import main as deps_main
+
+    with pytest.raises(SystemExit) as exc:
+        deps_main(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip().startswith("assurance deps ")
+
+
+def test_mcp_version_flag(capsys) -> None:
+    from assurance_mcp.boundary import parse
+
+    with pytest.raises(SystemExit) as exc:
+        parse(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip().startswith("assurance-mcp ")
+
+
+def test_no_args_prints_start_here(capsys) -> None:
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    assert "assurance <command> --help for more." in out
+
+
+def test_check_with_no_folder_uses_cwd(tmp_path: Path, monkeypatch, capsys) -> None:
+    for name in ("2026-01.csv", "2026-02.csv", "2026-04.csv"):
+        (tmp_path / name).write_text("date,n\n2026-01-05,1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check"]) == 0
+    assert "3 of 4 months" in capsys.readouterr().out
+
+
+def test_check_period_range_still_works_with_optional_folder(tmp_path: Path, capsys) -> None:
+    """`assurance check ~/x "last 12 months"` — folder then period_range, both optional-shaped."""
+    for month in range(1, 13):
+        (tmp_path / f"2025-{month:02d}.csv").write_text("date,n\n2025-01-05,1\n", encoding="utf-8")
+    assert main(["check", str(tmp_path), "last 12 months"]) == 0
+    out = capsys.readouterr().out
+    assert "12 of 12 months" in out
+    assert "last 12 months" in out or "Range set by request" in out
+
+
+def test_check_skips_tool_directories_and_names_them(tmp_path: Path, capsys) -> None:
+    """`.git` and `node_modules` are not walked; their names appear as skipped."""
+    for name in ("2026-01.csv", "2026-02.csv", "2026-04.csv"):
+        (tmp_path / name).write_text("date,n\n2026-01-05,1\n", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    nested = tmp_path / "node_modules" / "x"
+    nested.mkdir(parents=True)
+    (nested / "2026-03.csv").write_text("date,n\n2026-03-05,1\n", encoding="utf-8")
+
+    code = main(["check", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "3 of 4 months" in out
+    assert ".git/" in out and "skipped" in out
+    assert "node_modules/" in out
