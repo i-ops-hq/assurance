@@ -1,25 +1,37 @@
-# assurance
+<div align="center">
 
-[![PyPI](https://img.shields.io/pypi/v/assurance?label=pip%20install%20assurance)](https://pypi.org/project/assurance/)
-[![tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+# assurance
 
 **Your AI agent says it's done. Assurance tells you what it didn't check.**
 
-Coding agents and agent pipelines report success confidently. Assurance reads what actually happened
-and says, in plain sentences, what was done, what was skipped, and — just as loudly — what it could not
-verify. No model decides anything. No network. No account.
+[![PyPI](https://img.shields.io/pypi/v/assurance?label=pypi&color=2563eb)](https://pypi.org/project/assurance/)
+[![Python](https://img.shields.io/pypi/pyversions/assurance?color=2563eb)](https://pypi.org/project/assurance/)
+[![tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-2563eb)](LICENSE)
 
-## Try it in 10 seconds
+No model · No network · No account
 
-In any project where you've used Claude Code, run:
+[Quick start](#quick-start) · [Commands](#commands) · [MCP](#use-it-from-an-mcp-client) · [Limits](#limits-the-agent-cant-raise) · [Feedback](#tell-us-where-its-wrong)
+
+</div>
+
+---
+
+Coding agents finish with *"All done — tests pass."* Assurance reads what actually happened and tells
+you, in plain sentences, what was done, what was skipped, and what it **could not verify**.
+
+## Quick start
+
+Run this in any project where you've used Claude Code:
 
 ```bash
-uvx assurance audit          # or: pip install assurance && assurance audit
+uvx assurance audit
 ```
 
-Here is its real output on [a sample session](examples/audit/sample-session.jsonl) in this repo, where
-the agent was asked to fix a rounding bug "and make sure the tests pass", and finished by saying
+<sub>No uv? `pip install assurance && assurance audit`</sub>
+
+Here is the real output on [a sample session](examples/audit/sample-session.jsonl) in this repo. The
+agent was asked to fix a rounding bug *"and make sure the tests pass"*, and ended with
 *"All done — the totals are correct now."*
 
 ```
@@ -35,45 +47,62 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
   Not read: 0 lines.
 ```
 
-"All done" — but the tests failed three times in a row, a file was changed without being read, and
-nothing was tested after the last edit. The audit also names the two commands it can't vouch for either
-way, because **silence is not a pass**.
+What "All done" left out:
 
-## What's in the box
+- ❌ The tests failed **three times in a row**.
+- ❌ A file was changed **without being read**.
+- ❌ **Nothing was tested** after the last edit.
+- ❔ Two commands it **can't vouch for either way**, so it says so. Silence is not a pass.
 
-One install, one command:
+## Commands
 
-| command | what it answers |
+One install, one `assurance` command.
+
+| Command | What it answers |
 |---|---|
-| `assurance audit` | What did the coding-agent session in this folder actually do — and what did it skip? |
-| `assurance diff` | Did the work cover everything it should have? (retrieved docs vs. required docs, files reviewed vs. files changed, …) |
+| `assurance audit` | What did the coding-agent session in this folder do, and what did it skip? |
+| `assurance diff` | Did the work cover everything it should have? For example, retrieved docs vs. required docs. |
 | `assurance pin` | Did an MCP server quietly change a tool's description after you approved it? |
-| `assurance deps` | What will `pip install` / `npm install` execute on your machine — read without running it? |
-| `assurance budget` | Where did an agent run's budget go, and where did it loop going nowhere? |
-| `assurance authority` | May this task proceed for the person who asked, without borrowing someone else's access? |
+| `assurance deps` | What will `pip install` or `npm install` run on your machine? Read without running it. |
+| `assurance budget` | Where did an agent run's budget go, and where did it loop? |
+| `assurance authority` | May this task go ahead for the person who asked, without borrowing someone else's access? |
 | `assurance check` | Is a folder of dated reports complete, and which periods are missing? |
 
-Every command exits `0` when it checked and found nothing, `1` when there's something to look at —
-**including when something couldn't be checked** — and `2` when it couldn't run. So each one works as a
-CI gate as-is.
+Every command works as a CI gate as it is:
 
-## Three quick examples
+| Exit code | Meaning |
+|:-:|---|
+| `0` | Checked, found nothing |
+| `1` | Something to look at, **including something it couldn't check** |
+| `2` | Couldn't run |
 
-**Did the retriever fetch what the question needed?**
+## Examples
+
+<details>
+<summary><b>Did the retriever fetch what the question needed?</b></summary>
+
 ```bash
 assurance diff --expected needed.txt --found retrieved.json --fail-on-gap
 # 2 of 5 items — not in the found set: doc-2, doc-3, doc-5
 # also present and not expected: doc-9
 ```
 
-**Did an MCP server change a tool definition behind your back?** (the rug-pull, CVE-2025-54136)
+</details>
+
+<details>
+<summary><b>Did an MCP server change a tool definition behind your back?</b> (the rug-pull, CVE-2025-54136)</summary>
+
 ```bash
 pip install 'assurance-cli[mcp]'
 assurance pin --save      # snapshot every tool your MCP servers expose; commit .assurance/mcp-pins.json
 assurance pin --check     # in CI: exit 1 if any description changed, or any server couldn't be checked
 ```
 
-**What will this install run?**
+</details>
+
+<details>
+<summary><b>What will this install run?</b></summary>
+
 ```bash
 assurance deps package.json
 # Of the 100 read, 2 execute code when installed:
@@ -81,11 +110,16 @@ assurance deps package.json
 #   · sharp 0.33.5   node install/check
 ```
 
-## Use it inside Cursor, Claude Desktop or any MCP client
+</details>
+
+## Use it from an MCP client
+
+Works in Cursor, Claude Desktop, Claude Code and any other MCP client.
 
 ```bash
 pip install assurance-mcp
 ```
+
 ```json
 {
   "mcpServers": {
@@ -97,9 +131,10 @@ pip install assurance-mcp
 }
 ```
 
-`--root` is the only folder the tools may read. You set it; the model can't widen it.
+> [!IMPORTANT]
+> `--root` is the only folder the tools may read. You set it in your config; the model can't widen it.
 
-## Limits you set, that the agent can't raise
+## Limits the agent can't raise
 
 ```toml
 # ~/.config/assurance/config.toml   (Windows: %APPDATA%\assurance\config.toml)
@@ -108,40 +143,47 @@ tool_calls = 400
 seconds = 3600
 ```
 
-Your user file and `ASSURANCE_MAX_*` environment variables set the limits. A `.assurance/config.toml`
-inside the project — which an agent can write — can only *lower* them, and `assurance audit` tells you
-if a session touched it.
+Your user file and the `ASSURANCE_MAX_*` environment variables set the limits. A
+`.assurance/config.toml` inside the project can only **lower** them, because an agent can write there.
+`assurance audit` tells you if a session touched that file.
 
 ## What it won't do
 
-- **Guess.** When it can't establish a number, it says so instead of inventing one.
-- **Call a model or the network.** Every result is arithmetic you can check.
-- **Claim more than it saw.** `audit` reads Claude Code transcripts today; other agents are next
-  (tell us which one you use).
+- **Guess.** If it can't establish a number, it says so instead of making one up.
+- **Call a model or the network.** Every result is arithmetic you can check yourself.
+- **Claim more than it saw.** `audit` reads Claude Code transcripts today. Other agents are next:
+  [tell us which one you use](https://github.com/i-ops-hq/assurance/issues/new?template=feature.yml).
 
 ## Tell us where it's wrong
 
-This is early, and the most useful thing you can do is run it on something real:
+It's early, and the most useful thing you can do is run it on real work.
 
-- **[It gave a wrong or misleading answer](https://github.com/i-ops-hq/assurance/issues/new?template=wrong-answer.yml)** — the most valuable report there is.
-- **[Something broke](https://github.com/i-ops-hq/assurance/issues/new?template=bug.yml)** or
-  **[I want it to support X](https://github.com/i-ops-hq/assurance/issues/new?template=feature.yml)** (another agent, lockfile, framework).
-- Want to contribute? Start with a [`good first issue`](https://github.com/i-ops-hq/assurance/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and read [CONTRIBUTING.md](CONTRIBUTING.md).
+- 🎯 **[It gave a wrong or misleading answer](https://github.com/i-ops-hq/assurance/issues/new?template=wrong-answer.yml)**. This is the most valuable report there is.
+- 🐛 **[Something broke](https://github.com/i-ops-hq/assurance/issues/new?template=bug.yml)**
+- 💡 **[Support another agent, lockfile or framework](https://github.com/i-ops-hq/assurance/issues/new?template=feature.yml)**
+- 🤝 **Contribute:** pick a [`good first issue`](https://github.com/i-ops-hq/assurance/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 If it's useful to you, a ⭐ helps other people find it.
 
-## The packages
+## Packages
 
-`pip install assurance` installs the command-line tools. Each piece also installs on its own:
+`pip install assurance` gives you all the commands. Each part also installs on its own.
 
-| package | what it is |
+| Package | What it is |
 |---|---|
-| [`assurance-cli`](packages/cli) | the `assurance` command: `diff`, `check`, `pin`, `drift`, `init` |
-| [`assurance-budget`](packages/budget) | `audit` (coding-agent sessions) and `budget` (run logs) |
-| [`assurance-deps`](packages/deps) | read what an install will execute, without executing it |
-| [`assurance-authority`](packages/authority) | whether a task may proceed for the person who asked |
-| [`assurance-mcp`](packages/mcp) | the checks as MCP tools, read-only, confined to `--root` |
-| [`assurance-core`](packages/core) | the pure decision library underneath — no I/O, no model, no dependencies |
+| [`assurance-cli`](packages/cli) | The `assurance` command: `diff`, `check`, `pin`, `drift`, `init` |
+| [`assurance-budget`](packages/budget) | `audit` for coding-agent sessions, `budget` for run logs |
+| [`assurance-deps`](packages/deps) | Reads what an install will run, without running it |
+| [`assurance-authority`](packages/authority) | Whether a task may go ahead for the person who asked |
+| [`assurance-mcp`](packages/mcp) | The checks as read-only MCP tools, limited to `--root` |
+| [`assurance-core`](packages/core) | The pure decision library underneath. No I/O, no model, no dependencies |
 
-Part of [I-Ops](https://i-ops.dev) — keep your models, agents and orchestration; put an independent
-check around them. Apache-2.0.
+---
+
+<div align="center">
+
+Part of **[I-Ops](https://i-ops.dev)**. Keep your models, agents and orchestration, and put an independent check around them.
+
+<sub>Apache-2.0 · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Releases](https://github.com/i-ops-hq/assurance/releases)</sub>
+
+</div>
