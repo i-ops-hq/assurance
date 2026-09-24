@@ -38,6 +38,8 @@ _EDIT_TOOLS = frozenset({"Edit", "MultiEdit", "NotebookEdit"})
 _WRITE_TOOLS = frozenset({"Write"})
 _CHANGE_TOOLS = _EDIT_TOOLS | _WRITE_TOOLS
 _READ_TOOLS = frozenset({"Read"})
+_LIMITS_FILE_SUFFIX = ".assurance/config.toml"
+_LIMITS_BASH_MARKERS = (">", ">>", "tee", "sed -i", "cp", "mv")
 
 BashKind = Literal["test", "check", "read", "unclassified"]
 
@@ -294,6 +296,29 @@ def read_claude_code(path: Path) -> Session:
         not_read=not_read,
         unmatched_results=unmatched_results,
     )
+
+
+def changed_limits_file(session: Session) -> bool:
+    """True when this session wrote or edited `.assurance/config.toml`.
+
+    Matches Write/Edit/MultiEdit/NotebookEdit whose path ends with that file, or a Bash command that
+    both names the file and contains a write marker (`>`, `>>`, `tee`, `sed -i`, `cp`, `mv`).
+    """
+    for call in session.tool_calls:
+        if call.name in _CHANGE_TOOLS:
+            path = call.input.get("file_path")
+            if isinstance(path, str) and path.replace("\\", "/").endswith(_LIMITS_FILE_SUFFIX):
+                return True
+        if call.name == "Bash":
+            command = call.input.get("command")
+            if not isinstance(command, str):
+                continue
+            normalised = command.replace("\\", "/")
+            if ".assurance/config.toml" not in normalised:
+                continue
+            if any(marker in command for marker in _LIMITS_BASH_MARKERS):
+                return True
+    return False
 
 
 def edited_without_read(session: Session) -> list[str]:

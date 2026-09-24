@@ -18,7 +18,12 @@ from typing import Sequence
 from assurance_core.run_budget import Budget
 
 from assurance_budget.audit import Audit, audit
-from assurance_budget.config import ConfigError, load_ceilings
+from assurance_budget.config import (
+    ConfigError,
+    limits_for_json,
+    load_ceilings,
+    project_overreach_notes,
+)
 from assurance_budget.events import LogError, read
 
 EXIT_OK = 0
@@ -60,9 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def render(result: Audit, *, ceilings_source: str = "built-in defaults") -> str:
+def render(result: Audit, *, ceilings_source: str = "built-in defaults", overreach: Sequence[str] = ()) -> str:
     """The human-readable table. Only rows worth acting on are listed."""
     lines = [result.summary, "", f"  Limits from: {ceilings_source}", ""]
+    for note in overreach:
+        lines.append(f"  {note}")
+    if overreach:
+        lines.append("")
     listed = 0
     for row in result.runs:
         if row.exhausted is None and row.stalled is None and not row.over_time:
@@ -129,12 +138,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             ceilings=ceilings,
         ),
     )
+    limits = limits_for_json(ceilings)
+    notes = project_overreach_notes(ceilings)
     if args.as_json:
         payload = result.as_dict()
         payload["budget"]["source"] = ceilings.source
+        if limits:
+            payload["limits"] = limits
+        if notes:
+            payload["project_limit_notes"] = notes
         print(json.dumps(payload, indent=2))
     else:
-        print(render(result, ceilings_source=ceilings.source))
+        print(render(result, ceilings_source=ceilings.source, overreach=notes))
 
     if args.fail_on_exhausted and (result.exhausted or result.stalled or result.over_time):
         return EXIT_GATE

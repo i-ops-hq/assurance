@@ -1,5 +1,9 @@
 # Unreleased
 
+- **The project config file can only lower a limit.** User file and `ASSURANCE_MAX_*` env vars may
+  raise or lower; `<cwd>/.assurance/config.toml` applies as `min(current, project)`. A project ask
+  above the current ceiling is ignored and named in the report. `--json` gains `limits` with per-key
+  origin. `assurance audit` reports when the session changed `.assurance/config.toml`.
 - **Operator-set ceilings.** Built-in defaults stay in `assurance-core`; an operator raises them via
   `~/.config/assurance/config.toml`, `<cwd>/.assurance/config.toml`, or `ASSURANCE_MAX_*` env vars.
   The agent (the caller) still cannot raise a limit — `Budget.allowing` clamps to the active

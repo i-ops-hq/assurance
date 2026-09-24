@@ -1,5 +1,7 @@
 # Unreleased
 
+- **`Ceilings.origins` / `project_asked_more`:** metadata for callers that load operator config.
+  Core still never reads files or the environment.
 - **`Ceilings`:** the built-in `MAX_*` constants are the defaults an operator has not overridden.
   `Budget.allowing(..., ceilings=…)` clamps the caller to those ceilings. Core never reads files or
   the environment — callers load operator config and pass the result in.

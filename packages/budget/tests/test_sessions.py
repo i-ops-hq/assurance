@@ -11,6 +11,7 @@ from assurance_budget.events import LogError
 from assurance_budget.session_cli import detect_loops, main
 from assurance_budget.sessions import (
     after_last_edit,
+    changed_limits_file,
     classify_bash,
     edited_without_read,
     find_latest_session,
@@ -389,12 +390,77 @@ def test_main_json_keys(tmp_path: Path, capsys) -> None:
         "edited_without_read",
         "after_last_edit",
         "unclassified_commands",
+        "changed_limits_file",
     ):
         assert key in payload, key
     assert payload["tool_calls"] == 1
     assert payload["by_tool"] == {"Bash": 1}
     assert payload["not_read"] == 0
     assert payload["records"] == {"summary": 1}
+    assert payload["changed_limits_file"] is False
+
+
+def test_edit_of_limits_file_is_reported(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "s.jsonl"
+    limits = str(tmp_path / ".assurance" / "config.toml")
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    str(tmp_path),
+                    [_tool_use("e1", "Edit", file_path=limits)],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user(
+                    "abc",
+                    str(tmp_path),
+                    [_tool_result("e1", "ok")],
+                    "2026-09-24T01:00:01.000Z",
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert changed_limits_file(session) is True
+    assert main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "This session changed .assurance/config.toml — the limits file for this project." in out
+    assert main([str(path), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["changed_limits_file"] is True
+
+
+def test_read_of_limits_file_is_not_a_change(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "s.jsonl"
+    limits = str(tmp_path / ".assurance" / "config.toml")
+    path.write_text(
+        "\n".join(
+            [
+                _assistant(
+                    "abc",
+                    str(tmp_path),
+                    [_tool_use("r1", "Read", file_path=limits)],
+                    "2026-09-24T01:00:00.000Z",
+                ),
+                _user(
+                    "abc",
+                    str(tmp_path),
+                    [_tool_result("r1", "[budget]\n")],
+                    "2026-09-24T01:00:01.000Z",
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    session = read_claude_code(path)
+    assert changed_limits_file(session) is False
+    assert main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "This session changed .assurance/config.toml" not in out
+    assert main([str(path), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["changed_limits_file"] is False
 
 
 def test_main_always_prints_not_read_zero(tmp_path: Path, capsys) -> None:

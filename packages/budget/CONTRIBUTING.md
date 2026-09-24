@@ -5,10 +5,11 @@ Pull requests welcome.
 ## The rule that is not up for discussion
 
 **A model may reason about a budget. Only code may enforce one.** The built-in defaults live in
-`assurance_core.run_budget`. An operator may raise them via config files or `ASSURANCE_MAX_*`
-environment variables (`assurance_budget.config.load_ceilings`); `Budget.allowing` clamps every
-caller to the active `Ceilings`. Do not add a way for the agent (the caller) to exceed those
-ceilings — that is the hard rule. Core must not read files or the environment.
+`assurance_core.run_budget`. An operator may raise them via the user config file or `ASSURANCE_MAX_*`
+environment variables (`assurance_budget.config.load_ceilings`); the project file in the working tree
+can only lower them. `Budget.allowing` clamps every caller to the active `Ceilings`. Do not add a way
+for the agent (the caller) to exceed those ceilings — that is the hard rule. Core must not read files
+or the environment.
 
 Do not reimplement the limits here. A rule with two implementations disagrees on the day it matters.
 
