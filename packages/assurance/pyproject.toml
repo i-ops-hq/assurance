@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assurance"
+version = "0.1.0"
+description = "One install for the assurance tools: what an agent run covered, spent, may do, and is about to install — and what could not be checked."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "I-Ops Operations Intelligence, LLC", email = "hello@i-ops.dev" }]
+requires-python = ">=3.10"
+# The four command-line tools, at the versions this tree tests against. `assurance-mcp` is left out on
+# purpose: it brings the MCP SDK and a web stack with it, and most people installing this want a
+# command, not a server. `pip install assurance-mcp` when you do.
+dependencies = [
+  "assurance-cli>=0.5.13",
+  "assurance-deps>=0.2.4",
+  "assurance-budget>=0.1.4",
+  "assurance-authority>=0.1.3",
+]
+keywords = ["ai-agents", "mcp", "rag", "assurance", "supply-chain", "guardrails", "llm-ops"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Homepage = "https://i-ops.dev"
+Source = "https://github.com/i-ops-hq/assurance"
+
+# The same entry point `assurance-cli` declares. It is declared here too so that `uvx assurance` and
+# `pipx install assurance` expose the command from the package that was named, rather than finding
+# it one dependency down with a warning.
+[project.scripts]
+assurance = "assurance_cli.cli:main"
+
+[tool.setuptools]
+py-modules = []
