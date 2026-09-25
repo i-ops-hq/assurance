@@ -449,7 +449,8 @@ def test_sed_i_limits_file_counts(tmp_path: Path) -> None:
 
 
 def test_cp_to_absolute_limits_file_counts(tmp_path: Path) -> None:
-    dest = str(tmp_path / ".assurance" / "config.toml")
+    # As a shell command would name it: `C:/…` on Windows, since bash reads `\` in a word as an escape.
+    dest = (tmp_path / ".assurance" / "config.toml").as_posix()
     assert (
         changed_limits_file(read_claude_code(_bash_session(tmp_path, f"cp /tmp/c.toml {dest}")))
         is True

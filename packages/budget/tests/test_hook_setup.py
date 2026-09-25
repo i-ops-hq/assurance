@@ -27,7 +27,12 @@ def _run(
     which: dict[str, str] | None = None,
     platform: str = "darwin",
 ) -> int:
-    env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "XDG_STATE_HOME": str(tmp_path / "state")}
+    # Backups go under XDG_STATE_HOME, or LOCALAPPDATA on Windows: both point into the test's folder.
+    env = {
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "claude"),
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+        "LOCALAPPDATA": str(tmp_path / "state"),
+    }
     return hook_setup.main(
         argv,
         cwd=tmp_path / "project",

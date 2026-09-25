@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -111,7 +112,7 @@ def test_a_declaration_it_cannot_use_is_refused_with_the_file_named(tmp_path: Pa
     _project(tmp_path, body)
     with pytest.raises(ConfigError, match=None) as exc:
         load_declared(tmp_path)
-    assert says in str(exc.value) and ".assurance/config.toml" in str(exc.value)
+    assert says in str(exc.value) and os.path.join(".assurance", "config.toml") in str(exc.value)
 
 
 def test_budget_limits_and_declarations_live_in_the_same_file(tmp_path: Path) -> None:
