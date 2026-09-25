@@ -715,6 +715,10 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
 
     Returns `None` when the session has no such edits inside `cwd`. Scratch edits outside `cwd`
     do not restart the clock; they are counted as `outside_cwd_edits`.
+
+    Shell commands after the edit that could not be classified are counted too (`unclassified`,
+    `unclassified_by_command`). A project's own check script is one of them, so "no test or check
+    ran" is only true when this count is zero; otherwise none that was recognised did.
     """
     last_i: int | None = None
     last_at: float | None = None
@@ -771,6 +775,7 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
             )
         elif kind == "check":
             checks += 1
+    unclassified = _unclassified_counts(session.tool_calls[last_i + 1 :])
     return {
         "at": last_at,
         "by": last_by,
@@ -780,6 +785,8 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
         "checks": checks,
         "test_runs": test_runs,
         "test_labels": _group_test_labels(test_runs),
+        "unclassified": sum(unclassified.values()),
+        "unclassified_by_command": dict(unclassified),
         "outside_cwd_edits": outside,
     }
 
@@ -967,8 +974,12 @@ def unclassified_by_command(session: Session) -> dict[str, int]:
     the subcommand for tools like git or make, plus the mode for python (`-c`, `-`, `-m pkg`,
     `script`). A command that cannot be parsed at all is `(unparsed)`. Never the full text.
     """
+    return dict(_unclassified_counts(session.tool_calls))
+
+
+def _unclassified_counts(calls: tuple[ToolCall, ...] | list[ToolCall]) -> Counter[str]:
     counts: Counter[str] = Counter()
-    for call in session.tool_calls:
+    for call in calls:
         if call.name != "Bash":
             continue
         command = call.input.get("command")
@@ -978,7 +989,7 @@ def unclassified_by_command(session: Session) -> dict[str, int]:
         if classify_bash(command) != "unclassified":
             continue
         counts[_unclassified_label(command)] += 1
-    return dict(counts)
+    return counts
 
 
 def _unclassified_label(command: str) -> str:
