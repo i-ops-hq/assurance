@@ -44,6 +44,10 @@ _OURS = re.compile(r"(?:^|[\s/\\])assurance(?:@[\w.+!-]+)?\s+audit\b.*\s--hook\b
 _PINNED = re.compile(r"\bassurance@([\w.+!-]+)")
 
 
+#: The Claude Code plugin that runs the same hook: `claude plugin install assurance@i-ops-hq`.
+PLUGIN_ID = "assurance@i-ops-hq"
+
+
 class SetupError(Exception):
     """The settings file could not be changed safely; nothing was written."""
 
@@ -107,6 +111,23 @@ def hook_command(
     if exe and scope != "project":
         return f"{exe} {flags}"
     return f"assurance {flags}"
+
+
+def plugin_enabled(cwd: Path, env: Mapping[str, str]) -> str | None:
+    """The scope whose settings turn the assurance plugin on, or None when it is off or absent.
+
+    Decided as Claude Code decides it: the most specific settings file that mentions the plugin wins,
+    local over project over user, so a plugin a teammate disabled for themselves is not counted.
+    """
+    for scope in ("local", "project", "user"):
+        try:
+            settings = load_settings(settings_path(scope, cwd, env))
+        except SetupError:
+            continue
+        enabled = (settings or {}).get("enabledPlugins")
+        if isinstance(enabled, dict) and PLUGIN_ID in enabled:
+            return scope if enabled[PLUGIN_ID] is True else None
+    return None
 
 
 def with_hook(settings: Mapping[str, Any], command: str) -> dict[str, Any]:
@@ -355,6 +376,12 @@ def main(
         print(f"No assurance hook in {where}. Nothing to remove.")
         return EXIT_OK
 
+    plugin = plugin_enabled(here, environ) if args.action == "install" else None
+    if plugin:
+        print(
+            f"! The {PLUGIN_ID} plugin is on in your {plugin} settings and already runs the audit after "
+            "every turn; adding the hook here as well runs it twice."
+        )
     for scope, path, before_text, after_text, relaid in plans:
         print(f"{scope} settings: {_show(path)}")
         if relaid and after_text:
@@ -438,10 +465,18 @@ def _status(cwd: Path, env: Mapping[str, str], which: Callable[[str], str | None
                 notes.append(f"The {scope} hook {runner}")
     if len({f.command for f in found}) > 1:
         notes.append("It is installed with different commands, so it runs more than once per turn.")
+    plugin = plugin_enabled(cwd, env)
+    if plugin:
+        print(f"  plugin   {PLUGIN_ID}: on, in your {plugin} settings")
+        if found:
+            notes.append(
+                f"The {PLUGIN_ID} plugin runs it too, so it runs twice per turn. Keep one: "
+                f"`assurance hook remove`, or `claude plugin uninstall {PLUGIN_ID}`."
+            )
     for note in notes:
         print(f"  ! {note}")
-    if not found:
-        print("Not installed. `assurance hook install` adds it.")
+    if not found and not plugin:
+        print("Not installed. `assurance hook install` adds it, or `claude plugin install assurance@i-ops-hq`.")
         return EXIT_GATE
     return EXIT_GATE if notes else EXIT_OK
 

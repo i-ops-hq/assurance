@@ -313,3 +313,40 @@ def test_status_is_clean_when_it_is_installed_and_can_run(
     _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "uvx assurance@0.1.4 audit --hook --nudge"}]}]}})
     assert _run(tmp_path, ["status"]) == 0
     assert "!" not in capsys.readouterr().out
+
+
+# --- the Claude Code plugin runs the same hook -----------------------------------------------------
+
+
+def test_status_counts_the_plugin_as_installed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write(_user_file(tmp_path), {"enabledPlugins": {"assurance@i-ops-hq": True}})
+    assert _run(tmp_path, ["status"]) == 0
+    out = capsys.readouterr().out
+    assert "plugin   assurance@i-ops-hq: on, in your user settings" in out and "Not installed" not in out
+
+
+def test_the_plugin_and_a_settings_hook_together_are_said_to_run_twice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    _write(_user_file(tmp_path), {
+        "enabledPlugins": {"assurance@i-ops-hq": True},
+        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "uvx assurance@0.1.4 audit --hook --nudge"}]}]},
+    })
+    assert _run(tmp_path, ["status"]) == 1
+    assert "runs twice per turn" in capsys.readouterr().out
+
+
+def test_a_plugin_turned_off_for_this_repository_is_not_counted(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write(_user_file(tmp_path), {"enabledPlugins": {"assurance@i-ops-hq": True}})
+    _write(tmp_path / "project" / ".claude" / "settings.local.json", {"enabledPlugins": {"assurance@i-ops-hq": False}})
+    assert _run(tmp_path, ["status"]) == 1
+    assert "Not installed" in capsys.readouterr().out
+
+
+def test_installing_the_hook_while_the_plugin_is_on_warns_it_would_run_twice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(_user_file(tmp_path), {"enabledPlugins": {"assurance@i-ops-hq": True}})
+    assert _run(tmp_path, ["install", "--dry-run"]) == 0
+    assert "adding the hook here as well runs it twice" in capsys.readouterr().out

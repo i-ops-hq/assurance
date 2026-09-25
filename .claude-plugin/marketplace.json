@@ -1,0 +1,16 @@
+{
+  "name": "i-ops-hq",
+  "owner": {
+    "name": "I-Ops"
+  },
+  "metadata": {
+    "description": "Assurance for Claude Code: what a session actually did, checked after every turn."
+  },
+  "plugins": [
+    {
+      "name": "assurance",
+      "source": "./plugins/assurance",
+      "description": "After every turn, says whether anything was tested after Claude's last edit, and what it could not check. No model, no network, no account."
+    }
+  ]
+}
