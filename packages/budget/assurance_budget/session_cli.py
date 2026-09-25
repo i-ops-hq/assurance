@@ -60,7 +60,8 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         return EXIT_OK
     try:
         session = read_claude_code(Path(data["transcript_path"]).expanduser())
-        finding = _hook_finding(after_last_edit(session))
+        after = after_last_edit(session)
+        finding = _hook_finding(after)
     except LogError as exc:
         _hook_print({"systemMessage": f"assurance: could not read this session ({exc}); nothing audited."})
         return EXIT_OK
@@ -72,15 +73,18 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         return EXIT_OK
     out: dict[str, Any] = {"systemMessage": f"assurance: {finding}."}
     if nudge and not data.get("stop_hook_active"):
-        out["hookSpecificOutput"] = {
-            "hookEventName": "Stop",
-            "additionalContext": (
-                f"Assurance audit of this session: {finding}. Before you say the work is done, run "
-                "the project's tests or checks for what you changed, without piping the test "
-                "command into another (or with `set -o pipefail`) so its result is visible, or say "
-                "plainly why they cannot be run here."
-            ),
-        }
+        context = (
+            f"Assurance audit of this session: {finding}. Before you say the work is done, run "
+            "the project's tests or checks for what you changed, without piping the test "
+            "command into another (or with `set -o pipefail`) so its result is visible, or say "
+            "plainly why they cannot be run here."
+        )
+        if after is not None and int(after.get("unclassified") or 0):
+            context += (
+                " If one of the commands it could not classify was the project's test or check, "
+                "say which one and what it returned instead of running it again."
+            )
+        out["hookSpecificOutput"] = {"hookEventName": "Stop", "additionalContext": context}
     _hook_print(out)
     return EXIT_OK
 
@@ -91,7 +95,19 @@ def _hook_finding(after: dict[str, Any] | None) -> str | None:
     when = _clock(after.get("at"))
     since = f" (last edit {when})" if when else ""
     if int(after.get("tests") or 0) == 0 and int(after.get("checks") or 0) == 0:
-        return f"files were edited and no test or check ran after the last edit{since}"
+        unclassified = int(after.get("unclassified") or 0)
+        if not unclassified:
+            return f"files were edited and no test or check ran after the last edit{since}"
+        # A project's own check script is unclassified, so "no check ran" would be a guess.
+        which = _unclassified_breakdown(after.get("unclassified_by_command") or {})
+        which = f" ({which})" if which else ""
+        ran = _count_phrase(unclassified, "command", "commands")
+        one = "it was" if unclassified == 1 else "one of them was"
+        return (
+            f"files were edited and no test or check it recognises ran after the last edit{since}; "
+            f"{ran} after it could not be classified{which}, so whether {one} a test or check "
+            "is unknown"
+        )
     runs = list(after.get("test_runs") or [])
     if not runs:
         return None  # only checks ran; they passed or failed on their own terms
@@ -135,7 +151,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--fail-on-unverified",
         action="store_true",
-        help=f"Exit {EXIT_GATE} when there were edits and no test or check ran after the last one",
+        help=(
+            f"Exit {EXIT_GATE} when there were edits and no test or check it recognises ran after "
+            "the last one"
+        ),
     )
     parser.add_argument(
         "--demo",
@@ -462,7 +481,13 @@ def _after_last_edit_line(after: dict[str, Any]) -> str:
     tests = int(after.get("tests") or 0)
     checks = int(after.get("checks") or 0)
     if tests == 0 and checks == 0:
-        return f"{prefix} no test or check command ran"
+        unclassified = int(after.get("unclassified") or 0)
+        if not unclassified:
+            return f"{prefix} no test or check command ran"
+        which = _unclassified_breakdown(after.get("unclassified_by_command") or {})
+        which = f" ({which})" if which else ""
+        ran = _count_phrase(unclassified, "unclassified command", "unclassified commands")
+        return f"{prefix} no test or check it recognises; {ran} ran after it{which}"
     labels = list(after.get("test_labels") or [])
     test_bit = _count_phrase(tests, "test run", "test runs")
     if labels:

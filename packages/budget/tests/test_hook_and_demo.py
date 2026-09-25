@@ -10,7 +10,7 @@ import pytest
 
 from assurance_budget import session_cli
 from assurance_budget.session_cli import SAMPLE_SESSION, main, run_hook
-from assurance_budget.sessions import read_claude_code, unclassified_by_command
+from assurance_budget.sessions import after_last_edit, read_claude_code, unclassified_by_command
 
 REPO_SAMPLE = Path(__file__).resolve().parents[3] / "examples" / "audit" / "sample-session.jsonl"
 
@@ -89,6 +89,48 @@ def test_hook_flags_a_last_test_run_that_failed(tmp_path: Path, capsys: pytest.C
     out = _hook(path, nudge=True, capsys=capsys)
     assert out is not None and "last test run after the last edit failed" in str(out["systemMessage"])
     assert "pytest -q" in str(out["systemMessage"])
+
+
+def test_hook_does_not_say_no_check_ran_when_it_could_not_classify_what_did(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Found in a real desktop session: the project's check was a Python script, it ran and passed
+    # after the last edit, and the hook said no test or check had run. It cannot know that.
+    check = ("Bash", {"command": "python scripts/check.py"}, False)
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), check])
+    out = _hook(path, nudge=True, capsys=capsys)
+    assert out is not None  # unknown is still worth saying: silence is not a pass
+    message = str(out["systemMessage"])
+    assert "no test or check ran after the last edit" not in message
+    assert "no test or check it recognises ran after the last edit" in message
+    assert (
+        "1 command after it could not be classified (python script), so whether it was a test or "
+        "check is unknown"
+    ) in message
+    context = out["hookSpecificOutput"]
+    assert isinstance(context, dict)
+    assert "say which one and what it returned" in context["additionalContext"]
+
+
+def test_only_unclassified_commands_after_the_last_edit_count(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    before = ("Bash", {"command": "python scripts/check.py"}, False)
+    path = _session(tmp_path, [before, _read(tmp_path), _edit(tmp_path)])
+    after = after_last_edit(read_claude_code(path))
+    assert after is not None
+    assert after["unclassified"] == 0 and after["unclassified_by_command"] == {}
+    out = _hook(path, nudge=True, capsys=capsys)
+    assert out is not None and "no test or check ran after the last edit" in str(out["systemMessage"])
+    context = out["hookSpecificOutput"]
+    assert isinstance(context, dict) and "say which one" not in context["additionalContext"]
+
+
+def test_report_names_the_unclassified_commands_after_the_last_edit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    ran = [("Bash", {"command": "python scripts/check.py"}, False), ("Bash", {"command": "make lint-fix"}, False)]
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), *ran])
+    assert main([str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "no test or check command ran" not in out
+    assert "no test or check it recognises; 2 unclassified commands ran after it (make lint-fix, python script)" in out
+    # Unknown is not passed: the gate still fails when nothing it recognises ran after the edit.
+    assert main([str(path), "--fail-on-unverified"]) == 1
 
 
 def test_hook_is_silent_when_nothing_was_edited(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

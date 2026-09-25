@@ -1,3 +1,9 @@
+# Unreleased
+
+- **The README's sample report shows the corrected "after the last edit" line**: no test or check
+  the audit recognises ran, and the two commands after the edit that it could not classify are named.
+  The change itself is in `assurance-budget`.
+
 # 0.1.3
 
 - **Requires `assurance-budget` 0.2.3:** the Stop hook no longer treats a test piped into `tail` as

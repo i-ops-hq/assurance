@@ -1,5 +1,12 @@
 # Unreleased
 
+- **"No test or check ran" is said only when it is known.** A project's own check script
+  (`python scripts/check.py`, `make lint-fix`) is not a command the audit recognises, so when one ran
+  after the last edit, the hook and the report said nothing had. They now say no test or check *it
+  recognises* ran, and name the commands after the edit that it could not classify. With `--nudge`,
+  Claude is asked to say which of them was the check and what it returned rather than run it again.
+  The hook still speaks in that case, and `--fail-on-unverified` still exits 1: unknown is not
+  passed. `after_last_edit` in `--json` gains `unclassified` and `unclassified_by_command`.
 - **`assurance audit`'s public functions have docstrings.** `help()` on `build_parser`, `main`,
   `build_report` and `format_report` now says what each returns, and for `main` what exit codes 0, 1
   and 2 mean. No behaviour change.
