@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import mmap
 import os
 import re
 import shlex
@@ -373,12 +374,115 @@ def read_claude_code(path: Path) -> Session:
         raise LogError(f"cannot read {target}: {exc}") from exc
     except UnicodeDecodeError as exc:
         raise LogError(f"{target} is not UTF-8 text, so not a Claude Code transcript ({exc.reason})") from exc
+    return _parse_lines(raw_lines, target)
 
+
+def read_claude_code_tail(path: Path, window: int) -> tuple[Session, bool]:
+    """The session as seen in roughly the last `window` bytes of its transcript, and whether that was
+    the whole file.
+
+    For the Stop hook, which runs after every turn and only needs what happened since the last edit:
+    re-reading a transcript of hundreds of megabytes each time is the cost of a long session. The
+    project directory is still the one the session started in, read from the start of the file as
+    `read_claude_code` reads it, so a window that begins after a `cd` does not move the project.
+    """
+    target = Path(path)
+    try:
+        size = target.stat().st_size
+        if size <= window:
+            return read_claude_code(target), True
+        with target.open("rb") as fh:
+            cwd = _first_cwd(fh, limit=window)
+            if cwd is None:
+                return read_claude_code(target), True
+            fh.seek(size - window)
+            data = fh.read()
+    except OSError as exc:
+        raise LogError(f"cannot read {target}: {exc}") from exc
+    newline = data.find(b"\n")
+    try:
+        text = data[newline + 1 :].decode("utf-8") if newline >= 0 else ""
+    except UnicodeDecodeError as exc:
+        raise LogError(f"{target} is not UTF-8 text, so not a Claude Code transcript ({exc.reason})") from exc
+    return _parse_lines(text.splitlines(), target, cwd=cwd), False
+
+
+def transcript_changed_limits_file(path: Path, cwd: str) -> bool:
+    """`changed_limits_file` over a whole transcript, reading only the lines that can decide it.
+
+    A write to the limits file names it, whether as a path or as the target of a command, because
+    nothing is expanded. So only the lines that contain `config.toml` are read, together with the
+    result of each tool call on them, which says whether that call failed. The answer is the one a
+    full read gives; the cost is those lines, not the transcript.
+    """
+    target = Path(path)
+    try:
+        with target.open("rb") as fh:
+            if fh.seek(0, os.SEEK_END) == 0:
+                return False
+            with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as data:
+                lines = _lines_containing(data, b"config.toml")
+                if not lines:
+                    return False
+                ids: set[str] = set()
+                for raw in lines.values():
+                    try:
+                        record = json.loads(raw)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                    message = record.get("message") if isinstance(record, dict) else None
+                    content = message.get("content") if isinstance(message, dict) else None
+                    if isinstance(content, list):
+                        ids.update(
+                            b["id"] for b in content
+                            if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str)
+                        )
+                for tool_id in ids:
+                    lines.update(_lines_containing(data, json.dumps(tool_id).encode()))
+    except OSError as exc:
+        raise LogError(f"cannot read {target}: {exc}") from exc
+    try:
+        text = [lines[offset].decode("utf-8") for offset in sorted(lines)]
+    except UnicodeDecodeError:
+        return changed_limits_file(read_claude_code(target))  # which says what is wrong with the file
+    return changed_limits_file(_parse_lines(text, target, cwd=cwd))
+
+
+def _lines_containing(data: mmap.mmap, needle: bytes) -> dict[int, bytes]:
+    """Every line of `data` that contains `needle`, by the offset it starts at."""
+    found: dict[int, bytes] = {}
+    at = data.find(needle)
+    while at >= 0:
+        start = data.rfind(b"\n", 0, at) + 1
+        end = data.find(b"\n", at)
+        end = len(data) if end < 0 else end
+        found[start] = data[start:end]
+        at = data.find(needle, end)
+    return found
+
+
+def _first_cwd(fh: Any, limit: int) -> str | None:
+    """The `cwd` of the first JSON object that has one, as `read_claude_code` takes it; None when the
+    first `limit` bytes hold none, so the caller reads the whole file instead of guessing."""
+    read = 0
+    for raw in fh:
+        read += len(raw)
+        if read > limit:
+            return None
+        try:
+            record = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if isinstance(record, dict) and isinstance(record.get("cwd"), str) and record["cwd"]:
+            return str(record["cwd"])
+    return None
+
+
+def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     pending: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     results: dict[str, tuple[bool, str]] = {}
     session_id = ""
-    cwd = ""
     started: float | None = None
     ended: float | None = None
     user_turns = 0
@@ -591,7 +695,9 @@ def changed_limits_file(session: Session) -> bool:
             command = call.input.get("command")
             if not isinstance(command, str):
                 continue
-            if _bash_writes_session_limits(command, session.cwd):
+            # A write target is compared as written, never expanded, so a command that writes the
+            # limits file names it; the shell parser is only needed for the ones that do.
+            if "config.toml" in command and _bash_writes_session_limits(command, session.cwd):
                 return True
     return False
 
@@ -769,7 +875,16 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
     last_at: float | None = None
     last_by = ""
     outside = 0
-    for i, call in enumerate(session.tool_calls):
+    for call in session.tool_calls:
+        if call.error or call.name not in _CHANGE_TOOLS:
+            continue
+        path = _call_path(call)
+        if path is not None and not _path_inside_cwd(path, session.cwd):
+            outside += 1
+    # Walked from the end: the last edit is usually recent, and working out whether a shell command
+    # edited the project is the expensive part, so only the commands after it are parsed.
+    for i in range(len(session.tool_calls) - 1, -1, -1):
+        call = session.tool_calls[i]
         if call.error:
             continue
         if call.name == "Bash":
@@ -778,16 +893,15 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
             command = call.input.get("command")
             if isinstance(command, str) and bash_edits_project(command, session.cwd):
                 last_i, last_at, last_by = i, call.at, "Bash"
+                break
             continue
         if call.name not in _CHANGE_TOOLS:
             continue
         path = _call_path(call)
-        if path is None:
-            continue
-        if not _path_inside_cwd(path, session.cwd):
-            outside += 1
+        if path is None or not _path_inside_cwd(path, session.cwd):
             continue
         last_i, last_at, last_by = i, call.at, call.name
+        break
     if last_i is None:
         return None
 
@@ -1108,6 +1222,9 @@ def _check_summary(text: str) -> str | None:
     return None
 
 
+#: Text every shell edit contains: a redirect, or the name of a command that writes or patches files.
+_EDIT_HINTS = (">", "tee", "sed", "perl", "cp", "mv", "install", "curl", "wget", "patch", "git")
+
 #: git subcommands that rewrite files in the working tree.
 _GIT_TREE_WRITES = frozenset({"apply", "restore", "pull", "merge", "rebase", "cherry-pick", "am", "revert"})
 
@@ -1119,6 +1236,10 @@ def bash_edits_project(command: str, cwd: str) -> bool:
     `cp` / `mv` / `install`) that resolves inside `cwd`, and git or patch commands that rewrite the
     working tree. After a `cd` elsewhere, relative targets are not taken to be the project's.
     """
+    # Every edit below needs one of these in the command as typed (nothing is expanded), so a command
+    # with none of them is not an edit, and the shell parser, the slow part, is skipped for it.
+    if not any(hint in command for hint in _EDIT_HINTS):
+        return False
     try:
         segments = split_shell_segments(strip_heredoc_bodies(command))
     except ValueError:

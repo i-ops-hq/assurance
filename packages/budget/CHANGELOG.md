@@ -1,5 +1,13 @@
 # Unreleased
 
+- **The Stop hook is faster on long sessions, and says the same thing.** It reads the last 2 MB of the
+  transcript, and the whole file only when the last edit is further back than that. The project
+  folder still comes from the start of the session, and whether the session ever wrote
+  `.assurance/config.toml` is still judged over the whole transcript, reading only the lines that name
+  the file. On real transcripts of 58 to 81 MB the hook went from 230-420 ms to 34-139 ms, with output
+  identical to a whole-file read on every transcript it was compared against. Finding the last edit
+  now walks back from the end, and a shell command with no redirect and no file-writing command in it
+  skips the shell parser, which also makes `assurance audit` faster.
 - **Test results are read from more runners, and a passing cargo run is no longer called failed.**
   When a test's exit status belongs to something piped after it, the result is read from the
   runner's own summary: pytest as before, and now jest, vitest, mocha, `node --test` (both
