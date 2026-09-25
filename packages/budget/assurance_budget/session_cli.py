@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from collections import Counter
 from datetime import datetime
@@ -430,7 +431,7 @@ def build_report(
         "failed": failed,
         "by_tool": by_tool,
         "loops": [
-            {"rounds": loop.rounds, "action": loop.action, "error": loop.error}
+            {"rounds": loop.rounds, "action": _loop_action(loop.action), "error": loop.error}
             for loop in loops
         ],
         "assistant_turns": session.assistant_turns,
@@ -617,8 +618,18 @@ def _after_last_edit_line(after: dict[str, Any]) -> str:
     return f"{prefix} {test_bit}, {check_bit}"
 
 
+def _loop_action(action: str) -> str:
+    """A loop's step as shown to a reader: an edit's content key is how it is told apart, not shown.
+
+    Only a change tool's step carries the key. A command is shown whole, even one that happens to
+    end in something shaped like it, such as a comment naming a commit.
+    """
+    name, _, _ = action.partition(" ")
+    return _CONTENT_MARK.sub("", action) if name in _CHANGE_TOOL_NAMES else action
+
+
 def _loop_line(loop: Stalled) -> str:
-    action = loop.action
+    action = _loop_action(loop.action)
     name, _, short = action.partition(" ")
     if short:
         labelled = f"{name} `{short}`"
@@ -644,6 +655,11 @@ def _tool_breakdown(by_tool: dict[str, int]) -> str:
     return ", ".join(parts)
 
 
+#: Tools that change a file. Their loop key carries what they changed, not only where.
+_CHANGE_TOOL_NAMES = frozenset({"Edit", "MultiEdit", "Write", "NotebookEdit"})
+_CONTENT_MARK = re.compile(r" #[0-9a-f]{12}$")
+
+
 def _short_input(call: ToolCall) -> str:
     data = call.input
     if call.name in ("Bash", "PowerShell"):
@@ -652,6 +668,13 @@ def _short_input(call: ToolCall) -> str:
             return command
     path = data.get("file_path")
     if isinstance(path, str) and path:
+        if call.name in _CHANGE_TOOL_NAMES:
+            # Four different edits to one file are four steps, not one step repeated. The loop watch
+            # needs "enough of its arguments to tell two calls apart", so what an edit changes is part
+            # of its key; the same edit tried again, the real loop, still matches itself.
+            change = {key: value for key, value in data.items() if key != "file_path"}
+            digest = hashlib.sha256(json.dumps(change, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+            return f"{path} #{digest[:12]}"
         return path
     dumped = json.dumps(data, sort_keys=True, default=str)
     return hashlib.sha256(dumped.encode("utf-8")).hexdigest()[:12]
