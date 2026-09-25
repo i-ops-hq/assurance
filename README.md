@@ -107,6 +107,13 @@ inside a session; only you can run it, so it adds nothing to Claude's context un
 plugin or `assurance hook install`, not both: together they audit twice per turn, and
 `assurance hook status` says so.
 
+On Windows, Claude Code runs hooks in Git Bash when Git for Windows is installed, and in PowerShell
+when it is not. The plugin's hook is a shell script, so it needs Git Bash; without it, use
+`uvx assurance@latest hook install`, which writes a hook both shells can run. Commands Claude runs
+through the PowerShell tool are read like Bash ones: `Set-Content app.py` counts as an edit and
+`pytest` as a test. Their result is taken from what the runner printed, because that tool's error
+flag has not been checked against its exit status.
+
 <details>
 <summary>Or add it by hand</summary>
 

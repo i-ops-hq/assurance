@@ -101,3 +101,17 @@ def test_without_uvx_or_assurance_the_hook_says_so_and_lets_the_session_end(tmp_
     assert "this turn was not audited" in json.loads(hook.stdout)["systemMessage"]
     by_hand = subprocess.run(["sh", str(script), "audit"], capture_output=True, text=True, env=env, check=False)
     assert by_hand.returncode == 2 and "neither uvx nor assurance was found" in by_hand.stderr
+
+
+def test_the_script_keeps_unix_line_endings_wherever_it_is_checked_out() -> None:
+    # Git for Windows checks files out with CRLF by default, and bash, Git Bash's included, stops at a
+    # `\r`. `.gitattributes` pins the script to LF so a Windows clone of the marketplace can run it.
+    assert b"\r" not in SCRIPT.read_bytes()
+    rules = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    assert "*.sh text eol=lf" in rules
+
+
+def test_the_script_looks_for_uvx_where_uv_installs_it_on_every_os() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    for place in ('"$HOME/.local/bin/uvx"', '"$HOME/.local/bin/uvx.exe"', "/opt/homebrew/bin/uvx", "/usr/local/bin/uvx"):
+        assert place in text, place

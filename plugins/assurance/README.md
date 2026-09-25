@@ -15,5 +15,6 @@ claude plugin uninstall assurance@i-ops-hq                # take it out
 `/assurance:audit` shows the whole report inside a session.
 
 It runs `uvx assurance@<version>` (or an `assurance` installed with pip), so it needs
-[uv](https://docs.astral.sh/uv/) or `pip install assurance`. No model, no network beyond fetching the
+[uv](https://docs.astral.sh/uv/) or `pip install assurance`. On Windows the hook is a shell script, so it
+needs Git Bash, which comes with Git for Windows; without it, use `uvx assurance@latest hook install`. No model, no network beyond fetching the
 package once, no account. Source and documentation: https://github.com/i-ops-hq/assurance
