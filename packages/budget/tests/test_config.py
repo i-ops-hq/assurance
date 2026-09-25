@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from assurance_budget import config
 from assurance_budget.cli import main as budget_main
 from assurance_budget.config import ConfigError, limits_for_json, load_ceilings, project_overreach_notes
 from assurance_budget.session_cli import main as audit_main
@@ -15,9 +16,11 @@ from assurance_budget.session_cli import main as audit_main
 
 def _write_user(monkeypatch: pytest.MonkeyPatch, home: Path, body: str) -> None:
     monkeypatch.setenv("HOME", str(home))
-    cfg = home / ".config" / "assurance"
-    cfg.mkdir(parents=True)
-    (cfg / "config.toml").write_text(body, encoding="utf-8")
+    monkeypatch.setenv("USERPROFILE", str(home))  # what Path.home() reads on Windows
+    monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))  # where Windows keeps it
+    path = config._user_config_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(body, encoding="utf-8")
 
 
 def _write_project(project: Path, body: str) -> None:

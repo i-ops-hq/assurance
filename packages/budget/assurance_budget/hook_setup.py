@@ -94,7 +94,7 @@ def hook_command(
     nudge: bool,
     version: str | None,
     which: Callable[[str], str | None] = shutil.which,
-    platform: str = sys.platform,
+    platform: str | None = None,
 ) -> str:
     """The command the hook should run.
 
@@ -110,7 +110,7 @@ def hook_command(
     each other. A bare name means the same thing in both.
     """
     flags = "audit --hook --nudge" if nudge else "audit --hook"
-    windows = platform == "win32"
+    windows = (platform or sys.platform) == "win32"
     uvx = which("uvx")
     if version and uvx:
         runner = "uvx" if scope == "project" or windows else shlex.quote(uvx)
@@ -279,7 +279,9 @@ def _write(path: Path, text: str, *, scope: str, env: Mapping[str, str]) -> Path
     """Write atomically. The file as it was is copied outside the repository first, so a backup
     never shows up in `git status`; returns where that copy is."""
     backup = None
+    crlf = False
     if path.exists():
+        crlf = b"\r\n" in path.read_bytes()
         folder = _backup_dir(env)
         folder.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -287,7 +289,9 @@ def _write(path: Path, text: str, *, scope: str, env: Mapping[str, str]) -> Path
         shutil.copy2(path, backup)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.assurance-tmp")
-    tmp.write_text(text, encoding="utf-8")
+    # The file keeps the line endings it had. Written in text mode on Windows, every `\n` would
+    # become `\r\n`, and a committed `.claude/settings.json` would change on every line.
+    tmp.write_text(text.replace("\n", "\r\n") if crlf else text, encoding="utf-8", newline="")
     os.replace(tmp, path)
     return backup
 
@@ -341,6 +345,7 @@ def main(
     which: Callable[[str], str | None] = shutil.which,
     interactive: Callable[[], bool] | None = None,
     ask: Callable[[str], str] = input,
+    platform: str | None = None,
 ) -> int:
     """Run `assurance hook`. 0 done (or nothing to do), 1 not written or not installed, 2 refused."""
     args = build_parser().parse_args(list(argv) if argv is not None else None)
@@ -359,7 +364,7 @@ def main(
             before_text = path.read_text(encoding="utf-8") if current is not None else None
             if args.action == "install":
                 command = args.command or hook_command(
-                    scope, nudge=not args.no_nudge, version=_this_version(), which=which
+                    scope, nudge=not args.no_nudge, version=_this_version(), which=which, platform=platform
                 )
                 after = with_hook(current or {}, command)
                 if current is not None and after == current:

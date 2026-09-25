@@ -263,7 +263,7 @@ def _positive_number(origin: Path | str, key: str, raw: Any) -> float:
 
 
 def _display_path(path: Path, cwd: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(Path(cwd).expanduser().resolve()))
+    try:  # `.assurance/config.toml` on every platform, as the README and the notes spell it
+        return path.resolve().relative_to(Path(cwd).expanduser().resolve()).as_posix()
     except (ValueError, OSError):
         return str(path)

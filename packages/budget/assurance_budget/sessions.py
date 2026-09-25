@@ -2311,7 +2311,7 @@ def _display_path(normed: str, cwd: str) -> str:
         return normed
     sep = "\\" if _pathmod(cwd) is ntpath else "/"
     rest = normed[len(base.rstrip(sep)) + 1 :]
-    return rest or "."
+    return rest.replace("\\", "/") or "."  # shown with `/` whatever recorded it: `src/app.py`
 
 
 def _projects_root(projects_dir: Path | None) -> Path | None:
