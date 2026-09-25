@@ -1,3 +1,9 @@
+# Unreleased
+
+- **`assurance audit`'s public functions have docstrings.** `help()` on `build_parser`, `main`,
+  `build_report` and `format_report` now says what each returns, and for `main` what exit codes 0, 1
+  and 2 mean. No behaviour change.
+
 # 0.2.3
 
 Two ways `--hook` stayed silent when it should not have, both found in a real desktop Claude Code run:

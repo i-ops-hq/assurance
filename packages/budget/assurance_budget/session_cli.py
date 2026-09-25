@@ -112,6 +112,8 @@ def _hook_print(payload: dict[str, Any]) -> None:
     print(json.dumps(payload))
 
 def build_parser() -> argparse.ArgumentParser:
+    """The `assurance audit` command line: an optional transcript path, `--json`, the two
+    `--fail-on-*` gates, `--demo`, and `--hook` with `--nudge`."""
     parser = argparse.ArgumentParser(
         prog="assurance audit",
         description=(
@@ -157,6 +159,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run `assurance audit` and return its exit code.
+
+    0 when the session was read. 1 when `--fail-on-loop` or `--fail-on-unverified` was given and
+    its condition holds. 2 when there was nothing to read: no session recorded for this folder, a
+    transcript that cannot be read, or a limits config that cannot be loaded. A usage error exits 2
+    from argparse. `--hook` hands off to `run_hook`, which always returns 0.
+    """
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     if args.hook:
@@ -260,6 +269,13 @@ def build_report(
     limits_changed: bool = False,
     bash_kinds: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    """The report as a dict: what `--json` prints, and what `format_report` reads from.
+
+    What the reader could not account for sits beside what it could — `not_read` with its reasons,
+    `unmatched_results`, and `unclassified_commands` broken down by command — so no count appears
+    without the part it could not count. `edited_without_read` is always here, even for sources
+    where the text report leaves it out.
+    """
     by_tool = dict(Counter(call.name for call in session.tool_calls))
     failed = sum(1 for call in session.tool_calls if call.error)
     duration = None
@@ -317,6 +333,13 @@ def build_report(
 
 
 def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]) -> str:
+    """The text report: a header, tool counts, loops, what ran after the last edit, then what could
+    not be classified or read.
+
+    "Edited without reading it first" is printed only for sources whose harness does not already
+    refuse an edit to an unread file; for Claude Code that line would report this reader's blind
+    spot as the agent's fault.
+    """
     empty = (
         not session.tool_calls
         and session.not_read == 0
