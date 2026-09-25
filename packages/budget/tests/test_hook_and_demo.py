@@ -253,7 +253,7 @@ def test_an_unexpected_error_in_the_audit_still_lets_the_session_end(
 ) -> None:
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path)])
 
-    def boom(_: object) -> None:
+    def boom(*_: object) -> None:
         raise RuntimeError("simulated bug")
 
     monkeypatch.setattr(session_cli, "after_last_edit", boom)

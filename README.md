@@ -202,6 +202,25 @@ pip install assurance-mcp
 > [!IMPORTANT]
 > `--root` is the only folder the tools may read. You set it in your config; the model can't widen it.
 
+## Your project's own tests and checks
+
+The audit knows pytest, `npm test`, `cargo test`, mypy, ruff, eslint, tsc and the like. A project's own
+script is nothing it can recognise, so it says it couldn't classify it rather than guess. Declare it,
+and it counts:
+
+```toml
+# .assurance/config.toml   (commit it, and everyone's audit knows)
+[audit]
+tests = ["./scripts/test.sh"]
+checks = ["python scripts/check.py", "make lint"]
+```
+
+A declared command counts however it is run: `.venv/bin/python scripts/check.py --fast > out.txt`
+matches `python scripts/check.py`. Its result follows the same rule as a test's, so a check piped into
+`tail` is still unknown. A session that changes this file does not get to use what it declares, and
+the report says so: an agent that could declare a do-nothing command a check could pass its own audit.
+The same table in `~/.config/assurance/config.toml` applies to every project on your machine.
+
 ## Limits the agent can't raise
 
 ```toml

@@ -14,9 +14,16 @@ from typing import Any, Sequence
 
 from assurance_core.run_budget import Ceilings, Progress, ProgressWatch, Stalled
 
-from assurance_budget.config import ConfigError, limits_for_json, load_ceilings, project_overreach_notes
+from assurance_budget.config import (
+    ConfigError,
+    limits_for_json,
+    load_ceilings,
+    load_declared,
+    project_overreach_notes,
+)
 from assurance_budget.events import LogError
 from assurance_budget.sessions import (
+    Declared,
     Session,
     ToolCall,
     after_last_edit,
@@ -60,7 +67,8 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         return EXIT_OK
     try:
         session = read_claude_code(Path(data["transcript_path"]).expanduser())
-        after = after_last_edit(session)
+        declared, declared_note = _hook_declared(session)
+        after = after_last_edit(session, declared)
         finding = _hook_finding(after)
     except LogError as exc:
         _hook_print({"systemMessage": f"assurance: could not read this session ({exc}); nothing audited."})
@@ -71,10 +79,16 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
 
     if finding is None:
         return EXIT_OK
-    out: dict[str, Any] = {"systemMessage": f"assurance: {finding}."}
+    message = f"assurance: {finding}."
+    if declared_note:
+        message += f" {declared_note}"
+    elif after is not None and int(after.get("unclassified") or 0) and not (after.get("tests") or after.get("checks")):
+        # Told to you, not to Claude: an agent should not be the one declaring what counts as its check.
+        message += " If one of them is this project's own test or check, declare it under [audit] in .assurance/config.toml and it will count."
+    out: dict[str, Any] = {"systemMessage": message}
     if nudge and not data.get("stop_hook_active"):
         context = (
-            f"Assurance audit of this session: {finding}. Before you say the work is done, run "
+            f"Assurance audit of this session: {finding}.{' ' + declared_note if declared_note else ''} Before you say the work is done, run "
             "the project's tests or checks for what you changed, without piping the test "
             "command into another (or with `set -o pipefail`) so its result is visible, or say "
             "plainly why they cannot be run here."
@@ -108,20 +122,50 @@ def _hook_finding(after: dict[str, Any] | None) -> str | None:
             f"{ran} after it could not be classified{which}, so whether {one} a test or check "
             "is unknown"
         )
-    runs = list(after.get("test_runs") or [])
+    return _last_run_finding(list(after.get("test_runs") or []), "test run", since) or _last_run_finding(
+        list(after.get("check_runs") or []), "check", since
+    )
+
+
+def _last_run_finding(runs: list[dict[str, Any]], noun: str, since: str) -> str | None:
+    """What to say about the last run of a test or a check: nothing when it visibly passed.
+
+    Checks get the same rule as tests. A type checker that failed after the last edit used to leave
+    the hook silent, because only test runs were looked at.
+    """
     if not runs:
-        return None  # only checks ran; they passed or failed on their own terms
+        return None
     last = runs[-1]
     label = str(last.get("label") or last.get("command") or "")
     outcome = last.get("outcome") or ("failed" if last.get("failed") else "passed")
     if outcome == "failed":
-        return f"the last test run after the last edit failed{since}: {label}"
+        return f"the last {noun} after the last edit failed{since}: {label}"
     if outcome == "unknown":
+        whose = noun.split()[0]
         return (
-            f"the last test run after the last edit ({label}) was piped or followed by another "
-            f"command, so its exit status is not the test's and whether it passed is unknown{since}"
+            f"the last {noun} after the last edit ({label}) was piped or followed by another "
+            f"command, so its exit status is not the {whose}'s and whether it passed is unknown{since}"
         )
     return None
+
+
+def _hook_declared(session: Session) -> tuple[Declared | None, str]:
+    """Declared tests and checks for the hook, and a sentence when some could not be used.
+
+    A config file that cannot be read must not break the session, so it becomes a sentence.
+    """
+    try:
+        declared, _sources, notes = load_declared(
+            _project_dir(session), trust_project=not changed_limits_file(session)
+        )
+    except ConfigError as exc:
+        return None, f"Declared tests and checks were not used: {exc}."
+    return declared, " ".join(notes)
+
+
+def _project_dir(session: Session) -> Path:
+    """The project the session worked in: its declarations are the ones that apply to it."""
+    return Path(session.cwd).expanduser() if session.cwd else Path.cwd()
 
 
 def _hook_print(payload: dict[str, Any]) -> None:
@@ -226,12 +270,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"assurance audit: cannot read {path}: {exc}", file=sys.stderr)
         return EXIT_UNREADABLE
 
+    limits_changed = changed_limits_file(session)
+    try:
+        declared, declared_from, declared_notes = load_declared(
+            _project_dir(session), trust_project=not limits_changed
+        )
+    except ConfigError as exc:
+        print(f"assurance audit: {exc}", file=sys.stderr)
+        return EXIT_UNREADABLE
+
     loops = detect_loops(session.tool_calls)
     unread_edits = edited_without_read(session)
-    after = after_last_edit(session)
-    unclassified = unclassified_bash_count(session)
-    bash_kinds = bash_kinds_count(session)
-    limits_changed = changed_limits_file(session)
+    after = after_last_edit(session, declared)
+    unclassified = unclassified_bash_count(session, declared)
+    bash_kinds = bash_kinds_count(session, declared)
     report = build_report(
         session,
         loops,
@@ -241,6 +293,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         ceilings,
         limits_changed=limits_changed,
         bash_kinds=bash_kinds,
+        declared=declared,
+        declared_from=declared_from,
+        declared_notes=declared_notes,
     )
     if args.as_json:
         print(json.dumps(report, indent=2))
@@ -287,6 +342,9 @@ def build_report(
     *,
     limits_changed: bool = False,
     bash_kinds: dict[str, int] | None = None,
+    declared: Declared | None = None,
+    declared_from: Sequence[str] = (),
+    declared_notes: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The report as a dict: what `--json` prints, and what `format_report` reads from.
 
@@ -316,7 +374,7 @@ def build_report(
                     "limit": caps.tool_calls,
                     "source": origin,
                 }
-    kinds = bash_kinds if bash_kinds is not None else bash_kinds_count(session)
+    kinds = bash_kinds if bash_kinds is not None else bash_kinds_count(session, declared)
     payload: dict[str, Any] = {
         "session_id": session.session_id,
         "source": session.source,
@@ -338,11 +396,17 @@ def build_report(
         "edited_without_read": list(unread_edits),
         "after_last_edit": after,
         "unclassified_commands": unclassified,
-        "unclassified_by_command": unclassified_by_command(session),
+        "unclassified_by_command": unclassified_by_command(session, declared),
         "bash_kinds": kinds,
         "over_configured_limit": over_limit,
         "ceilings_source": None if caps is None or caps.source == "built-in defaults" else caps.source,
         "changed_limits_file": limits_changed,
+        "declared": (
+            {"tests": list(declared.tests), "checks": list(declared.checks), "from": list(declared_from)}
+            if declared is not None and (declared.tests or declared.checks)
+            else None
+        ),
+        "declared_notes": list(declared_notes),
     }
     if limits:
         payload["limits"] = limits
@@ -435,6 +499,14 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     if report.get("changed_limits_file"):
         body.append("This session changed .assurance/config.toml — the limits file for this project.")
 
+    declared = report.get("declared")
+    if declared:
+        commands = [*declared["tests"], *declared["checks"]]
+        shown = ", ".join(commands[:3]) + (f", {len(commands) - 3} more" if len(commands) > 3 else "")
+        body.append(f"Counted as tests and checks because {' and '.join(declared['from'])} declares them: {shown}.")
+    for note in report.get("declared_notes") or []:
+        body.append(note)
+
     bookkeeping = sum(session.records.values())
     body.append(
         "Also in the transcript: "
@@ -493,6 +565,9 @@ def _after_last_edit_line(after: dict[str, Any]) -> str:
     if labels:
         test_bit = f"{test_bit} ({', '.join(labels)})"
     check_bit = _count_phrase(checks, "check", "checks")
+    check_labels = list(after.get("check_labels") or [])
+    if check_labels:
+        check_bit = f"{check_bit} ({', '.join(check_labels)})"
     return f"{prefix} {test_bit}, {check_bit}"
 
 

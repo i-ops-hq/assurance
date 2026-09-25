@@ -7,6 +7,7 @@ Nothing here consults a model or the network. A line that is not a known shape i
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -16,7 +17,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, Sequence
 
 from assurance_budget.events import LogError
 
@@ -151,6 +152,48 @@ _PYTHON_NAMES = frozenset({"python", "python3", "pypy3"}) | {
 _PIP_NAMES = frozenset({"pip", "pip3"})
 
 BashKind = Literal["test", "check", "read", "write", "unclassified", "neutral"]
+
+
+@dataclass(frozen=True)
+class Declared:
+    """The commands a project, or the person running the audit, says are its tests and checks.
+
+    A project's own check script (`python scripts/check.py`, `make verify`) is nothing this reader can
+    recognise, so undeclared it is reported as unclassified and "no test or check ran" cannot be said.
+    A declared command matches a run that begins with it, once both get the normalisation every
+    command gets: `python scripts/check.py` matches `.venv/bin/python scripts/check.py --fast >
+    out.txt`. A declaration only adds to what is recognised as a test or check; it never turns a
+    command into a read or a write.
+    """
+
+    tests: tuple[str, ...] = ()
+    checks: tuple[str, ...] = ()
+
+    def kind(self, argv: Sequence[str]) -> BashKind | None:
+        """`test` or `check` when `argv` begins with a declared command, else None."""
+        head = tuple(argv)
+        for command in self.tests:
+            want = declared_argv(command)
+            if want and head[: len(want)] == want:
+                return "test"
+        for command in self.checks:
+            want = declared_argv(command)
+            if want and head[: len(want)] == want:
+                return "check"
+        return None
+
+
+@functools.lru_cache(maxsize=256)
+def declared_argv(command: str) -> tuple[str, ...] | None:
+    """A declared command as the argv a run has to begin with; None when it is not one command."""
+    try:
+        segments = split_shell_segments(strip_heredoc_bodies(command))
+    except ValueError:
+        return None
+    if len(segments) != 1:
+        return None
+    argv = _normalise_argv(_drop_redirections(segments[0]))
+    return tuple(argv) if argv else None
 
 # Longest prefixes first so `npm run test` wins over `npm test` over bare names.
 _TEST_PREFIXES: tuple[tuple[str, ...], ...] = (
@@ -710,7 +753,7 @@ def edited_without_read(session: Session) -> list[str]:
     return missing
 
 
-def after_last_edit(session: Session) -> dict[str, Any] | None:
+def after_last_edit(session: Session, declared: Declared | None = None) -> dict[str, Any] | None:
     """Test/check commands that ran after the latest in-cwd Edit/MultiEdit/Write/NotebookEdit.
 
     Returns `None` when the session has no such edits inside `cwd`. Scratch edits outside `cwd`
@@ -750,17 +793,20 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
     tests_failed = 0
     tests_unknown = 0
     checks = 0
+    checks_failed = 0
+    checks_unknown = 0
     test_runs: list[dict[str, Any]] = []
+    check_runs: list[dict[str, Any]] = []
     for call in session.tool_calls[last_i + 1 :]:
         if call.name != "Bash":
             continue
         command = call.input.get("command")
         if not isinstance(command, str):
             continue
-        kind = classify_bash(command)
+        kind = classify_bash(command, declared)
         if kind == "test":
             tests += 1
-            outcome = outcome_of_test_run(command, call.error, call.result_tail)
+            outcome = outcome_of_test_run(command, call.error, call.result_tail, declared)
             if outcome == "failed":
                 tests_failed += 1
             elif outcome == "unknown":
@@ -768,14 +814,27 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
             test_runs.append(
                 {
                     "command": command,
-                    "label": bash_test_label(command),
+                    "label": bash_test_label(command, declared),
                     "failed": outcome == "failed",
                     "outcome": outcome,
                 }
             )
         elif kind == "check":
             checks += 1
-    unclassified = _unclassified_counts(session.tool_calls[last_i + 1 :])
+            outcome = outcome_of_check_run(command, call.error, call.result_tail, declared)
+            if outcome == "failed":
+                checks_failed += 1
+            elif outcome == "unknown":
+                checks_unknown += 1
+            check_runs.append(
+                {
+                    "command": command,
+                    "label": bash_label(command, "check", declared),
+                    "failed": outcome == "failed",
+                    "outcome": outcome,
+                }
+            )
+    unclassified = _unclassified_counts(session.tool_calls[last_i + 1 :], declared)
     return {
         "at": last_at,
         "by": last_by,
@@ -783,15 +842,21 @@ def after_last_edit(session: Session) -> dict[str, Any] | None:
         "tests_failed": tests_failed,
         "tests_unknown": tests_unknown,
         "checks": checks,
+        "checks_failed": checks_failed,
+        "checks_unknown": checks_unknown,
         "test_runs": test_runs,
         "test_labels": _group_test_labels(test_runs),
+        "check_runs": check_runs,
+        "check_labels": _group_test_labels(check_runs),
         "unclassified": sum(unclassified.values()),
         "unclassified_by_command": dict(unclassified),
         "outside_cwd_edits": outside,
     }
 
 
-def outcome_of_test_run(command: str, error: bool, result_tail: str = "") -> str:
+def outcome_of_test_run(
+    command: str, error: bool, result_tail: str = "", declared: Declared | None = None
+) -> str:
     """`passed`, `failed` or `unknown` for one test command.
 
     The tool's error flag is the command's exit status, which is the test's only when nothing after
@@ -799,12 +864,25 @@ def outcome_of_test_run(command: str, error: bool, result_tail: str = "") -> str
     with echo's. Then the result is read from a runner summary line in the output, if there is one
     (`1 failed, 2 passed in 0.03s`), and is otherwise unknown — never assumed to have passed.
     """
-    if _test_exit_is_visible(command):
+    if _exit_is_visible(command, "test", declared):
         return "failed" if error else "passed"
     return _runner_summary(result_tail) or "unknown"
 
 
-def _test_exit_is_visible(command: str) -> bool:
+def outcome_of_check_run(
+    command: str, error: bool, result_tail: str = "", declared: Declared | None = None
+) -> str:
+    """`passed`, `failed` or `unknown` for one check: a linter, a type checker, a declared check.
+
+    The same rule as a test run. Its exit status counts only when nothing after it can replace it,
+    and otherwise the result is unknown: a failed check is not a pass because it was piped.
+    """
+    if _exit_is_visible(command, "check", declared):
+        return "failed" if error else "passed"
+    return "unknown"
+
+
+def _exit_is_visible(command: str, kind: BashKind = "test", declared: Declared | None = None) -> bool:
     try:
         tokens = _scan_shell(strip_heredoc_bodies(command))[0]
     except ValueError:
@@ -819,7 +897,7 @@ def _test_exit_is_visible(command: str) -> bool:
             segments[-1].append(tok)
     pipefail = any(_sets_pipefail(seg) for seg in segments)
     for index, seg in enumerate(segments):
-        if not seg or _classify_segment(seg) != "test":
+        if not seg or _classify_segment(seg, declared) != kind:
             continue
         after = separators[index:]
         if not after:
@@ -946,7 +1024,7 @@ def _group_test_labels(test_runs: list[dict[str, Any]]) -> list[str]:
     return labels
 
 
-def unclassified_bash_count(session: Session) -> int:
+def unclassified_bash_count(session: Session, declared: Declared | None = None) -> int:
     """How many Bash commands could not be classified as test, check, read or write."""
     n = 0
     for call in session.tool_calls:
@@ -956,7 +1034,7 @@ def unclassified_bash_count(session: Session) -> int:
         if not isinstance(command, str):
             n += 1
             continue
-        if classify_bash(command) == "unclassified":
+        if classify_bash(command, declared) == "unclassified":
             n += 1
     return n
 
@@ -967,17 +1045,19 @@ _TWO_WORD_LABELS = frozenset(
 )
 
 
-def unclassified_by_command(session: Session) -> dict[str, int]:
+def unclassified_by_command(session: Session, declared: Declared | None = None) -> dict[str, int]:
     """What the unclassified Bash commands were, by a short label: `python -c`, `curl`, `make lint`.
 
     One label per command, from its first unclassified segment. The label is the program name, plus
     the subcommand for tools like git or make, plus the mode for python (`-c`, `-`, `-m pkg`,
     `script`). A command that cannot be parsed at all is `(unparsed)`. Never the full text.
     """
-    return dict(_unclassified_counts(session.tool_calls))
+    return dict(_unclassified_counts(session.tool_calls, declared))
 
 
-def _unclassified_counts(calls: tuple[ToolCall, ...] | list[ToolCall]) -> Counter[str]:
+def _unclassified_counts(
+    calls: tuple[ToolCall, ...] | list[ToolCall], declared: Declared | None = None
+) -> Counter[str]:
     counts: Counter[str] = Counter()
     for call in calls:
         if call.name != "Bash":
@@ -986,19 +1066,19 @@ def _unclassified_counts(calls: tuple[ToolCall, ...] | list[ToolCall]) -> Counte
         if not isinstance(command, str):
             counts["(no command)"] += 1
             continue
-        if classify_bash(command) != "unclassified":
+        if classify_bash(command, declared) != "unclassified":
             continue
-        counts[_unclassified_label(command)] += 1
+        counts[_unclassified_label(command, declared)] += 1
     return counts
 
 
-def _unclassified_label(command: str) -> str:
+def _unclassified_label(command: str, declared: Declared | None = None) -> str:
     try:
         segments = split_shell_segments(strip_heredoc_bodies(command))
     except ValueError:
         return "(unparsed)"
     for tokens in segments:
-        if _classify_segment(tokens) != "unclassified":
+        if _classify_segment(tokens, declared) != "unclassified":
             continue
         argv = _normalise_argv(_drop_redirections(tokens)) or []
         if not argv:
@@ -1017,7 +1097,7 @@ def _unclassified_label(command: str) -> str:
     return "(inside $( ))"
 
 
-def bash_kinds_count(session: Session) -> dict[str, int]:
+def bash_kinds_count(session: Session, declared: Declared | None = None) -> dict[str, int]:
     """Counts of Bash commands by kind, including unclassified."""
     counts: dict[str, int] = {
         "test": 0,
@@ -1033,7 +1113,7 @@ def bash_kinds_count(session: Session) -> dict[str, int]:
         if not isinstance(command, str):
             counts["unclassified"] += 1
             continue
-        kind = classify_bash(command)
+        kind = classify_bash(command, declared)
         if kind == "neutral":
             counts["read"] += 1
         elif kind in counts:
@@ -1345,8 +1425,13 @@ def _drop_redirections(tokens: list[str]) -> list[str]:
     return out
 
 
-def bash_test_label(command: str) -> str:
+def bash_test_label(command: str, declared: Declared | None = None) -> str:
     """Short label for the first test segment: normalised argv via shlex.join, max 60 chars."""
+    return bash_label(command, "test", declared)
+
+
+def bash_label(command: str, kind: BashKind, declared: Declared | None = None) -> str:
+    """Short label for the first segment of `kind`: normalised argv via shlex.join, max 60 chars."""
     stripped = strip_heredoc_bodies(command)
     try:
         segments = split_shell_segments(stripped)
@@ -1358,7 +1443,7 @@ def bash_test_label(command: str) -> str:
             continue
         if argv[0] in _NEUTRAL_COMMANDS:
             continue
-        if _classify_argv(argv, tokens) == "test":
+        if _classify_segment(tokens, declared) == kind:
             return _truncate_label(shlex.join(argv))
     return _truncate_label(command)
 
@@ -1371,12 +1456,12 @@ def _truncate_label(label: str, limit: int = _LABEL_MAX) -> str:
     return label[: limit - 1] + "…"
 
 
-def classify_bash(command: str) -> BashKind:
+def classify_bash(command: str, declared: Declared | None = None) -> BashKind:
     """Classify a shell command after heredoc strip, quote-aware split, and argv normalisation.
 
     On a parse error the whole command is unclassified. Across segments: any test wins, else any
     check, else any unclassified, else any write, else read. Neutral-only commands are not
-    unclassified.
+    unclassified. A command in `declared` is the test or check it was declared as.
     """
     stripped = strip_heredoc_bodies(command)
     try:
@@ -1386,12 +1471,12 @@ def classify_bash(command: str) -> BashKind:
         return "unclassified"
     kinds: set[BashKind] = set()
     for tokens in segments:
-        kind = _classify_segment(tokens)
+        kind = _classify_segment(tokens, declared)
         if kind != "neutral":
             kinds.add(kind)
     # `X=$(git rev-parse HEAD)` ran `git rev-parse`; `for f in $(ls)` ran `ls`. Those count too.
     for sub in inner:
-        kind = classify_bash(sub) if sub.strip() else "neutral"
+        kind = classify_bash(sub, declared) if sub.strip() else "neutral"
         if kind != "neutral":
             kinds.add(kind)
     if not kinds:
@@ -1407,7 +1492,7 @@ def classify_bash(command: str) -> BashKind:
     return "read"
 
 
-def _classify_segment(tokens: list[str]) -> BashKind:
+def _classify_segment(tokens: list[str], declared: Declared | None = None) -> BashKind:
     argv = _normalise_argv(_drop_redirections(tokens))
     if argv is None:
         return "neutral"
@@ -1415,6 +1500,10 @@ def _classify_segment(tokens: list[str]) -> BashKind:
         return "neutral"
     if argv[0] in _NEUTRAL_COMMANDS:
         return "neutral"
+    if declared is not None:
+        own = declared.kind(argv)
+        if own is not None:
+            return own
     kind = _classify_argv(argv, tokens)
     # `cat a > b` read `a` and wrote `b`. Output to /dev/null or a stream writes nothing.
     if kind in ("read", "neutral") and _redirects_output_to_a_file(tokens):

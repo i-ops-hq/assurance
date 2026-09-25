@@ -4,7 +4,8 @@ Core stays pure: this module is the only place files and environment variables a
 limits. `Budget.allowing(..., ceilings=…)` is what enforces them.
 
 The user file and environment variables set limits; the project file, which sits in the repo an
-agent can write, can only lower them.
+agent can write, can only lower them. The same two files can declare a project's own tests and checks
+under `[audit]`, and the project file's declarations are set aside for any session that changed it.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from assurance_core.run_budget import Ceilings, built_in_ceilings
+
+from assurance_budget.sessions import Declared, declared_argv
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -30,6 +33,7 @@ _ENV_KEYS = {
 }
 
 _BUDGET_KEYS = frozenset(_ENV_KEYS.values())
+_AUDIT_KEYS = ("tests", "checks")
 _KEY_ORDER = ("iterations", "tool_calls", "frontier_calls", "seconds", "retries")
 
 
@@ -97,6 +101,39 @@ def load_ceilings(cwd: Path, env: Mapping[str, str]) -> Ceilings:
     )
 
 
+def load_declared(project: Path, *, trust_project: bool = True) -> tuple[Declared, list[str], list[str]]:
+    """The tests and checks declared under `[audit]`, the files they came from, and notes.
+
+    The user file's declarations always apply. The project's `.assurance/config.toml` sits in the
+    repository the agent works in, so when a session changed it, what it declares is not used for
+    that session: an agent able to declare `echo ok` a check could pass its own audit. The notes say
+    when that happened, so the report never goes quiet about it.
+    """
+    tests: list[str] = []
+    checks: list[str] = []
+    sources: list[str] = []
+    notes: list[str] = []
+    project_path = Path(project).expanduser() / ".assurance" / "config.toml"
+    for path, is_project in ((_user_config_path(), False), (project_path, True)):
+        if not path.is_file():
+            continue
+        label = _display_path(path, project)
+        if is_project and not trust_project:
+            try:
+                declares = bool(_read_audit_table(path))
+            except ConfigError:
+                declares = True  # changed by the session and now unreadable: say so, do not guess
+            if declares:
+                notes.append(f"This session changed {label}, so the tests and checks it declares were not used.")
+            continue
+        table = _read_audit_table(path)
+        if table:
+            tests.extend(table.get("tests", []))
+            checks.extend(table.get("checks", []))
+            sources.append(label)
+    return Declared(tuple(tests), tuple(checks)), sources, notes
+
+
 def limits_for_json(ceilings: Ceilings) -> dict[str, dict[str, Any]]:
     """Per-key value and origin for every limit that is not a built-in default."""
     base = built_in_ceilings()
@@ -150,7 +187,7 @@ def _user_config_path() -> Path:
     return Path.home() / ".config" / "assurance" / "config.toml"
 
 
-def _read_budget_table(path: Path) -> dict[str, float]:
+def _read_toml(path: Path) -> dict[str, Any]:
     if tomllib is None:
         raise ConfigError(
             f"{path}: Python 3.10 cannot read TOML config files (tomllib arrives in 3.11). "
@@ -166,6 +203,11 @@ def _read_budget_table(path: Path) -> dict[str, float]:
         raise ConfigError(f"{path}: {exc}") from exc
     if not isinstance(data, dict):
         raise ConfigError(f"{path}: root must be a table")
+    return data
+
+
+def _read_budget_table(path: Path) -> dict[str, float]:
+    data = _read_toml(path)
     budget = data.get("budget")
     if budget is None:
         return {}
@@ -176,6 +218,30 @@ def _read_budget_table(path: Path) -> dict[str, float]:
         if key not in _BUDGET_KEYS:
             raise ConfigError(f"{path}: unknown key {key!r} under [budget]")
         out[key] = _positive_number(path, key, raw)
+    return out
+
+
+def _read_audit_table(path: Path) -> dict[str, list[str]]:
+    """`[audit]` tests and checks, each a single command. Anything else is refused with the file named."""
+    audit = _read_toml(path).get("audit")
+    if audit is None:
+        return {}
+    if not isinstance(audit, dict):
+        raise ConfigError(f"{path}: [audit] must be a table")
+    out: dict[str, list[str]] = {}
+    for key, raw in audit.items():
+        if key not in _AUDIT_KEYS:
+            raise ConfigError(f"{path}: unknown key {key!r} under [audit]; it takes tests and checks")
+        example = "make test" if key == "tests" else "make lint"
+        if not isinstance(raw, list) or not all(isinstance(c, str) and c.strip() for c in raw):
+            raise ConfigError(f'{path}: [audit] {key} must be a list of commands, like {key} = ["{example}"]')
+        for command in raw:
+            if declared_argv(command) is None:
+                raise ConfigError(
+                    f"{path}: [audit] {key} entry {command!r} is not one command; "
+                    "declare the command itself, without &&, | or ;"
+                )
+        out[key] = [c.strip() for c in raw]
     return out
 
 
