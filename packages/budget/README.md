@@ -31,7 +31,8 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 
 `assurance audit --demo` prints this from any folder. As a Claude Code **Stop hook**, it runs after
 every turn and speaks only when the last edit wasn't followed by a passing test or check; `--nudge`
-also sends Claude back to run them (once per turn, and it never fails the session):
+also sends Claude back to run them (once per turn, and it never fails the session).
+`assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
 { "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx assurance@0.1.3 audit --hook --nudge" } ] } ] } }

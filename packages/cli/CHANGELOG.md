@@ -1,3 +1,9 @@
+# Unreleased
+
+- **`assurance hook`** reaches `assurance-budget`'s `hook install | remove | status`, which adds the
+  Claude Code Stop hook after showing the change and takes it out again. Listed in `--help` and on the
+  start screen.
+
 # 0.6.1
 
 - **`audit` comes first** on the start screen, in `assurance --help`, and in the command list; the

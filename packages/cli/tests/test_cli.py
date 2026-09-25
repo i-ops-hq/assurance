@@ -840,8 +840,22 @@ def test_help_lists_every_forwarded_command(capsys) -> None:
     with pytest.raises(SystemExit):
         main(["--help"])
     out = capsys.readouterr().out
-    for name in ("deps", "budget", "authority"):
+    for name in ("deps", "budget", "authority", "audit", "hook"):
         assert name in out
+
+
+def test_the_hook_subcommand_reaches_the_installer(tmp_path: Path, capsys, monkeypatch) -> None:
+    """`assurance hook` is forwarded whole to assurance-budget, like `audit`."""
+    pytest.importorskip("assurance_budget.hook_setup")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.chdir(tmp_path)
+    assert main(["hook", "install", "--yes", "--command", "uvx assurance@9.9.9 audit --hook --nudge"]) == 0
+    assert "uvx assurance@9.9.9 audit --hook --nudge" in (tmp_path / "claude" / "settings.json").read_text()
+    assert main(["hook", "status"]) in (0, 1)
+    assert "uvx assurance@9.9.9 audit --hook --nudge" in capsys.readouterr().out
+    assert main(["hook", "remove", "--yes"]) == 0
+    assert not (tmp_path / "claude" / "settings.json").exists()
 
 
 def test_version_flag(capsys) -> None:
