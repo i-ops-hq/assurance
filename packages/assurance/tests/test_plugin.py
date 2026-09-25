@@ -115,3 +115,13 @@ def test_the_script_looks_for_uvx_where_uv_installs_it_on_every_os() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     for place in ('"$HOME/.local/bin/uvx"', '"$HOME/.local/bin/uvx.exe"', "/opt/homebrew/bin/uvx", "/usr/local/bin/uvx"):
         assert place in text, place
+
+
+def test_the_readmes_say_how_long_the_script_is_and_are_right() -> None:
+    # "Read what it runs" is only honest if the size it gives is the size it is. A number written in
+    # prose drifts when the code changes, so it is checked here instead of trusted.
+    lines = len(SCRIPT.read_text(encoding="utf-8").splitlines())
+    root = (ROOT / "README.md").read_text(encoding="utf-8")
+    plugin = (PLUGIN / "README.md").read_text(encoding="utf-8")
+    stated = re.findall(r"(\d+)-line shell script", root) + re.findall(r"\((\d+) lines,", plugin)
+    assert stated and all(int(n) == lines for n in stated), (stated, lines)
