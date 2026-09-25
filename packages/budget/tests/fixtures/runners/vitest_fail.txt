@@ -1,0 +1,32 @@
+
+ RUN  v2.1.9 /home/you/project/vitest/fail
+
+ ❯ sum.test.mjs (2 tests | 1 failed) 3ms
+   × subtracts 2ms
+     → expected 1 to be 3 // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  sum.test.mjs > subtracts
+AssertionError: expected 1 to be 3 // Object.is equality
+
+- Expected
++ Received
+
+- 3
++ 1
+
+ ❯ sum.test.mjs:3:41
+      1| import { test, expect } from 'vitest';
+      2| test('adds', () => { expect(1 + 1).toBe(2); });
+      3| test('subtracts', () => { expect(2 - 1).toBe(3); });
+       |                                         ^
+      4| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  22:58:53
+   Duration  167ms (transform 7ms, setup 0ms, collect 4ms, tests 3ms, environment 0ms, prepare 38ms)
+

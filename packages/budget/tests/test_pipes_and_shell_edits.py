@@ -32,7 +32,8 @@ PYTEST_PASS_TAIL = "..                                                          
         ("python3 -m pytest -q 2>&1 | head -3", False, "F\nFAILED test_x.py::t\n", "unknown"),
         ("pytest -q; echo done", False, "", "unknown"),
         ("pytest -q || true", False, "", "unknown"),
-        ("npm test | tail -5", False, "Tests: 1 failed, 2 total", "unknown"),  # only pytest's summary is read
+        ("npm test | tail -5", False, "Tests: 1 failed, 2 total", "failed"),  # jest's summary is read too
+        ("npm test | tail -5", False, "3 specs, 1 failure", "unknown"),  # a runner it does not know is not guessed at
         # pipefail makes the pipe carry the test's status.
         ("set -o pipefail; pytest -q | tail -3", True, "", "failed"),
         ("set -euo pipefail\npytest -q | tail -3", False, "", "passed"),

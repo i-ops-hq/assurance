@@ -220,6 +220,8 @@ _TEST_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("ctest",),
     ("jest",),
     ("vitest",),
+    ("mocha",),
+    ("node", "--test"),
     ("rspec",),
     ("phpunit",),
     ("tox",),
@@ -866,7 +868,35 @@ def outcome_of_test_run(
     """
     if _exit_is_visible(command, "test", declared):
         return "failed" if error else "passed"
-    return _runner_summary(result_tail) or "unknown"
+    return _runner_summary(result_tail, _cut_from_the_end(command, declared)) or "unknown"
+
+
+def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
+    """True when the test's own output was piped through `head` or `sed -n`: the start was kept, so a
+    failure printed after the part that was kept could be what is missing. A `head` in another
+    pipeline of the same command does not touch the test's output."""
+    try:
+        tokens = _scan_shell(strip_heredoc_bodies(command))[0]
+    except ValueError:
+        return True
+    segments: list[list[str]] = [[]]
+    separators: list[str] = []
+    for tok in tokens:
+        if tok in _SHELL_SEPARATORS:
+            separators.append(tok)
+            segments.append([])
+        else:
+            segments[-1].append(tok)
+    for index, seg in enumerate(segments):
+        if not seg or _classify_segment(seg, declared) != "test":
+            continue
+        for later, sep in zip(segments[index + 1 :], separators[index:]):
+            if sep != "|":
+                break
+            argv = _normalise_argv(_drop_redirections(later)) or []
+            if argv and (argv[0] == "head" or (argv[0] == "sed" and "-n" in argv)):
+                return True
+    return False
 
 
 def outcome_of_check_run(
@@ -874,12 +904,13 @@ def outcome_of_check_run(
 ) -> str:
     """`passed`, `failed` or `unknown` for one check: a linter, a type checker, a declared check.
 
-    The same rule as a test run. Its exit status counts only when nothing after it can replace it,
-    and otherwise the result is unknown: a failed check is not a pass because it was piped.
+    The same rule as a test run. Its exit status counts only when nothing after it can replace it;
+    otherwise the result is read from the checker's own last words (mypy, ruff, tsc, eslint) or is
+    unknown. A failed check is not a pass because it was piped.
     """
     if _exit_is_visible(command, "check", declared):
         return "failed" if error else "passed"
-    return "unknown"
+    return _check_summary(result_tail) or "unknown"
 
 
 def _exit_is_visible(command: str, kind: BashKind = "test", declared: Declared | None = None) -> bool:
@@ -919,17 +950,161 @@ def _sets_pipefail(tokens: list[str]) -> bool:
 
 
 _PYTEST_SUMMARY = re.compile(r"\b(\d+) (passed|failed|errors?)\b.* in [\d.]+s\b")
+_COUNT = re.compile(r"\b(\d+) (passed|failed|errors?|passing|failing|pass|fail)\b")
+
+# Each runner's summary, from real runs of each (tests/fixtures/runners). A failure count is always
+# printed after the pass count, so a `tail` that keeps a pass keeps any failure too.
+_JEST_START = re.compile(r"^(Test Suites:\s+.*\b\d+ total|Test Files\s{2,}.*\(\d+\))$")  # jest, vitest
+_JEST_TESTS = re.compile(r"^(Tests:\s+.*\b\d+ total|Tests\s{2,}.*\(\d+\))$")  # jest, vitest
+_NODE_START = re.compile(r"^[#ℹ] tests \d+$")  # node --test, TAP and spec reporters
+_NODE_COUNT = re.compile(r"^[#ℹ] (pass|fail) (\d+)$")
+_MOCHA_PASSING = re.compile(r"^(\d+) passing \(\S+\)$")
+_MOCHA_FAILING = re.compile(r"^(\d+) failing$")
+_BUN_COUNT = re.compile(r"^(\d+) (pass|fail)$")
+_BUN_FOOTER = re.compile(r"^Ran \d+ tests? across \d+ files?\.")
+_CARGO_RESULT = re.compile(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed;")
+_CARGO_FAILED = re.compile(r"^error: (test failed|\d+ targets? failed)")
 
 
-def _runner_summary(text: str) -> str | None:
-    """A pytest summary line near the end of the output: `failed` if anything failed or errored,
-    `passed` if only passes were counted. Any other runner's output is not guessed at."""
-    for line in reversed([ln for ln in text.splitlines() if ln.strip()][-6:]):
-        if _PYTEST_SUMMARY.search(line):
-            if re.search(r"\b\d+ (failed|errors?)\b", line):
-                return "failed"
-            if re.search(r"\b\d+ passed\b", line):
-                return "passed"
+@dataclass
+class _Run:
+    """One test run's summary: how many passed, and whether any failed."""
+
+    passed: int = 0
+    failed: bool = False
+    clean: bool = False  # the runner said, in so many words, that nothing failed
+
+
+def _runner_summary(text: str, cut_from_the_end: bool = False) -> str | None:
+    """`failed` or `passed` from test-runner summaries in the output, or None when it cannot tell.
+
+    Read only from what a runner prints as its summary: pytest's last line, and the formats of jest,
+    vitest, mocha, node --test, bun and cargo. A failure counted by a run makes that run failed;
+    a run passed only when it counted a pass and said nothing failed, so a run that collected no tests
+    is not a pass. One output can hold several runs: when they disagree the answer is unknown, because
+    which one describes the code as it stands cannot be read off the output. When the output was cut
+    from the end (`| head`), a failure may be what was cut, so only a failure is believed.
+    """
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    runs: list[_Run] = []
+    current: _Run | None = None
+    cargo: _Run | None = None
+    bun_run: _Run | None = None
+    bun = any(_BUN_FOOTER.search(ln) for ln in lines)
+    for line in lines[-6:]:
+        if _PYTEST_SUMMARY.search(line) and not line.startswith("test result:"):
+            run = _Run()
+            for number, word in _COUNT.findall(line):
+                if word == "passed":
+                    run.passed += int(number)
+                elif int(number) > 0:
+                    run.failed = True
+            run.clean = not run.failed
+            runs.append(run)
+    for line in lines:
+        if _JEST_START.search(line):
+            current = _Run()
+            runs.append(current)
+            _add_counts(current, line)
+        elif _JEST_TESTS.search(line):
+            if current is None:
+                current = _Run()
+                runs.append(current)
+            _add_counts(current, line)
+            current.clean = not current.failed
+            current = None
+        elif _NODE_START.search(line):
+            current = _Run()
+            runs.append(current)
+        elif node := _NODE_COUNT.search(line):
+            # node prints a run's pass count before its fail count, so a pass after a fail is the
+            # next run, even when a filter such as `grep "^# (pass|fail)"` removed the `# tests` line.
+            if current is None or (node.group(1) == "pass" and (current.failed or current.clean)):
+                current = _Run()
+                runs.append(current)
+            if node.group(1) == "pass":
+                current.passed += int(node.group(2))
+            elif int(node.group(2)) > 0:
+                current.failed = True
+            else:
+                current.clean = True
+        elif mocha := _MOCHA_PASSING.search(line):
+            current = _Run(passed=int(mocha.group(1)))
+            runs.append(current)
+        elif _MOCHA_FAILING.search(line):
+            if current is None:
+                current = _Run()
+                runs.append(current)
+            current.failed = current.failed or int(line.split()[0]) > 0
+        elif bun and (count := _BUN_COUNT.search(line)):
+            if bun_run is None:
+                bun_run = _Run()
+                runs.append(bun_run)
+            if count.group(2) == "pass":
+                bun_run.passed += int(count.group(1))
+            elif int(count.group(1)) > 0:
+                bun_run.failed = True
+            else:
+                bun_run.clean = True
+        elif bun and _BUN_FOOTER.search(line):
+            bun_run = None
+        elif cargo_line := _CARGO_RESULT.search(line):
+            if cargo is None:
+                cargo = _Run()
+                runs.append(cargo)  # every binary of one `cargo test` is one run
+            cargo.passed += int(cargo_line.group(2))
+            cargo.failed = cargo.failed or cargo_line.group(1) == "FAILED" or int(cargo_line.group(3)) > 0
+            cargo.clean = not cargo.failed
+        elif _CARGO_FAILED.search(line):
+            if cargo is None:
+                cargo = _Run()
+                runs.append(cargo)
+            cargo.failed = True
+    # mocha prints a failing line only when something failed, so its last run says clean by silence;
+    # that is only safe to believe when the end of the output was kept.
+    for run in runs:
+        if not run.failed and not run.clean and run.passed and not cut_from_the_end:
+            run.clean = True
+    verdicts = {"failed" if run.failed else "passed" if run.passed and run.clean else "none" for run in runs}
+    verdicts.discard("none")
+    if verdicts == {"failed"}:
+        return "failed"
+    if verdicts == {"passed"} and not cut_from_the_end:
+        return "passed"
+    return None
+
+
+def _add_counts(run: _Run, line: str) -> None:
+    for number, word in _COUNT.findall(line):
+        if word in ("passed", "passing", "pass"):
+            run.passed += int(number) if line.lstrip().startswith("Tests") else 0
+        elif int(number) > 0:
+            run.failed = True
+
+
+#: What linters and type checkers print when they are done. mypy and ruff say both ways; tsc and
+#: eslint say nothing when clean, so a clean run piped away stays unknown. eslint exits 0 on
+#: warnings unless told otherwise, so only a counted error is a failure.
+_CHECK_PASSED = (
+    re.compile(r"^Success: no issues found in \d+ source files?$"),  # mypy
+    re.compile(r"^All checks passed!$"),  # ruff
+)
+_CHECK_FAILED = (
+    re.compile(r"^Found [1-9]\d* errors? in \d+ files? \(checked \d+ source files?\)$"),  # mypy
+    re.compile(r"^Found [1-9]\d* errors?\.$"),  # ruff
+    re.compile(r"^\S.*\(\d+,\d+\): error TS\d+: "),  # tsc
+    re.compile(r"^Found [1-9]\d* errors? in \d+ files?\.$"),  # tsc --pretty
+    re.compile(r"^✖ \d+ problems? \([1-9]\d* errors?, \d+ warnings?\)$"),  # eslint
+)
+
+
+def _check_summary(text: str) -> str | None:
+    """`failed` or `passed` from what a linter or type checker printed last, or None."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if any(p.search(ln) for ln in lines for p in _CHECK_FAILED):
+        return "failed"
+    if any(p.search(ln) for ln in lines[-3:] for p in _CHECK_PASSED):
+        return "passed"
     return None
 
 

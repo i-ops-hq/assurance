@@ -1,5 +1,15 @@
 # Unreleased
 
+- **Test results are read from more runners, and a passing cargo run is no longer called failed.**
+  When a test's exit status belongs to something piped after it, the result is read from the
+  runner's own summary: pytest as before, and now jest, vitest, mocha, `node --test` (both
+  reporters), bun and cargo, each checked against real output. 0.2.3 read a passing
+  `cargo test | tail` as failed, because `0 failed` matched the pytest pattern. A run that counted no
+  tests is not a pass. An output holding a failing run and a passing one (break it, watch it fail,
+  restore it, in one command) is unknown rather than guessed. Output cut by `head` can show a failure
+  but never a pass, because the failure may be what was cut. A piped check is read from mypy's and
+  ruff's last line and from tsc's and eslint's errors; tsc and eslint print nothing when clean, so a
+  clean piped run stays unknown. `mocha` and `node --test` are recognised as tests.
 - **Declare a project's own tests and checks.** `[audit]` in `.assurance/config.toml` (or in
   `~/.config/assurance/config.toml`) takes `tests = [...]` and `checks = [...]`, one command each. A
   declared command counts however it is run, so `.venv/bin/python scripts/check.py --fast` matches
