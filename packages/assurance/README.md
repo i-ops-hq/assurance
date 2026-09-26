@@ -34,6 +34,13 @@ uvx assurance@latest hook install    # --scope project to share it with everyone
 uvx assurance hook remove
 ```
 
+Or as a Claude Code plugin, which also adds `/assurance:audit` for the whole report in a session:
+
+```bash
+claude plugin marketplace add i-ops-hq/assurance
+claude plugin install assurance@i-ops-hq
+```
+
 Or add it to `~/.claude/settings.json` yourself:
 
 ```json

@@ -1,5 +1,9 @@
 # Unreleased
 
+- **`assurance hook status` counts the Claude Code plugin.** When `assurance@i-ops-hq` is on, status
+  says so and in which settings, decided as Claude Code decides it (local over project over user), and
+  warns when a settings hook is there too, because then the audit runs twice per turn.
+  `assurance hook install` warns before adding a second one.
 - **The Stop hook is faster on long sessions, and says the same thing.** It reads the last 2 MB of the
   transcript, and the whole file only when the last edit is further back than that. The project
   folder still comes from the start of the session, and whether the session ever wrote

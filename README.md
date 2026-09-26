@@ -92,6 +92,21 @@ refuses a settings file it cannot parse, and keeps the file as it was in
 `~/.local/state/assurance/backups/`. It nudges at most once per turn, and it never fails or blocks a
 session: if it can't read the transcript it says so and lets Claude finish.
 
+Or install it as a **Claude Code plugin**, and let Claude Code add, pause and remove it:
+
+```bash
+claude plugin marketplace add i-ops-hq/assurance
+claude plugin install assurance@i-ops-hq     # --scope project to turn it on for everyone on the repository
+claude plugin disable assurance@i-ops-hq     # pause it; `enable` turns it back on
+claude plugin uninstall assurance@i-ops-hq   # take it out; `claude plugin marketplace remove i-ops-hq` forgets the source too
+```
+
+The plugin runs the same hook, pinned to the release, and finds `uvx` even when Claude Code starts
+hooks without your terminal's PATH. It also adds `/assurance:audit`, which shows the whole report
+inside a session; only you can run it, so it adds nothing to Claude's context until you do. Use the
+plugin or `assurance hook install`, not both: together they audit twice per turn, and
+`assurance hook status` says so.
+
 <details>
 <summary>Or add it by hand</summary>
 

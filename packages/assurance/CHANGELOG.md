@@ -1,5 +1,12 @@
 # Unreleased
 
+- **A Claude Code plugin**, `assurance@i-ops-hq`: `claude plugin marketplace add i-ops-hq/assurance`,
+  then `claude plugin install assurance@i-ops-hq`. It runs the Stop hook pinned to this release, and
+  `claude plugin disable` / `uninstall` pause it or take it out. It looks for `uvx` where uv installs
+  it, because the desktop app can start hooks without your terminal's PATH, falls back to an
+  `assurance` installed with pip, and without either says the turn was not audited and lets the
+  session end. `/assurance:audit` shows the whole report in a session; only you can run it, so it
+  adds nothing to Claude's context until you do.
 - **`assurance hook install` / `remove` / `status`** in the README, as the way to add the Stop hook
   and take it out; the hand-written JSON stays as the alternative.
 - **The README's sample report shows the corrected "after the last edit" line**: no test or check
