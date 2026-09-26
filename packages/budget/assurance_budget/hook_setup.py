@@ -17,6 +17,7 @@ import importlib.metadata
 import json
 import os
 import re
+import shlex
 import shutil
 import sys
 import time
@@ -40,7 +41,7 @@ _SCOPE_HELP = {
 #: A hook command that runs the audit as a hook, however it was installed: `uvx assurance@0.1.4 audit
 #: --hook`, `/opt/homebrew/bin/uvx assurance@0.1.4 audit --hook --nudge`, `/venv/bin/assurance audit
 #: --hook`, or plain `assurance audit --hook`.
-_OURS = re.compile(r"(?:^|[\s/\\])assurance(?:@[\w.+!-]+)?\s+audit\b.*\s--hook\b")
+_OURS = re.compile(r"(?:^|[\s/\\\"'])assurance(?:\.exe)?(?:@[\w.+!-]+)?[\"']?\s+audit\b.*\s--hook\b", re.I)
 _PINNED = re.compile(r"\bassurance@([\w.+!-]+)")
 
 
@@ -93,23 +94,30 @@ def hook_command(
     nudge: bool,
     version: str | None,
     which: Callable[[str], str | None] = shutil.which,
+    platform: str | None = None,
 ) -> str:
     """The command the hook should run.
 
     With uv installed, `uvx assurance@<this version>`: pinned, because a hook runs after every turn in
-    every project and should run a version somebody chose. In a file that stays on this machine the
-    full path of `uvx` is written, because the desktop app does not always start hooks with the
-    PATH your terminal has; a project file is shared, so it says `uvx` and lets each machine find it.
-    Without uv, the `assurance` command this was run from.
+    every project and should run a version somebody chose. Without uv, the `assurance` command this
+    was run from.
+
+    On macOS and Linux, a file that stays on this machine gets the full path, quoted when it has a
+    space, because the desktop app starts hooks with only `/usr/bin:/bin:/usr/sbin:/sbin` on PATH. A
+    project file is shared, so it says `uvx` and lets each machine find it. On Windows the bare name
+    is written for every scope: apps there get the user's full PATH, and Claude Code runs a hook in
+    Git Bash or in PowerShell depending on what is installed, which quote paths in ways that break
+    each other. A bare name means the same thing in both.
     """
     flags = "audit --hook --nudge" if nudge else "audit --hook"
+    windows = (platform or sys.platform) == "win32"
     uvx = which("uvx")
     if version and uvx:
-        runner = "uvx" if scope == "project" else uvx
+        runner = "uvx" if scope == "project" or windows else shlex.quote(uvx)
         return f"{runner} assurance@{version} {flags}"
     exe = which("assurance")
-    if exe and scope != "project":
-        return f"{exe} {flags}"
+    if exe and scope != "project" and not windows:
+        return f"{shlex.quote(exe)} {flags}"
     return f"assurance {flags}"
 
 
@@ -271,7 +279,9 @@ def _write(path: Path, text: str, *, scope: str, env: Mapping[str, str]) -> Path
     """Write atomically. The file as it was is copied outside the repository first, so a backup
     never shows up in `git status`; returns where that copy is."""
     backup = None
+    crlf = False
     if path.exists():
+        crlf = b"\r\n" in path.read_bytes()
         folder = _backup_dir(env)
         folder.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -279,7 +289,9 @@ def _write(path: Path, text: str, *, scope: str, env: Mapping[str, str]) -> Path
         shutil.copy2(path, backup)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.assurance-tmp")
-    tmp.write_text(text, encoding="utf-8")
+    # The file keeps the line endings it had. Written in text mode on Windows, every `\n` would
+    # become `\r\n`, and a committed `.claude/settings.json` would change on every line.
+    tmp.write_text(text.replace("\n", "\r\n") if crlf else text, encoding="utf-8", newline="")
     os.replace(tmp, path)
     return backup
 
@@ -333,9 +345,11 @@ def main(
     which: Callable[[str], str | None] = shutil.which,
     interactive: Callable[[], bool] | None = None,
     ask: Callable[[str], str] = input,
+    platform: str | None = None,
 ) -> int:
     """Run `assurance hook`. 0 done (or nothing to do), 1 not written or not installed, 2 refused."""
     args = build_parser().parse_args(list(argv) if argv is not None else None)
+    _survive_narrow_consoles()
     here = (cwd or Path.cwd()).resolve()
     environ = os.environ if env is None else env
     tty = interactive if interactive is not None else _is_tty
@@ -350,7 +364,7 @@ def main(
             before_text = path.read_text(encoding="utf-8") if current is not None else None
             if args.action == "install":
                 command = args.command or hook_command(
-                    scope, nudge=not args.no_nudge, version=_this_version(), which=which
+                    scope, nudge=not args.no_nudge, version=_this_version(), which=which, platform=platform
                 )
                 after = with_hook(current or {}, command)
                 if current is not None and after == current:
@@ -414,6 +428,19 @@ def main(
     else:
         print("Removed. No other setting in those files changed.")
     return EXIT_OK
+
+
+def _survive_narrow_consoles() -> None:
+    """Replace, rather than crash on, a character the console's encoding has no byte for.
+
+    A settings file can hold any text, and on Windows output sent to a pipe is encoded in the
+    locale's code page, not UTF-8, so printing its diff could stop the command halfway.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if reconfigure is not None and encoding != "utf8":
+            reconfigure(errors="replace")
 
 
 def _is_tty() -> bool:
@@ -490,11 +517,15 @@ def _entry_command(entry: Mapping[str, Any]) -> str:
 
 
 def _runner_problem(command: str, which: Callable[[str], str | None]) -> str | None:
-    first = command.split()[0] if command.split() else ""
+    try:  # Windows splitting keeps the `\` in C:\… paths; POSIX splitting reads it as an escape
+        words = shlex.split(command, posix=sys.platform != "win32")
+    except ValueError:
+        words = command.split()
+    first = words[0].strip("\"'") if words else ""
     if not first:
         return "has an empty command."
-    if os.path.isabs(first) or os.sep in first:
-        if not os.access(first, os.X_OK):
+    if "/" in first or "\\" in first:  # a path, whichever machine wrote it
+        if not (os.path.isfile(first) and os.access(first, os.X_OK)):
             return f"runs {first}, which does not exist or cannot run here."
         return None
     if which(first) is None:

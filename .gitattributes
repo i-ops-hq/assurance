@@ -1,0 +1,4 @@
+# Shell scripts run under bash, including Git Bash on Windows, and bash stops at the first line of a
+# script checked out with Windows line endings. Git for Windows converts to CRLF on checkout by
+# default, so this keeps the plugin's hook script as it is written.
+*.sh text eol=lf

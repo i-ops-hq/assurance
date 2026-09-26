@@ -25,8 +25,14 @@ def _run(
     interactive: bool = False,
     answer: str = "",
     which: dict[str, str] | None = None,
+    platform: str = "darwin",
 ) -> int:
-    env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "XDG_STATE_HOME": str(tmp_path / "state")}
+    # Backups go under XDG_STATE_HOME, or LOCALAPPDATA on Windows: both point into the test's folder.
+    env = {
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "claude"),
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+        "LOCALAPPDATA": str(tmp_path / "state"),
+    }
     return hook_setup.main(
         argv,
         cwd=tmp_path / "project",
@@ -34,6 +40,7 @@ def _run(
         which=_which(which if which is not None else {"uvx": UVX}),
         interactive=lambda: interactive,
         ask=lambda _prompt: answer,
+        platform=platform,
     )
 
 
@@ -118,20 +125,22 @@ def test_project_scope_is_shared_so_it_does_not_hardcode_this_machines_path(tmp_
     assert _run(tmp_path, ["install", "--yes", "--scope", "project"]) == 0
     path = tmp_path / "project" / ".claude" / "settings.json"
     assert _stop_commands(path)[0].startswith("uvx assurance@")
-    assert hook_command("user", nudge=True, version="0.1.4", which=_which({"uvx": UVX})) == (
+    assert hook_command("user", nudge=True, version="0.1.4", which=_which({"uvx": UVX}), platform="darwin") == (
         f"{UVX} assurance@0.1.4 audit --hook --nudge"
     )
-    assert hook_command("local", nudge=False, version="0.1.4", which=_which({"uvx": UVX})) == (
+    assert hook_command("local", nudge=False, version="0.1.4", which=_which({"uvx": UVX}), platform="linux") == (
         f"{UVX} assurance@0.1.4 audit --hook"
     )
 
 
 def test_without_uv_it_runs_the_assurance_command_it_was_installed_with() -> None:
     which = _which({"assurance": "/home/you/.venv/bin/assurance"})
-    assert hook_command("user", nudge=True, version="0.1.4", which=which) == (
+    assert hook_command("user", nudge=True, version="0.1.4", which=which, platform="linux") == (
         "/home/you/.venv/bin/assurance audit --hook --nudge"
     )
-    assert hook_command("project", nudge=True, version="0.1.4", which=which) == "assurance audit --hook --nudge"
+    assert hook_command("project", nudge=True, version="0.1.4", which=which, platform="linux") == (
+        "assurance audit --hook --nudge"
+    )
 
 
 def test_user_scope_follows_claude_config_dir(tmp_path: Path) -> None:
@@ -350,3 +359,18 @@ def test_installing_the_hook_while_the_plugin_is_on_warns_it_would_run_twice(
     _write(_user_file(tmp_path), {"enabledPlugins": {"assurance@i-ops-hq": True}})
     assert _run(tmp_path, ["install", "--dry-run"]) == 0
     assert "adding the hook here as well runs it twice" in capsys.readouterr().out
+
+
+def test_a_file_keeps_its_line_endings(tmp_path: Path) -> None:
+    # Written in text mode on Windows, every line would have become CRLF, and a committed
+    # .claude/settings.json would show every line changed.
+    for ending in (b"\n", b"\r\n"):
+        path = _user_file(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'{' + ending + b'  "model": "opus"' + ending + b'}' + ending)
+        assert _run(tmp_path, ["install", "--yes"]) == 0
+        data = path.read_bytes()
+        assert data.count(ending) == data.count(b"\n"), ending  # every line ends the way it did
+        assert _run(tmp_path, ["remove", "--yes"]) == 0
+        assert path.read_bytes() == b'{' + ending + b'  "model": "opus"' + ending + b'}' + ending
+        path.unlink()

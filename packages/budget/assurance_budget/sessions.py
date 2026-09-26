@@ -10,8 +10,9 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
-import mmap
+import ntpath
 import os
+import posixpath
 import re
 import shlex
 from collections import Counter
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
 from assurance_budget.events import LogError
+from assurance_budget.powershell import Shell, powershell_as_posix
 
 #: Top-level `type` values that are bookkeeping, not turns or tool calls. Explicit — no catch-all.
 KNOWN_RECORDS = (
@@ -417,30 +419,29 @@ def transcript_changed_limits_file(path: Path, cwd: str) -> bool:
     """
     target = Path(path)
     try:
-        with target.open("rb") as fh:
-            if fh.seek(0, os.SEEK_END) == 0:
-                return False
-            with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as data:
-                lines = _lines_containing(data, b"config.toml")
-                if not lines:
-                    return False
-                ids: set[str] = set()
-                for raw in lines.values():
-                    try:
-                        record = json.loads(raw)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        continue
-                    message = record.get("message") if isinstance(record, dict) else None
-                    content = message.get("content") if isinstance(message, dict) else None
-                    if isinstance(content, list):
-                        ids.update(
-                            b["id"] for b in content
-                            if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str)
-                        )
-                for tool_id in ids:
-                    lines.update(_lines_containing(data, json.dumps(tool_id).encode()))
+        # Read, not memory-mapped: Claude Code is appending to this file while the hook runs, and on
+        # Windows a mapped view can get in the way of the writer. A plain read never does.
+        data = target.read_bytes()
     except OSError as exc:
         raise LogError(f"cannot read {target}: {exc}") from exc
+    lines = _lines_containing(data, b"config.toml")
+    if not lines:
+        return False
+    ids: set[str] = set()
+    for raw in lines.values():
+        try:
+            record = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        message = record.get("message") if isinstance(record, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            ids.update(
+                b["id"] for b in content
+                if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str)
+            )
+    for tool_id in ids:
+        lines.update(_lines_containing(data, json.dumps(tool_id).encode()))
     try:
         text = [lines[offset].decode("utf-8") for offset in sorted(lines)]
     except UnicodeDecodeError:
@@ -448,7 +449,7 @@ def transcript_changed_limits_file(path: Path, cwd: str) -> bool:
     return changed_limits_file(_parse_lines(text, target, cwd=cwd))
 
 
-def _lines_containing(data: mmap.mmap, needle: bytes) -> dict[int, bytes]:
+def _lines_containing(data: bytes, needle: bytes) -> dict[int, bytes]:
     """Every line of `data` that contains `needle`, by the offset it starts at."""
     found: dict[int, bytes] = {}
     at = data.find(needle)
@@ -691,9 +692,9 @@ def changed_limits_file(session: Session) -> bool:
             path = _call_path(call)
             if path is not None and _is_session_limits_file(path, session.cwd):
                 return True
-        if call.name == "Bash":
-            command = call.input.get("command")
-            if not isinstance(command, str):
+        if call.name in _SHELL_TOOLS:
+            command = shell_command(call)
+            if command is None:
                 continue
             # A write target is compared as written, never expanded, so a command that writes the
             # limits file names it; the shell parser is only needed for the ones that do.
@@ -734,7 +735,7 @@ def _segment_cds_away(tokens: list[str], cwd: str) -> bool:
         return True
     if dest in (".", ""):
         return False
-    return _norm_path(dest, cwd) != os.path.normpath(str(Path(cwd).expanduser()))
+    return not _same_path(_norm_path(dest, cwd), _norm_path(cwd, cwd), cwd)
 
 
 def _is_absolute_path_token(path: str) -> bool:
@@ -813,8 +814,7 @@ def _is_session_limits_file(path: str, cwd: str) -> bool:
     """Whether `path`, resolved against `cwd`, is exactly `<cwd>/.assurance/config.toml`."""
     if not cwd or not path:
         return False
-    expected = _norm_path(_LIMITS_FILE_SUFFIX, cwd)
-    return _norm_path(path, cwd) == expected
+    return _same_path(_norm_path(path, cwd), _norm_path(_LIMITS_FILE_SUFFIX, cwd), cwd)
 
 
 def edited_without_read(session: Session) -> list[str]:
@@ -887,12 +887,13 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
         call = session.tool_calls[i]
         if call.error:
             continue
-        if call.name == "Bash":
-            # `sed -i`, `> file`, `tee`, `cp`, `git apply` … change files as surely as Edit does, and
-            # Claude Code is allowed to edit that way. Only changes inside the project count.
-            command = call.input.get("command")
-            if isinstance(command, str) and bash_edits_project(command, session.cwd):
-                last_i, last_at, last_by = i, call.at, "Bash"
+        if call.name in _SHELL_TOOLS:
+            # `sed -i`, `> file`, `tee`, `cp`, `git apply`, `Set-Content` … change files as surely
+            # as Edit does, and Claude Code is allowed to edit that way. Only changes inside the
+            # project count.
+            command = shell_command(call)
+            if command is not None and bash_edits_project(command, session.cwd):
+                last_i, last_at, last_by = i, call.at, call.name
                 break
             continue
         if call.name not in _CHANGE_TOOLS:
@@ -914,22 +915,24 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
     test_runs: list[dict[str, Any]] = []
     check_runs: list[dict[str, Any]] = []
     for call in session.tool_calls[last_i + 1 :]:
-        if call.name != "Bash":
+        if call.name not in _SHELL_TOOLS:
             continue
-        command = call.input.get("command")
-        if not isinstance(command, str):
+        command = shell_command(call)
+        if command is None:
             continue
+        exit_known = exit_status_is_reported(call)
+        typed = str(call.input.get("command"))
         kind = classify_bash(command, declared)
         if kind == "test":
             tests += 1
-            outcome = outcome_of_test_run(command, call.error, call.result_tail, declared)
+            outcome = outcome_of_test_run(command, call.error, call.result_tail, declared, exit_known)
             if outcome == "failed":
                 tests_failed += 1
             elif outcome == "unknown":
                 tests_unknown += 1
             test_runs.append(
                 {
-                    "command": command,
+                    "command": typed,
                     "label": bash_test_label(command, declared),
                     "failed": outcome == "failed",
                     "outcome": outcome,
@@ -937,14 +940,14 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
             )
         elif kind == "check":
             checks += 1
-            outcome = outcome_of_check_run(command, call.error, call.result_tail, declared)
+            outcome = outcome_of_check_run(command, call.error, call.result_tail, declared, exit_known)
             if outcome == "failed":
                 checks_failed += 1
             elif outcome == "unknown":
                 checks_unknown += 1
             check_runs.append(
                 {
-                    "command": command,
+                    "command": typed,
                     "label": bash_label(command, "check", declared),
                     "failed": outcome == "failed",
                     "outcome": outcome,
@@ -971,7 +974,11 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
 
 
 def outcome_of_test_run(
-    command: str, error: bool, result_tail: str = "", declared: Declared | None = None
+    command: str,
+    error: bool,
+    result_tail: str = "",
+    declared: Declared | None = None,
+    exit_known: bool = True,
 ) -> str:
     """`passed`, `failed` or `unknown` for one test command.
 
@@ -980,9 +987,9 @@ def outcome_of_test_run(
     with echo's. Then the result is read from a runner summary line in the output, if there is one
     (`1 failed, 2 passed in 0.03s`), and is otherwise unknown — never assumed to have passed.
     """
-    if _exit_is_visible(command, "test", declared):
+    if exit_known and _exit_is_visible(command, "test", declared):
         return "failed" if error else "passed"
-    return _runner_summary(result_tail, _cut_from_the_end(command, declared)) or "unknown"
+    return _unless_flagged(_runner_summary(result_tail, _cut_from_the_end(command, declared)), error, exit_known)
 
 
 def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
@@ -1014,7 +1021,11 @@ def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
 
 
 def outcome_of_check_run(
-    command: str, error: bool, result_tail: str = "", declared: Declared | None = None
+    command: str,
+    error: bool,
+    result_tail: str = "",
+    declared: Declared | None = None,
+    exit_known: bool = True,
 ) -> str:
     """`passed`, `failed` or `unknown` for one check: a linter, a type checker, a declared check.
 
@@ -1022,9 +1033,21 @@ def outcome_of_check_run(
     otherwise the result is read from the checker's own last words (mypy, ruff, tsc, eslint) or is
     unknown. A failed check is not a pass because it was piped.
     """
-    if _exit_is_visible(command, "check", declared):
+    if exit_known and _exit_is_visible(command, "check", declared):
         return "failed" if error else "passed"
-    return _check_summary(result_tail) or "unknown"
+    return _unless_flagged(_check_summary(result_tail), error, exit_known)
+
+
+def _unless_flagged(summary: str | None, error: bool, exit_known: bool) -> str:
+    """The printed result, unless the tool flagged an error its exit status cannot be checked for.
+
+    Where the flag is not known to be the exit status (the PowerShell tool), a clean flag says
+    nothing, but a raised one still counts: a run that printed "2 passed" and then failed on a
+    coverage threshold is not called passed.
+    """
+    if not exit_known and error and summary == "passed":
+        return "unknown"
+    return summary or "unknown"
 
 
 def _exit_is_visible(command: str, kind: BashKind = "test", declared: Declared | None = None) -> bool:
@@ -1280,13 +1303,7 @@ def bash_edits_project(command: str, cwd: str) -> bool:
 def _path_inside_cwd(path: str, cwd: str) -> bool:
     if not cwd or not path:
         return False
-    normed = _norm_path(path, cwd)
-    base = os.path.normpath(str(Path(cwd).expanduser()))
-    try:
-        Path(normed).relative_to(base)
-        return True
-    except ValueError:
-        return False
+    return _within(_norm_path(path, cwd), _norm_path(cwd, cwd), cwd)
 
 
 def _group_test_labels(test_runs: list[dict[str, Any]]) -> list[str]:
@@ -1321,13 +1338,13 @@ def _group_test_labels(test_runs: list[dict[str, Any]]) -> list[str]:
 
 
 def unclassified_bash_count(session: Session, declared: Declared | None = None) -> int:
-    """How many Bash commands could not be classified as test, check, read or write."""
+    """How many shell commands could not be classified as test, check, read or write."""
     n = 0
     for call in session.tool_calls:
-        if call.name != "Bash":
+        if call.name not in _SHELL_TOOLS:
             continue
-        command = call.input.get("command")
-        if not isinstance(command, str):
+        command = shell_command(call)
+        if command is None:
             n += 1
             continue
         if classify_bash(command, declared) == "unclassified":
@@ -1356,10 +1373,10 @@ def _unclassified_counts(
 ) -> Counter[str]:
     counts: Counter[str] = Counter()
     for call in calls:
-        if call.name != "Bash":
+        if call.name not in _SHELL_TOOLS:
             continue
-        command = call.input.get("command")
-        if not isinstance(command, str):
+        command = shell_command(call)
+        if command is None:
             counts["(no command)"] += 1
             continue
         if classify_bash(command, declared) != "unclassified":
@@ -1403,10 +1420,10 @@ def bash_kinds_count(session: Session, declared: Declared | None = None) -> dict
         "unclassified": 0,
     }
     for call in session.tool_calls:
-        if call.name != "Bash":
+        if call.name not in _SHELL_TOOLS:
             continue
-        command = call.input.get("command")
-        if not isinstance(command, str):
+        command = shell_command(call)
+        if command is None:
             counts["unclassified"] += 1
             continue
         kind = classify_bash(command, declared)
@@ -1704,6 +1721,36 @@ def _redir_takes_target(tok: str) -> bool:
     return _is_redir_token(tok)
 
 
+#: The tools whose calls are shell commands. Claude Code on Windows runs commands through `PowerShell`
+#: by default, and reading only `Bash` made a test run there look like no test at all.
+_SHELL_TOOLS = frozenset({"Bash", "PowerShell"})
+_POSIX = Shell(scan=_scan_shell, is_redirect=_is_redir_token, takes_target=_redir_takes_target)
+
+
+def shell_command(call: ToolCall) -> str | None:
+    """What a shell tool call ran, as text the shell rules read; None when it recorded no command.
+
+    Bash's is read as typed. PowerShell's is rewritten as the POSIX command that does the same to
+    files (`assurance_budget.powershell`), so one set of rules reads both.
+    """
+    command = call.input.get("command")
+    if not isinstance(command, str):
+        return None
+    if call.name == "PowerShell":
+        return powershell_as_posix(command, _POSIX)
+    return command
+
+
+def exit_status_is_reported(call: ToolCall) -> bool:
+    """Whether the tool's error flag is the command's exit status.
+
+    True for Bash. How the PowerShell tool reports a native program's exit status has not been
+    checked against a real transcript, so a test or check run there is judged only by what the
+    runner printed, and is otherwise unknown. Not knowing is said; a guess is not made.
+    """
+    return call.name == "Bash"
+
+
 def _drop_redirections(tokens: list[str]) -> list[str]:
     """Drop redirection operators and their targets from argv used for classification."""
     out: list[str] = []
@@ -1834,7 +1881,7 @@ def _normalise_argv(tokens: list[str]) -> list[str] | None:
     changed = True
     while changed and argv:
         changed = False
-        head = os.path.basename(argv[0].lstrip("("))
+        head = _program_name(argv[0].lstrip("("))
         if head != argv[0]:
             argv[0] = head
         if argv[0] == "timeout" and len(argv) >= 3:
@@ -1889,7 +1936,7 @@ def _normalise_argv(tokens: list[str]) -> list[str] | None:
         return None
 
     # Basename + python/pip alias.
-    base = os.path.basename(argv[0])
+    base = _program_name(argv[0])
     if base in _PYTHON_NAMES or base.startswith("python3."):
         argv[0] = "python"
     elif base in _PIP_NAMES:
@@ -1897,6 +1944,23 @@ def _normalise_argv(tokens: list[str]) -> list[str] | None:
     else:
         argv[0] = base
     return argv
+
+
+_WINDOWS_PROGRAM = re.compile(r"\.(exe|cmd|bat)$", re.IGNORECASE)
+
+
+def _program_name(word: str) -> str:
+    """The program a word runs: its last path part, with Windows' `.exe`, `.cmd` or `.bat` dropped.
+
+    `C:/Python312/python.exe -m pytest` and `npm.cmd test` are `python -m pytest` and `npm test`.
+    A backslash separates only in a word that is Windows-shaped (a drive-letter path, or a `.exe`,
+    `.cmd` or `.bat` program), so a POSIX command reads exactly as it did.
+    """
+    windows = bool(_WINDOWS_PATH.match(word) or _WINDOWS_PROGRAM.search(word))
+    base = (word.replace("\\", "/") if windows else word).rsplit("/", 1)[-1]
+    if _WINDOWS_PROGRAM.search(base):
+        return _WINDOWS_PROGRAM.sub("", base).lower()
+    return base
 
 
 def _drop_paren_tokens(argv: list[str]) -> None:
@@ -2186,12 +2250,50 @@ def _call_path(call: ToolCall) -> str | None:
     return None
 
 
+_WINDOWS_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+_GIT_BASH_DRIVE = re.compile(r"^/([A-Za-z])(?=/|$)")
+
+
+def _pathmod(cwd: str) -> Any:
+    """The path rules of the machine that recorded the session, read from its `cwd`.
+
+    Windows rules for `C:\\…`, POSIX rules otherwise, whichever machine is reading the transcript: a
+    Windows session read on a Mac, or in Linux CI, compared its paths by the wrong rules, and a file
+    on `D:\\` counted as inside a project on `C:\\`.
+    """
+    return ntpath if _WINDOWS_PATH.match(cwd or "") else posixpath
+
+
 def _norm_path(path: str, cwd: str) -> str:
-    raw = Path(path).expanduser()
-    if not raw.is_absolute():
-        base = Path(cwd).expanduser() if cwd else Path.cwd()
-        raw = base / raw
-    return os.path.normpath(str(raw))
+    mod = _pathmod(cwd) if cwd else _pathmod(path)
+    if mod is ntpath:
+        drive = _GIT_BASH_DRIVE.match(path)  # Git Bash writes C:\x as /c/x
+        if drive:
+            path = f"{drive.group(1)}:/{path[drive.end():].lstrip('/')}"
+        absolute = bool(ntpath.splitdrive(path)[0])
+    else:
+        path = posixpath.expanduser(path)
+        absolute = path.startswith("/")
+    if not absolute:
+        base = cwd or os.getcwd()
+        path = mod.join(base if mod is ntpath else posixpath.expanduser(base), path)
+    return str(mod.normpath(path))
+
+
+def _same_path(a: str, b: str, cwd: str) -> bool:
+    """Two normalised paths name the same file, compared as the recording machine compares them."""
+    if _pathmod(cwd) is ntpath:
+        return bool(ntpath.normcase(a) == ntpath.normcase(b))
+    return a == b
+
+
+def _within(normed: str, base: str, cwd: str) -> bool:
+    """`normed` is `base` or inside it; case-insensitive for Windows paths."""
+    windows = _pathmod(cwd) is ntpath
+    if windows:
+        normed, base = ntpath.normcase(normed), ntpath.normcase(base)
+    sep = "\\" if windows else "/"
+    return normed == base or normed.startswith(base.rstrip(sep) + sep)
 
 
 def _display_path(normed: str, cwd: str) -> str:
@@ -2204,11 +2306,12 @@ def _display_path(normed: str, cwd: str) -> str:
     """
     if not cwd:
         return normed
-    base = os.path.normpath(str(Path(cwd).expanduser()))
-    try:
-        return str(Path(normed).relative_to(base))
-    except ValueError:
+    base = _norm_path(cwd, cwd)
+    if not _within(normed, base, cwd):
         return normed
+    sep = "\\" if _pathmod(cwd) is ntpath else "/"
+    rest = normed[len(base.rstrip(sep)) + 1 :]
+    return rest.replace("\\", "/") or "."  # shown with `/` whatever recorded it: `src/app.py`
 
 
 def _projects_root(projects_dir: Path | None) -> Path | None:

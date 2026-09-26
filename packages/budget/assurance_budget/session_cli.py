@@ -200,6 +200,19 @@ def _project_dir(session: Session) -> Path:
     return Path(session.cwd).expanduser() if session.cwd else Path.cwd()
 
 
+def _survive_narrow_consoles() -> None:
+    """Replace, rather than crash on, a character the console's encoding has no byte for.
+
+    Paths and commands in a transcript can hold any text, and on Windows output sent to a pipe is
+    encoded in the locale's code page, not UTF-8, so the report could stop halfway through.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if reconfigure is not None and encoding != "utf8":
+            reconfigure(errors="replace")
+
+
 def _hook_print(payload: dict[str, Any]) -> None:
     print(json.dumps(payload))
 
@@ -263,10 +276,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    if args.hook:
+    if args.hook:  # the hook prints JSON, which is ASCII, and must not touch the console's settings
         return run_hook(sys.stdin.read(), nudge=args.nudge)
     if args.nudge:
         parser.error("--nudge only applies with --hook")
+    _survive_narrow_consoles()
     if args.demo and args.transcript:
         parser.error("--demo audits the bundled sample; leave out the transcript path")
     try:
@@ -632,7 +646,7 @@ def _tool_breakdown(by_tool: dict[str, int]) -> str:
 
 def _short_input(call: ToolCall) -> str:
     data = call.input
-    if call.name == "Bash":
+    if call.name in ("Bash", "PowerShell"):
         command = data.get("command")
         if isinstance(command, str) and command:
             return command

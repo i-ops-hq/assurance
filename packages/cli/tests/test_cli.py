@@ -849,6 +849,7 @@ def test_the_hook_subcommand_reaches_the_installer(tmp_path: Path, capsys, monke
     pytest.importorskip("assurance_budget.hook_setup")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "state"))  # where backups go on Windows
     monkeypatch.chdir(tmp_path)
     assert main(["hook", "install", "--yes", "--command", "uvx assurance@9.9.9 audit --hook --nudge"]) == 0
     assert "uvx assurance@9.9.9 audit --hook --nudge" in (tmp_path / "claude" / "settings.json").read_text()

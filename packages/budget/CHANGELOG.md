@@ -1,5 +1,20 @@
 # Unreleased
 
+- **Windows: commands run through the PowerShell tool are read.** Claude Code on Windows runs
+  commands through a `PowerShell` tool by default, and the audit read only `Bash`: a test run there
+  looked like no test at all, and a file written there was not an edit. A PowerShell command is now
+  read as the POSIX command that does the same to files (`Set-Content app.py` as `tee app.py`,
+  `Copy-Item a b` as `cp a b`, aliases and abbreviated parameters included), and its result is taken
+  from what the runner printed, since that tool's error flag has not been checked against the exit
+  status; a printed pass under a raised flag is unknown, not passed.
+- **A transcript's paths follow the rules of the machine that recorded it.** A Windows session read
+  on a Mac compared its paths by POSIX rules, and a file on `D:\` counted as inside a project on
+  `C:\`. Windows paths are compared without regard to case, and Git Bash's `/c/Users/...` names
+  the same file as `C:\Users\...`. `python.exe` and `npm.cmd` are `python` and `npm`.
+- **`assurance hook install` writes a hook each platform's shells can run.** On Windows it writes
+  `uvx` bare, because Claude Code runs a hook in Git Bash or in PowerShell and the two quote paths in
+  ways that break each other; on macOS and Linux a path with a space is quoted. Output a console
+  cannot encode is replaced instead of stopping the command.
 - **`assurance hook status` counts the Claude Code plugin.** When `assurance@i-ops-hq` is on, status
   says so and in which settings, decided as Claude Code decides it (local over project over user), and
   warns when a settings hook is there too, because then the audit runs twice per turn.
