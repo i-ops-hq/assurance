@@ -1,5 +1,17 @@
 # Unreleased
 
+- **Declare a project's own tests and checks.** `[audit]` in `.assurance/config.toml` (or in
+  `~/.config/assurance/config.toml`) takes `tests = [...]` and `checks = [...]`, one command each. A
+  declared command counts however it is run, so `.venv/bin/python scripts/check.py --fast` matches
+  `python scripts/check.py`, and a project whose check is a script stops being told that nothing it
+  recognises ran. A session that changed the project file does not get to use what it declares, and
+  both the report and the hook say so; the hint to declare a check is shown to you, not sent to Claude.
+  A declaration that is not one command, or an unknown key, is refused with the file named.
+- **A check that failed after the last edit is said.** Only test runs were looked at, so a failed
+  `mypy` or `ruff` with no test after it left the hook silent. Checks now have outcomes like tests:
+  `passed`, `failed`, or `unknown` when the exit status belongs to something piped after them. The
+  report labels them (`1 check (mypy src failed)`). `--json` gains `declared` and `declared_notes`, and
+  `after_last_edit` gains `check_runs`, `check_labels`, `checks_failed` and `checks_unknown`.
 - **`assurance hook install`, `remove` and `status`.** Adding the Stop hook no longer means merging JSON
   into `~/.claude/settings.json` by hand, and taking it out is one command too. `install` shows the
   change as a diff and asks before writing (`--yes` to skip the question, `--dry-run` to only look),
