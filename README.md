@@ -78,6 +78,23 @@ Claude too, so Claude runs the tests before it stops. A test piped into `tail` o
 doesn't count as passed: its exit status is the other command's, so the result is read from the
 runner's summary line or reported as unknown.
 
+```bash
+uvx assurance@latest hook install   # shows the change to ~/.claude/settings.json, asks, then writes it
+uvx assurance hook status           # where it is installed, which version, and whether it can run
+uvx assurance hook remove           # takes it out again, wherever it is; nothing else changes
+```
+
+`install` pins the hook to the version it runs as, and running it again after an upgrade moves the
+pin. `--scope project` writes it to the repository's `.claude/settings.json`, so everyone who works on
+the project gets the audit once they commit it; `--scope local` is only you, in this repository.
+`--no-nudge` tells you without asking Claude to run the tests. It only ever touches the assurance hook,
+refuses a settings file it cannot parse, and keeps the file as it was in
+`~/.local/state/assurance/backups/`. It nudges at most once per turn, and it never fails or blocks a
+session: if it can't read the transcript it says so and lets Claude finish.
+
+<details>
+<summary>Or add it by hand</summary>
+
 ```json
 {
   "hooks": {
@@ -89,15 +106,17 @@ runner's summary line or reported as unknown.
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. It nudges at most once per turn, and it never fails
-or blocks a session: if it can't read the transcript it says so and lets Claude finish.
+`--nudge` to be told without Claude being asked.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
 version you chose: unpinned, `uvx` keeps whichever version it cached first and switches without
 telling you when that cache is pruned. To upgrade, change the number.
 
 Installed with pip instead of uv? Use `"command": "assurance audit --hook --nudge"`. If Claude Code
-reports `command not found`, put the full path from `which uvx` (or `which assurance`) in the command.
+reports `command not found`, put the full path from `which uvx` (or `which assurance`) in the command;
+`assurance hook install` does that for you.
+
+</details>
 
 ## Commands
 
@@ -106,6 +125,7 @@ One install, one `assurance` command.
 | Command | What it answers |
 |---|---|
 | `assurance audit` | What did the coding-agent session in this folder do, and what did it skip? |
+| `assurance hook` | Run that audit after every Claude Code turn, or stop running it: `install`, `remove`, `status`. |
 | `assurance diff` | Did the work cover everything it should have? For example, retrieved docs vs. required docs. |
 | `assurance pin` | Did an MCP server quietly change a tool's description after you approved it? |
 | `assurance deps` | What will `pip install` or `npm install` run on your machine? Read without running it. |

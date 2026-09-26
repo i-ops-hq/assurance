@@ -1,5 +1,16 @@
 # Unreleased
 
+- **`assurance hook install`, `remove` and `status`.** Adding the Stop hook no longer means merging JSON
+  into `~/.claude/settings.json` by hand, and taking it out is one command too. `install` shows the
+  change as a diff and asks before writing (`--yes` to skip the question, `--dry-run` to only look),
+  pins the version it runs as, and moves an existing assurance hook to that version instead of adding
+  a second one. In your own files it writes the full path of `uvx`, because the desktop app does not
+  always give hooks your terminal's PATH; `--scope project` writes plain `uvx` to the repository's
+  `.claude/settings.json` for everyone on it, and `--scope local` to `.claude/settings.local.json`.
+  `remove` finds the hook in every scope and takes out only its own entries, deleting a file only when
+  nothing else was in it. Both refuse a file they cannot parse, and keep the file as it was under
+  `~/.local/state/assurance/backups/`, outside the repository. `status` says where it is installed,
+  which version, whether Claude Code can find the command it runs, and whether `disableAllHooks` is on.
 - **"No test or check ran" is said only when it is known.** A project's own check script
   (`python scripts/check.py`, `make lint-fix`) is not a command the audit recognises, so when one ran
   after the last edit, the hook and the report said nothing had. They now say no test or check *it

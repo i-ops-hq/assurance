@@ -1,5 +1,7 @@
 # Unreleased
 
+- **`assurance hook install` / `remove` / `status`** in the README, as the way to add the Stop hook
+  and take it out; the hand-written JSON stays as the alternative.
 - **The README's sample report shows the corrected "after the last edit" line**: no test or check
   the audit recognises ran, and the two commands after the edit that it could not classify are named.
   The change itself is in `assurance-budget`.

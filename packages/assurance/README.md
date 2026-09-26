@@ -25,8 +25,16 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
   Not read: 0 lines.
 ```
 
-**Run it after every session.** Add this to `~/.claude/settings.json`. When Claude finishes without
-testing its last edit, you're told, and with `--nudge` Claude is sent back to run the tests:
+**Run it after every session.** When Claude finishes without testing its last edit, you're told, and
+Claude is sent back to run the tests. `assurance hook install` adds the Stop hook after showing you the
+change, and `assurance hook remove` takes it out again:
+
+```bash
+uvx assurance@latest hook install    # --scope project to share it with everyone on the repository
+uvx assurance hook remove
+```
+
+Or add it to `~/.claude/settings.json` yourself:
 
 ```json
 { "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx assurance@0.1.3 audit --hook --nudge" } ] } ] } }
@@ -37,6 +45,7 @@ testing its last edit, you're told, and with `--nudge` Claude is sent back to ru
 | command | question |
 |---|---|
 | `assurance audit` | what did a Claude Code session actually do, and what did it skip? |
+| `assurance hook` | install, remove or check the Stop hook that runs the audit after every turn |
 | `assurance diff` / `assurance check` | did the work cover what it was supposed to, and what did it miss? |
 | `assurance pin` | did an MCP server change a tool definition after you approved it? |
 | `assurance deps` | what will a `pip install` or `npm install` execute, read without executing it? |

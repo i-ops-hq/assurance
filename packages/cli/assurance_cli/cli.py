@@ -25,6 +25,7 @@ FORWARDED: dict[str, tuple[str, str]] = {
     "budget": ("assurance_budget.cli", "pip install assurance-budget"),
     "authority": ("assurance_authority.cli", "pip install assurance-authority"),
     "audit": ("assurance_budget.session_cli", "pip install assurance-budget"),
+    "hook": ("assurance_budget.hook_setup", "pip install assurance-budget"),
 }
 
 _START_HERE = """\
@@ -33,6 +34,7 @@ No model, no network, no account.
 
   assurance audit                         what the Claude Code session in this folder did, and skipped
   assurance audit --demo                  the same report on a bundled sample session
+  assurance hook install                  run the audit after every Claude Code turn (remove undoes it)
   assurance diff --expected A --found B   was everything that should have been read, read?
   assurance pin --save | --check          did an MCP server change a tool after you approved it?
   assurance deps package.json             what an install will execute, read without running it
@@ -109,6 +111,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "audit", add_help=False,
         help="What the Claude Code session in this folder did, and what it skipped (--demo for a sample)",
+    )
+
+    sub.add_parser(
+        "hook", add_help=False,
+        help="Run the audit after every Claude Code turn: install, remove, status",
     )
 
     init_parser = sub.add_parser("init", help="Write .assurance.json baseline")
