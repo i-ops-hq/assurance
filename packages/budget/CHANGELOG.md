@@ -1,4 +1,4 @@
-# Unreleased
+# 0.2.4
 
 - **The hook `assurance hook install` writes runs without the network.** It is now
   `uvx --offline assurance@<version> …`, the copy uv fetched when you installed it. Without the flag

@@ -1,3 +1,7 @@
+# 0.5.2
+
+- Requires `assurance-cli` 0.6.2. No change to the server or its tools.
+
 # 0.5.1
 
 - Requires `assurance-cli` 0.6.1. No change to the server or its tools.
