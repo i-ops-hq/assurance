@@ -1,4 +1,4 @@
-# Unreleased
+# 0.6.2
 
 - **`assurance hook`** reaches `assurance-budget`'s `hook install | remove | status`, which adds the
   Claude Code Stop hook after showing the change and takes it out again. Listed in `--help` and on the

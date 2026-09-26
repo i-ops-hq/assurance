@@ -12,7 +12,7 @@
 # outage) stops mattering after the first run. When the first run cannot fetch it, the turn is
 # reported as not audited: uv exits 2 when it cannot reach the index, and a Stop hook that exits 2
 # tells Claude to keep going.
-VERSION=0.1.3
+VERSION=0.1.4
 
 for uvx in "$(command -v uvx 2>/dev/null)" "$HOME/.local/bin/uvx" "$HOME/.local/bin/uvx.exe" "$HOME/.cargo/bin/uvx" "$HOME/.cargo/bin/uvx.exe" /opt/homebrew/bin/uvx /usr/local/bin/uvx; do
   if [ -n "$uvx" ] && [ -x "$uvx" ]; then

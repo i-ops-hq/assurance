@@ -1,5 +1,11 @@
-# Unreleased
+# 0.1.4
 
+- **Requires `assurance-budget` 0.2.4 and `assurance-cli` 0.6.2:** `assurance hook install`,
+  `remove` and `status`, with a hook that runs without the network; a project's own tests and checks
+  declared under `[audit]`; results read from jest, vitest, mocha, `node --test`, bun and cargo; a
+  faster Stop hook on long sessions; Windows, including commands run through the PowerShell tool; and
+  different edits to one file no longer reported as a loop. The README's hook command and the plugin
+  are pinned to this version.
 - **The plugin's hook no longer keeps Claude going when PyPI is out of reach.** uv exits 2 when it
   cannot reach the index, the script passed that on, and a Stop hook that exits 2 tells Claude to keep
   going: behind a proxy or during an outage, every turn would have ended with Claude told not to stop.
