@@ -58,7 +58,7 @@ def test_every_pinned_command_in_the_readmes_is_this_release() -> None:
     root = PACKAGE.parents[1]
     found = 0
     for readme in (root / "README.md", PACKAGE / "README.md", root / "packages" / "budget" / "README.md"):
-        for pinned in re.findall(r"uvx assurance@([0-9][^ \"`]*)", readme.read_text(encoding="utf-8")):
+        for pinned in re.findall(r"uvx (?:--offline )?assurance@([0-9][^ \"`]*)", readme.read_text(encoding="utf-8")):
             found += 1
             assert pinned == version, f"{readme} pins assurance@{pinned}, this release is {version}"
     assert found, "no pinned `uvx assurance@…` command in the READMEs"

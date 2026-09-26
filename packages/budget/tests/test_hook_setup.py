@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ def _run(
     answer: str = "",
     which: dict[str, str] | None = None,
     platform: str = "darwin",
+    run: Callable[[Sequence[str]], int] | None = None,
 ) -> int:
     # Backups go under XDG_STATE_HOME, or LOCALAPPDATA on Windows: both point into the test's folder.
     env = {
@@ -41,6 +43,8 @@ def _run(
         interactive=lambda: interactive,
         ask=lambda _prompt: answer,
         platform=platform,
+        # Never a real uv: UVX is where Homebrew puts it, and a test must not fetch from PyPI.
+        run=run if run is not None else (lambda _argv: 0),
     )
 
 
@@ -77,7 +81,7 @@ def test_install_into_no_file_writes_the_hook_and_nothing_else(tmp_path: Path) -
     assert _run(tmp_path, ["install", "--yes"]) == 0
     data = json.loads(_user_file(tmp_path).read_text(encoding="utf-8"))
     assert data == {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": data["hooks"]["Stop"][0]["hooks"][0]["command"]}]}]}}
-    assert _stop_commands(_user_file(tmp_path))[0].startswith(f"{UVX} assurance@")
+    assert _stop_commands(_user_file(tmp_path))[0].startswith(f"{UVX} --offline assurance@")
     assert _stop_commands(_user_file(tmp_path))[0].endswith(" audit --hook --nudge")
 
 
@@ -124,12 +128,12 @@ def test_no_nudge_installs_the_quiet_form(tmp_path: Path) -> None:
 def test_project_scope_is_shared_so_it_does_not_hardcode_this_machines_path(tmp_path: Path) -> None:
     assert _run(tmp_path, ["install", "--yes", "--scope", "project"]) == 0
     path = tmp_path / "project" / ".claude" / "settings.json"
-    assert _stop_commands(path)[0].startswith("uvx assurance@")
+    assert _stop_commands(path)[0].startswith("uvx --offline assurance@")
     assert hook_command("user", nudge=True, version="0.1.4", which=_which({"uvx": UVX}), platform="darwin") == (
-        f"{UVX} assurance@0.1.4 audit --hook --nudge"
+        f"{UVX} --offline assurance@0.1.4 audit --hook --nudge"
     )
     assert hook_command("local", nudge=False, version="0.1.4", which=_which({"uvx": UVX}), platform="linux") == (
-        f"{UVX} assurance@0.1.4 audit --hook"
+        f"{UVX} --offline assurance@0.1.4 audit --hook"
     )
 
 
@@ -319,9 +323,151 @@ def test_status_is_clean_when_it_is_installed_and_can_run(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
-    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "uvx assurance@0.1.4 audit --hook --nudge"}]}]}})
+    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "uvx --offline assurance@0.1.4 audit --hook --nudge"}]}]}})
     assert _run(tmp_path, ["status"]) == 0
     assert "!" not in capsys.readouterr().out
+
+
+# --- the hook runs without the network --------------------------------------------------------------
+# uv asks PyPI again every few minutes, and exits 2 when it cannot reach it. A Stop hook that exits 2
+# tells Claude to keep going, so behind a proxy or during an outage every turn would end in Claude
+# being told not to stop. The hook runs the pinned copy uv already has, and install makes sure it has.
+
+
+class _Uv:
+    """A stand-in for uv: records what it was asked, and has the copy once it has been fetched."""
+
+    def __init__(self, *, has_it: bool = True, can_fetch: bool = True) -> None:
+        self.has_it = has_it
+        self.can_fetch = can_fetch
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: Sequence[str]) -> int:
+        self.calls.append(list(argv))
+        if "--offline" in argv:
+            return 0 if self.has_it else 1
+        self.has_it = self.has_it or self.can_fetch
+        return 0 if self.can_fetch else 2
+
+
+def test_install_asks_uv_for_the_pinned_copy_and_fetches_nothing_it_has(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    uv = _Uv()
+    assert _run(tmp_path, ["install", "--yes"], run=uv) == 0
+    assert uv.calls == [[UVX, "--offline", "assurance@0.1.4", "--version"]]
+    assert "Fetching" not in capsys.readouterr().out
+
+
+def test_install_fetches_the_pinned_copy_once_when_uv_does_not_have_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    uv = _Uv(has_it=False)
+    assert _run(tmp_path, ["install", "--yes"], run=uv) == 0
+    assert uv.calls == [
+        [UVX, "--offline", "assurance@0.1.4", "--version"],
+        [UVX, "assurance@0.1.4", "--version"],
+        [UVX, "--offline", "assurance@0.1.4", "--version"],
+    ]
+    out = capsys.readouterr().out
+    assert "Fetching assurance@0.1.4 once" in out and "!" not in out
+
+
+def test_install_says_so_when_uv_cannot_fetch_it_and_writes_the_hook_anyway(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The hook is safe to write: run offline without the copy, uv exits 1, which Claude Code shows as
+    # a hook error and lets the session end. Only an exit 2 would keep Claude going.
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    assert _run(tmp_path, ["install", "--yes"], run=_Uv(has_it=False, can_fetch=False)) == 0
+    out = capsys.readouterr().out
+    assert "! The hook runs assurance@0.1.4 without the network, and uv does not have it yet" in out
+    assert "`uvx assurance@0.1.4 --version` fetches it once" in out
+    assert _stop_commands(_user_file(tmp_path)) == [f"{UVX} --offline assurance@0.1.4 audit --hook --nudge"]
+
+
+def test_a_dry_run_asks_nothing_of_uv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    uv = _Uv(has_it=False)
+    assert _run(tmp_path, ["install", "--dry-run"], run=uv) == 0
+    command = f"{UVX} --offline assurance@0.1.4 audit --hook --nudge"
+    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}})
+    assert _run(tmp_path, ["install", "--dry-run"], run=uv) == 0  # already installed
+    assert uv.calls == []
+
+
+def test_installing_again_makes_sure_uv_still_has_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `uv cache clean` removes the copy; `assurance hook install` is the one command that puts it back.
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    command = f"{UVX} --offline assurance@0.1.4 audit --hook --nudge"
+    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}})
+    uv = _Uv(has_it=False)
+    assert _run(tmp_path, ["install", "--yes"], run=uv) == 0
+    assert "Already installed" in capsys.readouterr().out
+    assert [UVX, "assurance@0.1.4", "--version"] in uv.calls
+
+
+def test_install_rewrites_a_hook_that_asks_pypi_every_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": f"{UVX} assurance@0.1.4 audit --hook --nudge"}]}]}})
+    assert _run(tmp_path, ["install", "--yes"]) == 0
+    assert _stop_commands(_user_file(tmp_path)) == [f"{UVX} --offline assurance@0.1.4 audit --hook --nudge"]
+
+
+def test_a_project_hook_says_what_everyone_else_runs_once(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    uv = _Uv()
+    assert _run(tmp_path, ["install", "--yes", "--scope", "project"], run=uv) == 0
+    assert "Everyone else on the project runs `uvx assurance@0.1.4 --version` once" in capsys.readouterr().out
+    assert uv.calls == [[UVX, "--offline", "assurance@0.1.4", "--version"]]  # bare `uvx`, found on PATH
+
+
+def _uvx_on_disk(tmp_path: Path) -> str:
+    """A runner that exists on every machine, quoted for a hook command.
+
+    `status` checks that a runner written as a path exists before it asks uv anything. UVX passed on
+    the machine this was written on, where Homebrew put uv, and failed on every CI runner.
+    """
+    runner = tmp_path / "bin" / "uvx"
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    runner.write_text("#!/bin/sh\n", encoding="utf-8")
+    runner.chmod(0o755)
+    return f'"{runner}"'
+
+
+def test_status_flags_a_hook_that_asks_pypi_every_time(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    command = f"{_uvx_on_disk(tmp_path)} assurance@0.1.4 audit --hook --nudge"
+    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}})
+    assert _run(tmp_path, ["status"]) == 1
+    out = capsys.readouterr().out
+    assert "asks PyPI for assurance@0.1.4 every few minutes" in out and "uv exits 2" in out
+    assert "`assurance hook install --scope user` rewrites it" in out
+
+
+def test_status_flags_an_offline_hook_uv_does_not_have(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
+    command = f"{_uvx_on_disk(tmp_path)} --offline assurance@0.1.4 audit --hook --nudge"
+    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}})
+    uv = _Uv(has_it=False)
+    assert _run(tmp_path, ["status"], run=uv) == 1
+    assert "The user hook runs assurance@0.1.4 without the network, and uv does not have it yet" in capsys.readouterr().out
+    assert uv.calls and all("--offline" in call for call in uv.calls)  # it asked uv, and fetched nothing
+
+
+def test_asking_uv_quietly_returns_its_exit_status_and_survives_a_missing_program(tmp_path: Path) -> None:
+    assert hook_setup._run_quietly([sys.executable, "-c", "import sys; print('x'); sys.exit(3)"]) == 3
+    assert hook_setup._run_quietly([str(tmp_path / "no-such-uvx")]) == -1
 
 
 # --- the Claude Code plugin runs the same hook -----------------------------------------------------

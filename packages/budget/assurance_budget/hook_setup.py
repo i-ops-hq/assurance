@@ -19,6 +19,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -43,6 +44,10 @@ _SCOPE_HELP = {
 #: --hook`, or plain `assurance audit --hook`.
 _OURS = re.compile(r"(?:^|[\s/\\\"'])assurance(?:\.exe)?(?:@[\w.+!-]+)?[\"']?\s+audit\b.*\s--hook\b", re.I)
 _PINNED = re.compile(r"\bassurance@([\w.+!-]+)")
+
+#: Runs a command with no input and nothing shown, and returns its exit status (-1 if it could not
+#: start). `install` and `status` use it to ask uv whether it has the pinned copy.
+Run = Callable[[Sequence[str]], int]
 
 
 #: The Claude Code plugin that runs the same hook: `claude plugin install assurance@i-ops-hq`.
@@ -102,6 +107,11 @@ def hook_command(
     every project and should run a version somebody chose. Without uv, the `assurance` command this
     was run from.
 
+    It runs with `--offline`, so the copy uv already has, which `install` makes sure it has. The
+    version is pinned, so that copy is the right one, and without the flag uv asks PyPI again every
+    few minutes: when PyPI cannot be reached (a proxy, a private mirror, an outage) uv exits 2, and a
+    Stop hook that exits 2 tells Claude to keep going instead of letting the session end.
+
     On macOS and Linux, a file that stays on this machine gets the full path, quoted when it has a
     space, because the desktop app starts hooks with only `/usr/bin:/bin:/usr/sbin:/sbin` on PATH. A
     project file is shared, so it says `uvx` and lets each machine find it. On Windows the bare name
@@ -114,7 +124,7 @@ def hook_command(
     uvx = which("uvx")
     if version and uvx:
         runner = "uvx" if scope == "project" or windows else shlex.quote(uvx)
-        return f"{runner} assurance@{version} {flags}"
+        return f"{runner} --offline assurance@{version} {flags}"
     exe = which("assurance")
     if exe and scope != "project" and not windows:
         return f"{shlex.quote(exe)} {flags}"
@@ -346,6 +356,7 @@ def main(
     interactive: Callable[[], bool] | None = None,
     ask: Callable[[str], str] = input,
     platform: str | None = None,
+    run: Run | None = None,
 ) -> int:
     """Run `assurance hook`. 0 done (or nothing to do), 1 not written or not installed, 2 refused."""
     args = build_parser().parse_args(list(argv) if argv is not None else None)
@@ -353,22 +364,26 @@ def main(
     here = (cwd or Path.cwd()).resolve()
     environ = os.environ if env is None else env
     tty = interactive if interactive is not None else _is_tty
+    quietly = run if run is not None else _run_quietly
     if args.action == "status":
-        return _status(here, environ, which)
+        return _status(here, environ, which, quietly)
     scopes = [args.scope] if args.scope else list(SCOPES)
     plans: list[tuple[str, Path, str | None, str, bool]] = []
+    command = ""
     try:
         for scope in scopes:
             path = settings_path(scope, here, environ)
             current = load_settings(path)
             before_text = path.read_text(encoding="utf-8") if current is not None else None
-            if args.action == "install":
+            if args.action == "install":  # one scope: install always has one
                 command = args.command or hook_command(
                     scope, nudge=not args.no_nudge, version=_this_version(), which=which, platform=platform
                 )
                 after = with_hook(current or {}, command)
                 if current is not None and after == current:
                     print(f"Already installed in {_show(path)}: {command}")
+                    if not args.dry_run:
+                        _print_notes(_ready_offline(command, which, quietly))
                     return EXIT_OK
             else:
                 if current is None:
@@ -425,6 +440,13 @@ def main(
     if args.action == "install":
         print("Installed. Claude Code runs it each time Claude finishes a turn; `/hooks` in a session shows it.")
         print("To take it out again: assurance hook remove")
+        _print_notes(_ready_offline(command, which, quietly))
+        uv = _uv_hook(command)
+        if args.scope == "project" and uv and uv.offline:
+            _print_notes([
+                f"Everyone else on the project runs `uvx {uv.spec} --version` once, so uv has it for the "
+                "hook; the plugin does that by itself (`claude plugin install assurance@i-ops-hq`)."
+            ])
     else:
         print("Removed. No other setting in those files changed.")
     return EXIT_OK
@@ -456,7 +478,7 @@ def _backup_then_delete(path: Path, *, scope: str, env: Mapping[str, str]) -> Pa
     return backup
 
 
-def _status(cwd: Path, env: Mapping[str, str], which: Callable[[str], str | None]) -> int:
+def _status(cwd: Path, env: Mapping[str, str], which: Callable[[str], str | None], run: Run) -> int:
     this = _this_version()
     found: list[Found] = []
     notes: list[str] = []
@@ -490,6 +512,15 @@ def _status(cwd: Path, env: Mapping[str, str], which: Callable[[str], str | None
             runner = _runner_problem(command, which)
             if runner:
                 notes.append(f"The {scope} hook {runner}")
+            uv = _uv_hook(command)
+            if uv and not uv.offline:
+                notes.append(
+                    f"The {scope} hook asks PyPI for {uv.spec} every few minutes, and when PyPI cannot be "
+                    "reached uv exits 2, which tells Claude to keep going instead of letting the session "
+                    f"end. `assurance hook install --scope {scope}` rewrites it to run without the network."
+                )
+            elif uv and not runner:
+                notes.extend(_ready_offline(command, which, run, fetch=False, scope=scope))
     if len({f.command for f in found}) > 1:
         notes.append("It is installed with different commands, so it runs more than once per turn.")
     plugin = plugin_enabled(cwd, env)
@@ -516,12 +547,78 @@ def _entry_command(entry: Mapping[str, Any]) -> str:
     return command
 
 
-def _runner_problem(command: str, which: Callable[[str], str | None]) -> str | None:
+def _words(command: str) -> list[str]:
     try:  # Windows splitting keeps the `\` in C:\… paths; POSIX splitting reads it as an escape
         words = shlex.split(command, posix=sys.platform != "win32")
     except ValueError:
         words = command.split()
-    first = words[0].strip("\"'") if words else ""
+    return [word.strip("\"'") for word in words]
+
+
+@dataclass(frozen=True)
+class UvHook:
+    """A hook command that runs the audit through uvx."""
+
+    runner: str
+    spec: str  # assurance@<version>
+    offline: bool
+
+
+def _uv_hook(command: str) -> UvHook | None:
+    words = _words(command)
+    if not words or re.split(r"[\\/]", words[0])[-1].lower() not in ("uvx", "uvx.exe"):
+        return None
+    for i, word in enumerate(words[1:], start=1):
+        if word.startswith("assurance@"):
+            return UvHook(words[0], word, "--offline" in words[1:i])
+    return None
+
+
+def _ready_offline(
+    command: str, which: Callable[[str], str | None], run: Run, *, fetch: bool = True, scope: str = ""
+) -> list[str]:
+    """Whether uv has the pinned copy an offline hook runs, fetching it once when `fetch` is set.
+
+    Returns what to tell the user: nothing when the copy is there.
+    """
+    uv = _uv_hook(command)
+    if uv is None or not uv.offline:
+        return []
+    uvx = uv.runner if ("/" in uv.runner or "\\" in uv.runner) else which(uv.runner)
+    if uvx is None:  # `status` names a runner it cannot find; there is nothing to ask
+        return []
+    if run([uvx, "--offline", uv.spec, "--version"]) == 0:
+        return []
+    if fetch:
+        print(f"Fetching {uv.spec} once, so the hook can run it without the network ...")
+        run([uvx, uv.spec, "--version"])
+        if run([uvx, "--offline", uv.spec, "--version"]) == 0:
+            return []
+    whose = f"The {scope} hook" if scope else "The hook"
+    return [
+        f"{whose} runs {uv.spec} without the network, and uv does not have it yet, so the hook cannot "
+        f"run: `uvx {uv.spec} --version` fetches it once."
+    ]
+
+
+def _print_notes(notes: Sequence[str]) -> None:
+    for note in notes:
+        print(f"! {note}")
+
+
+def _run_quietly(argv: Sequence[str]) -> int:
+    try:
+        return subprocess.run(
+            list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=False, timeout=600,
+        ).returncode
+    except (OSError, subprocess.SubprocessError):
+        return -1
+
+
+def _runner_problem(command: str, which: Callable[[str], str | None]) -> str | None:
+    words = _words(command)
+    first = words[0] if words else ""
     if not first:
         return "has an empty command."
     if "/" in first or "\\" in first:  # a path, whichever machine wrote it

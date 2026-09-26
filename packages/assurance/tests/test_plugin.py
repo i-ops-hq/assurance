@@ -103,6 +103,74 @@ def test_without_uvx_or_assurance_the_hook_says_so_and_lets_the_session_end(tmp_
     assert by_hand.returncode == 2 and "neither uvx nor assurance was found" in by_hand.stderr
 
 
+def _uv(tmp_path: Path, body: str) -> dict[str, str]:
+    """A stand-in `uvx`, first on PATH, that logs each call's UV_OFFLINE and arguments, then runs `body`."""
+    fake = tmp_path / "bin" / "uvx"
+    fake.parent.mkdir(exist_ok=True)
+    fake.write_text('#!/bin/sh\necho "UV_OFFLINE=${UV_OFFLINE:-} $*" >> "$UVX_LOG"\n' + body, encoding="utf-8")
+    fake.chmod(0o755)
+    return {"PATH": f"{fake.parent}:/usr/bin:/bin", "HOME": str(tmp_path), "UVX_LOG": str(tmp_path / "uvx.log")}
+
+
+def _hook(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["sh", str(SCRIPT), "audit", "--hook", "--nudge"],
+        input='{"transcript_path": "x"}', capture_output=True, text=True, env=env, check=False,
+    )
+
+
+def _calls(env: dict[str, str]) -> list[str]:
+    return Path(env["UVX_LOG"]).read_text(encoding="utf-8").splitlines()
+
+
+_NOT_CACHED = 'if [ "$UV_OFFLINE" = 1 ]; then echo "error: not found in the cache" >&2; exit 1; fi\n'
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
+def test_as_the_hook_it_runs_the_copy_uv_has_without_the_network(tmp_path: Path) -> None:
+    env = _uv(tmp_path, "echo AUDIT-RAN; cat\n")
+    run = _hook(env)
+    assert run.returncode == 0 and run.stdout.startswith("AUDIT-RAN")
+    assert _calls(env) == [f"UV_OFFLINE=1 assurance@{_release()} audit --hook --nudge"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
+def test_a_first_run_fetches_it_and_the_hook_input_still_reaches_the_audit(tmp_path: Path) -> None:
+    env = _uv(tmp_path, _NOT_CACHED + "echo AUDIT-RAN; cat\n")
+    run = _hook(env)
+    assert run.returncode == 0
+    assert run.stdout.count("AUDIT-RAN") == 1 and '{"transcript_path": "x"}' in run.stdout
+    assert [c.split()[0] for c in _calls(env)] == ["UV_OFFLINE=1", "UV_OFFLINE="]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
+def test_when_uv_cannot_reach_pypi_the_hook_lets_the_session_end(tmp_path: Path) -> None:
+    # uv exits 2 when it cannot reach the index, and a Stop hook that exits 2 tells Claude to keep
+    # going: behind a proxy that blocks PyPI, every turn would end with Claude told not to stop.
+    env = _uv(tmp_path, _NOT_CACHED + "printf 'error: Request failed after 3 retries in 4.2s\\n  Caused by: tcp connect error\\n' >&2; exit 2\n")
+    run = _hook(env)
+    assert run.returncode == 0
+    assert json.loads(run.stdout) == {"systemMessage": (
+        f"assurance: {_release()} did not run (error: Request failed after 3 retries in 4.2s), "
+        "so this turn was not audited."
+    )}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
+def test_uvs_reason_reaches_the_message_as_valid_json(tmp_path: Path) -> None:
+    env = _uv(tmp_path, _NOT_CACHED + "printf 'error: cannot open \"C:\\\\Users\\\\dev\"\\tnow\\n' >&2; exit 2\n")
+    message = json.loads(_hook(env).stdout)["systemMessage"]
+    assert '(error: cannot open "C:\\Users\\dev"now)' in message
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
+def test_by_hand_it_asks_uv_once_and_says_what_uv_said(tmp_path: Path) -> None:
+    env = _uv(tmp_path, "echo 'error: Request failed' >&2; exit 2\n")
+    run = subprocess.run(["sh", str(SCRIPT), "audit"], capture_output=True, text=True, env=env, check=False)
+    assert run.returncode == 2 and "Request failed" in run.stderr
+    assert _calls(env) == [f"UV_OFFLINE= assurance@{_release()} audit"]
+
+
 def test_the_script_keeps_unix_line_endings_wherever_it_is_checked_out() -> None:
     # Git for Windows checks files out with CRLF by default, and bash, Git Bash's included, stops at a
     # `\r`. `.gitattributes` pins the script to LF so a Windows clone of the marketplace can run it.

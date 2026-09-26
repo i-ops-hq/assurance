@@ -1,5 +1,11 @@
 # Unreleased
 
+- **The plugin's hook no longer keeps Claude going when PyPI is out of reach.** uv exits 2 when it
+  cannot reach the index, the script passed that on, and a Stop hook that exits 2 tells Claude to keep
+  going: behind a proxy or during an outage, every turn would have ended with Claude told not to stop.
+  The script now runs the copy uv already has without the network, fetches only on a first run, and
+  when that fails says the turn was not audited and exits 0. The plugin README's "no network beyond
+  fetching the package once" is now what the script does.
 - **A Claude Code plugin**, `assurance@i-ops-hq`: `claude plugin marketplace add i-ops-hq/assurance`,
   then `claude plugin install assurance@i-ops-hq`. It runs the Stop hook pinned to this release, and
   `claude plugin disable` / `uninstall` pause it or take it out. It looks for `uvx` where uv installs
