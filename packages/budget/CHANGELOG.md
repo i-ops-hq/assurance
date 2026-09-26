@@ -1,5 +1,11 @@
 # Unreleased
 
+- **Different edits to one file are no longer reported as a loop.** A loop is the same step failing
+  the same way with nothing new read, and an edit was keyed on its file alone, so four edits to one
+  file made together read as `Looped: 3 rounds of Edit`. On the real session where this was found,
+  seven such loops were reported and none was one. An edit is now told apart by what it changes;
+  the same edit failing again and again is still a loop, and the report and `--json` show the step
+  as before.
 - **Windows: commands run through the PowerShell tool are read.** Claude Code on Windows runs
   commands through a `PowerShell` tool by default, and the audit read only `Bash`: a test run there
   looked like no test at all, and a file written there was not an edit. A PowerShell command is now
