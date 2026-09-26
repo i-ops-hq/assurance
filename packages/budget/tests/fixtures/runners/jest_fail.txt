@@ -1,0 +1,23 @@
+FAIL jest/fail/sum.test.js
+  ✓ adds (1 ms)
+  ✕ subtracts (1 ms)
+
+  ● subtracts
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 3
+    Received: 1
+
+      1 | test('adds', () => { expect(1 + 1).toBe(2); });
+    > 2 | test('subtracts', () => { expect(2 - 1).toBe(3); });
+        |                                         ^
+      3 |
+
+      at Object.toBe (sum.test.js:2:41)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 passed, 2 total
+Snapshots:   0 total
+Time:        0.115 s
+Ran all test suites.

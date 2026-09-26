@@ -1,0 +1,32 @@
+I001 [*] Import block is un-sorted or un-formatted
+ --> fail/m.py:1:1
+  |
+1 | import os
+  | ^^^^^^^^^
+2 | def add(a: int, b: int) -> int:
+3 |     return "x"
+  |
+help: Organize imports
+  |
+1 | import os
+2 +
+3 +
+4 | def add(a: int, b: int) -> int:
+  |
+
+F401 [*] `os` imported but unused
+ --> fail/m.py:1:8
+  |
+1 | import os
+  |        ^^
+2 | def add(a: int, b: int) -> int:
+3 |     return "x"
+  |
+help: Remove unused import: `os`
+  |
+  - import os
+1 | def add(a: int, b: int) -> int:
+  |
+
+Found 2 errors.
+[*] 2 fixable with the `--fix` option.

@@ -1,0 +1,18 @@
+bun test v1.3.1 (89fa0f34)
+
+sum.test.js:
+1 | import { test, expect } from "bun:test";
+2 | test("adds", () => { expect(1 + 1).toBe(2); }); test("subtracts", () => { expect(2 - 1).toBe(3); });
+                                                                                            ^
+error: expect(received).toBe(expected)
+
+Expected: 3
+Received: 1
+
+      at <anonymous> (/home/you/project/bun/fail/sum.test.js:2:89)
+(fail) subtracts [2.70ms]
+
+ 1 pass
+ 1 fail
+ 2 expect() calls
+Ran 2 tests across 1 file. [6.00ms]

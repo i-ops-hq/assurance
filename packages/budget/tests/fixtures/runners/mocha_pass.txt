@@ -1,0 +1,9 @@
+
+
+  sum
+    ✔ adds
+    ✔ subtracts
+
+
+  2 passing (1ms)
+
