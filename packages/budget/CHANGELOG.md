@@ -1,5 +1,13 @@
 # Unreleased
 
+- **The hook `assurance hook install` writes runs without the network.** It is now
+  `uvx --offline assurance@<version> …`, the copy uv fetched when you installed it. Without the flag
+  uv asks PyPI again every few minutes, and when PyPI cannot be reached (a proxy, a private mirror, an
+  outage) it exits 2, which a Stop hook passes to Claude as "keep going": every turn would end with
+  Claude told not to stop. `install` makes sure uv has the pinned copy, fetching it once when it does
+  not, and says so when it cannot; with `--scope project` it prints the one command everyone else runs
+  once. `status` flags a hook that still asks PyPI every time, which `install` rewrites, and an offline
+  hook whose copy uv no longer has.
 - **Different edits to one file are no longer reported as a loop.** A loop is the same step failing
   the same way with nothing new read, and an edit was keyed on its file alone, so four edits to one
   file made together read as `Looped: 3 rounds of Edit`. On the real session where this was found,

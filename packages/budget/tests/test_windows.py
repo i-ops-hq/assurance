@@ -183,14 +183,14 @@ def test_on_windows_the_hook_names_uvx_bare_so_both_shells_read_it_the_same() ->
     which = _which({"uvx": "C:\\Users\\John Doe\\.local\\bin\\uvx.exe"})
     for scope in ("user", "project", "local"):
         assert hook_command(scope, nudge=True, version="0.1.4", which=which, platform="win32") == (
-            "uvx assurance@0.1.4 audit --hook --nudge"
+            "uvx --offline assurance@0.1.4 audit --hook --nudge"
         )
 
 
 def test_on_posix_a_path_with_a_space_is_quoted() -> None:
     which = _which({"uvx": "/Users/John Doe/.local/bin/uvx"})
     command = hook_command("user", nudge=True, version="0.1.4", which=which, platform="darwin")
-    assert command == "'/Users/John Doe/.local/bin/uvx' assurance@0.1.4 audit --hook --nudge"
+    assert command == "'/Users/John Doe/.local/bin/uvx' --offline assurance@0.1.4 audit --hook --nudge"
     assert is_ours({"type": "command", "command": command})
 
 
