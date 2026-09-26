@@ -89,8 +89,9 @@ pin. `--scope project` writes it to the repository's `.claude/settings.json`, so
 the project gets the audit once they commit it; `--scope local` is only you, in this repository.
 `--no-nudge` tells you without asking Claude to run the tests. It only ever touches the assurance hook,
 refuses a settings file it cannot parse, and keeps the file as it was in
-`~/.local/state/assurance/backups/`. It nudges at most once per turn, and it never fails or blocks a
-session: if it can't read the transcript it says so and lets Claude finish.
+`~/.local/state/assurance/backups/` (Windows: `%LOCALAPPDATA%\assurance\backups\`). It nudges at
+most once per turn, and it never fails or blocks a session: if it can't read the transcript it says
+so and lets Claude finish.
 
 Or install it as a **Claude Code plugin**, and let Claude Code add, pause and remove it:
 

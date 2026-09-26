@@ -64,8 +64,9 @@
   `.claude/settings.json` for everyone on it, and `--scope local` to `.claude/settings.local.json`.
   `remove` finds the hook in every scope and takes out only its own entries, deleting a file only when
   nothing else was in it. Both refuse a file they cannot parse, and keep the file as it was under
-  `~/.local/state/assurance/backups/`, outside the repository. `status` says where it is installed,
-  which version, whether Claude Code can find the command it runs, and whether `disableAllHooks` is on.
+  `~/.local/state/assurance/backups/` (Windows: `%LOCALAPPDATA%\assurance\backups\`), outside the
+  repository. `status` says where it is installed, which version, whether Claude Code can find the
+  command it runs, and whether `disableAllHooks` is on.
 - **"No test or check ran" is said only when it is known.** A project's own check script
   (`python scripts/check.py`, `make lint-fix`) is not a command the audit recognises, so when one ran
   after the last edit, the hook and the report said nothing had. They now say no test or check *it
