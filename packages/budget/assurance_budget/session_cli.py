@@ -32,6 +32,8 @@ from assurance_budget.sessions import (
     edited_without_read,
     find_latest_session,
     read_claude_code,
+    read_claude_code_tail,
+    transcript_changed_limits_file,
     unclassified_bash_count,
     unclassified_by_command,
 )
@@ -66,8 +68,9 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         _hook_print({"systemMessage": "assurance: the Stop hook input had no transcript_path; nothing audited."})
         return EXIT_OK
     try:
-        session = read_claude_code(Path(data["transcript_path"]).expanduser())
-        declared, declared_note = _hook_declared(session)
+        transcript = Path(data["transcript_path"]).expanduser()
+        session, whole = _hook_session(transcript)
+        declared, declared_note = _hook_declared(session, _limits_file_changed(transcript, session, whole))
         after = after_last_edit(session, declared)
         finding = _hook_finding(after)
     except LogError as exc:
@@ -149,14 +152,43 @@ def _last_run_finding(runs: list[dict[str, Any]], noun: str, since: str) -> str 
     return None
 
 
-def _hook_declared(session: Session) -> tuple[Declared | None, str]:
+#: How much of the end of a transcript the Stop hook reads first; it widens until it holds the last edit.
+HOOK_WINDOW = 2_000_000
+
+
+def _hook_session(transcript: Path) -> tuple[Session, bool]:
+    """The end of the transcript when it holds the last edit, else all of it; and which it was.
+
+    The hook runs after every turn and needs only what happened since the last edit, which in a
+    session that is still editing is near the end. When the window holds no edit inside the project,
+    the whole file is read: widening step by step re-read the same bytes and was slower than that on
+    real sessions whose last edit was hours back. What it says is what reading the whole file says.
+    """
+    session, whole = read_claude_code_tail(transcript, HOOK_WINDOW)
+    if whole or after_last_edit(session) is not None:
+        return session, whole
+    return read_claude_code(transcript), True
+
+
+def _limits_file_changed(transcript: Path, session: Session, whole: bool) -> bool:
+    """Whether the session changed `.assurance/config.toml` at any point, not only in the window.
+
+    Trusting a project's declared checks depends on it, and a write early in a long session is as
+    much a write as a late one.
+    """
+    if whole:
+        return changed_limits_file(session)
+    return transcript_changed_limits_file(transcript, session.cwd)
+
+
+def _hook_declared(session: Session, limits_changed: bool) -> tuple[Declared | None, str]:
     """Declared tests and checks for the hook, and a sentence when some could not be used.
 
     A config file that cannot be read must not break the session, so it becomes a sentence.
     """
     try:
         declared, _sources, notes = load_declared(
-            _project_dir(session), trust_project=not changed_limits_file(session)
+            _project_dir(session), trust_project=not limits_changed
         )
     except ConfigError as exc:
         return None, f"Declared tests and checks were not used: {exc}."
