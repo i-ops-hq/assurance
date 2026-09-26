@@ -428,11 +428,25 @@ def test_a_project_hook_says_what_everyone_else_runs_once(
     assert uv.calls == [[UVX, "--offline", "assurance@0.1.4", "--version"]]  # bare `uvx`, found on PATH
 
 
+def _uvx_on_disk(tmp_path: Path) -> str:
+    """A runner that exists on every machine, quoted for a hook command.
+
+    `status` checks that a runner written as a path exists before it asks uv anything. UVX passed on
+    the machine this was written on, where Homebrew put uv, and failed on every CI runner.
+    """
+    runner = tmp_path / "bin" / "uvx"
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    runner.write_text("#!/bin/sh\n", encoding="utf-8")
+    runner.chmod(0o755)
+    return f'"{runner}"'
+
+
 def test_status_flags_a_hook_that_asks_pypi_every_time(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
-    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": f"{UVX} assurance@0.1.4 audit --hook --nudge"}]}]}})
+    command = f"{_uvx_on_disk(tmp_path)} assurance@0.1.4 audit --hook --nudge"
+    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}})
     assert _run(tmp_path, ["status"]) == 1
     out = capsys.readouterr().out
     assert "asks PyPI for assurance@0.1.4 every few minutes" in out and "uv exits 2" in out
@@ -443,11 +457,12 @@ def test_status_flags_an_offline_hook_uv_does_not_have(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(hook_setup, "_this_version", lambda: "0.1.4")
-    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": f"{UVX} --offline assurance@0.1.4 audit --hook --nudge"}]}]}})
+    command = f"{_uvx_on_disk(tmp_path)} --offline assurance@0.1.4 audit --hook --nudge"
+    _write(_user_file(tmp_path), {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}})
     uv = _Uv(has_it=False)
     assert _run(tmp_path, ["status"], run=uv) == 1
     assert "The user hook runs assurance@0.1.4 without the network, and uv does not have it yet" in capsys.readouterr().out
-    assert all("--offline" in call for call in uv.calls)  # status only asks; it fetches nothing
+    assert uv.calls and all("--offline" in call for call in uv.calls)  # it asked uv, and fetched nothing
 
 
 def test_asking_uv_quietly_returns_its_exit_status_and_survives_a_missing_program(tmp_path: Path) -> None:
