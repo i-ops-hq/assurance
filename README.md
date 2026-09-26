@@ -107,6 +107,16 @@ inside a session; only you can run it, so it adds nothing to Claude's context un
 plugin or `assurance hook install`, not both: together they audit twice per turn, and
 `assurance hook status` says so.
 
+**Read what a plugin runs before you install it, this one included.** A plugin runs as you. In
+February 2026 Snyk scanned 3,984 agent skills from two public registries, ClawHub and skills.sh, of the
+kind Claude Code, Cursor and OpenClaw load: 36.82% had at least one security flaw, 13.4% a critical
+one, and 76 carried confirmed malicious payloads for credential theft, backdoors and data exfiltration
+([ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/)). This plugin is
+[`plugins/assurance/`](plugins/assurance): one Stop hook, one 28-line shell script that runs the pinned
+`uvx assurance@<version>`, and one skill that only you can run. Its only permission is to run that
+script when you type `/assurance:audit`. It calls no model and sends nothing anywhere; the network is
+used once, by `uvx`, to fetch the pinned package from PyPI.
+
 On Windows, Claude Code runs hooks in Git Bash when Git for Windows is installed, and in PowerShell
 when it is not. The plugin's hook is a shell script, so it needs Git Bash; without it, use
 `uvx assurance@latest hook install`, which writes a hook both shells can run. Commands Claude runs
