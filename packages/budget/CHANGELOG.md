@@ -1,4 +1,4 @@
-# Unreleased
+# 0.2.5
 
 - **A call Claude Code refused is no longer counted as a failure.** When a permission rule, a hook,
   auto mode or the user refuses a call, it never runs: Claude Code marks the result `toolDenialKind`,
