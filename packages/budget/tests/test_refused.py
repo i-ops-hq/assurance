@@ -9,6 +9,7 @@ anything is unknown". It is known: they did nothing. Worse, a refused test right
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -175,11 +176,13 @@ def test_a_permission_mode_record_is_bookkeeping(tmp_path: Path) -> None:
 
 
 def test_a_refused_file_is_named_by_its_end_when_its_path_is_long(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    far = "/srv/" + "/".join(f"level{i}" for i in range(12)) + "/settings.json"
+    # Written the way this machine writes a path, because the reader shows a path by the rules of the
+    # machine that recorded the transcript, and that is this one: `\` on Windows, `/` elsewhere.
+    far = Path(tmp_path.anchor, "srv", *(f"level{i}" for i in range(12)), "settings.json")
     path = _transcript(tmp_path, [
-        _step("Write", {"file_path": far, "content": "{}"}, AUTO_MODE, error=True, denial="automode-blocked"),
+        _step("Write", {"file_path": str(far), "content": "{}"}, AUTO_MODE, error=True, denial="automode-blocked"),
     ])
     assert main([str(path), "--json"]) == 0
     (label,) = json.loads(capsys.readouterr().out)["refused_calls"]
-    assert label.startswith("Write `…") and label.endswith("/level11/settings.json`")
+    assert label.startswith("Write `…") and label.endswith(f"{os.sep}level11{os.sep}settings.json`")
     assert len(label) <= len("Write ``") + 60
