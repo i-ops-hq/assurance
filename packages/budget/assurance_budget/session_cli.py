@@ -30,6 +30,7 @@ from assurance_budget.sessions import (
     after_last_edit,
     bash_kinds_count,
     changed_limits_file,
+    display_path,
     edited_without_read,
     find_latest_session,
     read_claude_code,
@@ -401,7 +402,9 @@ def build_report(
     where the text report leaves it out.
     """
     by_tool = dict(Counter(call.name for call in session.tool_calls))
-    failed = sum(1 for call in session.tool_calls if call.error)
+    # A call Claude Code refused never ran, so it did not fail: it is counted apart and named.
+    failed = sum(1 for call in session.tool_calls if call.error and not call.refused)
+    refused = [_refused_label(call, session.cwd) for call in session.tool_calls if call.refused]
     duration = None
     if session.started is not None and session.ended is not None:
         duration = max(0.0, session.ended - session.started)
@@ -429,6 +432,8 @@ def build_report(
         "duration_seconds": duration,
         "tool_calls": len(session.tool_calls),
         "failed": failed,
+        "refused": len(refused),
+        "refused_calls": refused,
         "by_tool": by_tool,
         "loops": [
             {"rounds": loop.rounds, "action": _loop_action(loop.action), "error": loop.error}
@@ -493,8 +498,10 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     lines = [header]
     n = report["tool_calls"]
     failed = report["failed"]
+    refused = list(report.get("refused_calls") or [])
     if n or failed:
         fail_bit = f", {failed} failed" if failed else ""
+        fail_bit += f", {len(refused)} refused" if refused else ""
         breakdown = _tool_breakdown(report["by_tool"])
         call_bit = _count_phrase(n, "tool call", "tool calls")
         lines.append(f"{call_bit}{fail_bit} — {breakdown}" if breakdown else f"{call_bit}{fail_bit}")
@@ -516,6 +523,10 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     after = report.get("after_last_edit")
     if after is not None:
         body.append(_after_last_edit_line(after))
+
+    if refused:
+        they = "it" if len(refused) == 1 else "they"
+        body.append(f"Refused, so {they} never ran: {', '.join(refused)}.")
 
     unclassified = int(report.get("unclassified_commands") or 0)
     which = _unclassified_breakdown(report.get("unclassified_by_command") or {})
@@ -587,6 +598,27 @@ def _unclassified_breakdown(by_command: dict[str, int]) -> str:
     if rest > 0:
         parts.append("1 more kind" if rest == 1 else f"{rest} more kinds")
     return ", ".join(parts)
+
+
+def _refused_label(call: ToolCall, cwd: str) -> str:
+    """A refused call as the report names it: the tool, and what it was asked to do, cut short.
+
+    A command keeps its start, which says what it was; a path keeps its end, which says which file.
+    """
+    if call.name in ("Bash", "PowerShell"):
+        what = call.input.get("command")
+        text = " ".join(what.split()) if isinstance(what, str) else ""
+        if len(text) > _REFUSED_LABEL_MAX:
+            text = text[: _REFUSED_LABEL_MAX - 1] + "…"
+    else:
+        what = call.input.get("file_path")
+        text = display_path(what, cwd) if isinstance(what, str) and what else ""
+        if len(text) > _REFUSED_LABEL_MAX:
+            text = "…" + text[-(_REFUSED_LABEL_MAX - 1) :]
+    return f"{call.name} `{text}`" if text else call.name
+
+
+_REFUSED_LABEL_MAX = 60
 
 
 def _count_phrase(n: int, singular: str, plural: str) -> str:

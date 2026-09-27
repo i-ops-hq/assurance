@@ -94,7 +94,8 @@ each fetches it once (`install` prints the command); `--scope local` is only you
 refuses a settings file it cannot parse, and keeps the file as it was in
 `~/.local/state/assurance/backups/` (Windows: `%LOCALAPPDATA%\assurance\backups\`). It nudges at
 most once per turn, and it never fails or blocks a session: if it can't read the transcript it says
-so and lets Claude finish.
+so and lets Claude finish. Take it out from your own terminal: in auto mode, Claude Code refuses to let
+Claude remove it, as tampering with an audit.
 
 Or install it as a **Claude Code plugin**, and let Claude Code add, pause and remove it:
 

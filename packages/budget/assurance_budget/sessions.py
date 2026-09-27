@@ -30,6 +30,7 @@ KNOWN_RECORDS = (
     "last-prompt",
     "atis-latch",
     "mode",
+    "permission-mode",
     "queue-operation",
     "system",
     "cost-state",
@@ -330,9 +331,34 @@ class ToolCall:
     result_first_line: str = ""
     result_tail: str = ""
     """The last few thousand characters of the result: where a test runner prints its summary."""
+    refused: bool = False
+    """Claude Code refused to run it, so it did nothing: no edit, no read, no test. See `_refused`."""
 
 
 _RESULT_TAIL_CHARS = 4000
+
+#: Claude Code's own words when it refuses a call: the harness refusing a command itself (a foreground
+#: `sleep`, which carries no `toolDenialKind`), and, for transcripts written before that field was,
+#: auto mode and the user saying no. A hook or permission rule words its own refusal, so only the
+#: field finds those.
+_REFUSAL_OPENINGS = (
+    "<tool_use_error>Blocked:",
+    "Permission for this action was denied",
+    "The user doesn't want to proceed with this tool use",
+)
+
+
+def _refused(record: Mapping[str, Any], is_error: bool, text: str) -> bool:
+    """Whether a tool result says the call was refused before it ran.
+
+    `toolDenialKind` is what Claude Code writes for a permission rule or a hook (`permission-rule`),
+    auto mode (`automode-blocked`) and the user saying no (`user-rejected`), seen from 2.1.247 to
+    2.1.283. A refused call is an error result; an ordinary failure is not a refusal, and neither is
+    a call the tool rejected as malformed.
+    """
+    if not is_error:
+        return False
+    return bool(record.get("toolDenialKind")) or text.lstrip().startswith(_REFUSAL_OPENINGS)
 
 
 @dataclass(frozen=True)
@@ -482,7 +508,7 @@ def _first_cwd(fh: Any, limit: int) -> str | None:
 def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     pending: dict[str, dict[str, Any]] = {}
     order: list[str] = []
-    results: dict[str, tuple[bool, str]] = {}
+    results: dict[str, tuple[bool, str, bool]] = {}  # error, text, refused
     session_id = ""
     started: float | None = None
     ended: float | None = None
@@ -605,7 +631,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 text = _result_text(block.get("content"))
                 is_error = bool(block.get("is_error", False))
                 if tool_id in pending:
-                    results[tool_id] = (is_error, text)
+                    results[tool_id] = (is_error, text, _refused(record, is_error, text))
                 else:
                     unmatched_results += 1
             if saw_result:
@@ -628,7 +654,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     for tool_id in order:
         meta = pending[tool_id]
         if tool_id in results:
-            err, text = results[tool_id]
+            err, text, refused = results[tool_id]
             first = text.splitlines()[0] if text else ""
             digest = _sha256(text)
             calls.append(
@@ -642,6 +668,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                     has_result=True,
                     result_first_line=first,
                     result_tail=text[-_RESULT_TAIL_CHARS:],
+                    refused=refused,
                 )
             )
         else:
@@ -694,7 +721,7 @@ def changed_limits_file(session: Session) -> bool:
                 return True
         if call.name in _SHELL_TOOLS:
             command = shell_command(call)
-            if command is None:
+            if command is None or call.refused:
                 continue
             # A write target is compared as written, never expanded, so a command that writes the
             # limits file names it; the shell parser is only needed for the ones that do.
@@ -836,7 +863,7 @@ def edited_without_read(session: Session) -> list[str]:
             next_attached += 1
         if call.name in _READ_TOOLS:
             path = _call_path(call)
-            if path is not None:
+            if path is not None and not call.refused:
                 known_paths.add(_norm_path(path, session.cwd))
             continue
         if call.name in _WRITE_TOOLS:
@@ -915,7 +942,7 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
     test_runs: list[dict[str, Any]] = []
     check_runs: list[dict[str, Any]] = []
     for call in session.tool_calls[last_i + 1 :]:
-        if call.name not in _SHELL_TOOLS:
+        if call.name not in _SHELL_TOOLS or call.refused:
             continue
         command = shell_command(call)
         if command is None:
@@ -1341,7 +1368,7 @@ def unclassified_bash_count(session: Session, declared: Declared | None = None) 
     """How many shell commands could not be classified as test, check, read or write."""
     n = 0
     for call in session.tool_calls:
-        if call.name not in _SHELL_TOOLS:
+        if call.name not in _SHELL_TOOLS or call.refused:
             continue
         command = shell_command(call)
         if command is None:
@@ -1373,7 +1400,7 @@ def _unclassified_counts(
 ) -> Counter[str]:
     counts: Counter[str] = Counter()
     for call in calls:
-        if call.name not in _SHELL_TOOLS:
+        if call.name not in _SHELL_TOOLS or call.refused:
             continue
         command = shell_command(call)
         if command is None:
@@ -1420,7 +1447,7 @@ def bash_kinds_count(session: Session, declared: Declared | None = None) -> dict
         "unclassified": 0,
     }
     for call in session.tool_calls:
-        if call.name not in _SHELL_TOOLS:
+        if call.name not in _SHELL_TOOLS or call.refused:
             continue
         command = shell_command(call)
         if command is None:
@@ -2294,6 +2321,12 @@ def _within(normed: str, base: str, cwd: str) -> bool:
         normed, base = ntpath.normcase(normed), ntpath.normcase(base)
     sep = "\\" if windows else "/"
     return normed == base or normed.startswith(base.rstrip(sep) + sep)
+
+
+def display_path(path: str, cwd: str) -> str:
+    """A path from a transcript as the report shows it: relative to the session `cwd` when inside it,
+    by the rules of the machine that recorded it."""
+    return _display_path(_norm_path(path, cwd), cwd)
 
 
 def _display_path(normed: str, cwd: str) -> str:
