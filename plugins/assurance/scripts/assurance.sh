@@ -12,15 +12,15 @@
 # outage) stops mattering after the first run. When the first run cannot fetch it, the turn is
 # reported as not audited: uv exits 2 when it cannot reach the index, and a Stop hook that exits 2
 # tells Claude to keep going.
-VERSION=0.1.9
+VERSION=0.1.10
 PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin"
 export PATH
 
 if command -v uvx >/dev/null 2>&1; then
-  case " $* " in *" --hook "*) ;; *) exec uvx assurance==0.1.9 "$@" ;; esac
+  case " $* " in *" --hook "*) ;; *) exec uvx assurance==0.1.10 "$@" ;; esac
   input=$(cat)
-  printf '%s' "$input" | UV_OFFLINE=1 uvx assurance==0.1.9 "$@" 2>/dev/null && exit 0
-  { err=$(printf '%s' "$input" | uvx assurance==0.1.9 "$@" 2>&1 >&3); } 3>&1 && exit 0
+  printf '%s' "$input" | UV_OFFLINE=1 uvx assurance==0.1.10 "$@" 2>/dev/null && exit 0
+  { err=$(printf '%s' "$input" | uvx assurance==0.1.10 "$@" 2>&1 >&3); } 3>&1 && exit 0
   why=$(printf '%s\n' "$err" | grep -m 1 '^error:' | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g')
   printf '{"systemMessage": "assurance: %s did not run%s, so this turn was not audited."}\n' "$VERSION" "${why:+ ($why)}"
   exit 0
