@@ -1,3 +1,8 @@
+# 0.6.3
+
+- **The start screen** says what the tool is for and lists the commands, without the line "No model,
+  no network, no account."
+
 # 0.6.2
 
 - **`assurance hook`** reaches `assurance-budget`'s `hook install | remove | status`, which adds the
