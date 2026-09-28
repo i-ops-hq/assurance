@@ -8,6 +8,7 @@ perfectly before he recommends it. 0.1.5 knew `go test`, `go vet` and `golangci-
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -183,6 +184,7 @@ def test_the_hook_names_the_failed_command_with_one_full_stop(
     assert f"{ends} Before you say" in context
 
 
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="config files need tomllib (3.11+)")
 def test_a_declared_go_command_is_listed_with_one_full_stop(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     config = tmp_path / ".assurance" / "config.toml"
     config.parent.mkdir()
