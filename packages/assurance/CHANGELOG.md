@@ -1,3 +1,10 @@
+# 0.1.10
+
+- **Requires `assurance-budget` 0.2.8:** `/assurance:audit` passes its session's id, so the audit
+  reads that session's transcript and no other.
+- **The plugin has a privacy policy,** `plugins/assurance/PRIVACY.md`, linked from its README as
+  "Privacy": what it reads, what for, that it keeps and sends nothing, and what uv downloads.
+
 # 0.1.9
 
 - **The plugin's listing says what it does, and no more.** It ended "No model, no network, no

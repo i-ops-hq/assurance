@@ -1,3 +1,12 @@
+# 0.2.8
+
+- **`assurance audit --session ID` reads one session's transcript and no other.** Without a path,
+  the audit finds the folder's newest session by reading the start of each newer transcript to
+  learn its folder, other sessions' included. With `--session`, it opens
+  `<projects>/<folder>/<ID>.jsonl`, found by its file name. An id that is not a plain id names
+  nothing, and an empty one is said as such, never answered with a search. The Claude Code plugin's
+  `/assurance:audit` uses it.
+
 # 0.2.7
 
 - **A command that ends in dots is named with one full stop.** A failing `go test ./...` was reported
