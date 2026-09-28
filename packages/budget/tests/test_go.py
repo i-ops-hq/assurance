@@ -8,11 +8,13 @@ perfectly before he recommends it. 0.1.5 knew `go test`, `go vet` and `golangci-
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from assurance_budget.session_cli import main, run_hook
 from assurance_budget.sessions import (
     _runner_summary,
     after_last_edit,
@@ -156,3 +158,39 @@ def test_the_hook_reads_a_piped_go_test_after_an_edit(tmp_path: Path) -> None:
     passing = _session(tmp_path, [edit, ("Bash", {"command": "go test ./... 2>&1 | tail -3"}, False, _tail(_fixture("gotest_pass.txt"), 3))])
     after = after_last_edit(read_claude_code(passing))
     assert after is not None and after["tests_failed"] == 0 and after["tests_unknown"] == 0
+
+
+# --- saying it: a command that ends in dots gets no second full stop ----------------------------------
+
+def _hook(path: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+    run_hook(json.dumps({"transcript_path": str(path), "cwd": str(tmp_path), "hook_event_name": "Stop"}), nudge=True)
+    return json.loads(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("command, output, ends", [
+    ("go test ./... 2>&1 | tail -3", "gotest_fail.txt", ": go test ./..."),  # was `./....`
+    ("pytest -q", None, ": pytest -q."),  # a label that does not end a sentence still gets one
+])
+def test_the_hook_names_the_failed_command_with_one_full_stop(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], command: str, output: str | None, ends: str
+) -> None:
+    edit = ("Edit", {"file_path": str(tmp_path / "trade.go"), "old_string": "3", "new_string": "4"}, False, "updated")
+    text = _tail(_fixture(output), 3) if output else "1 failed in 0.10s"
+    run = ("Bash", {"command": command}, output is None, text)
+    said = _hook(_session(tmp_path, [edit, run]), tmp_path, capsys)
+    assert said["systemMessage"].endswith(ends)
+    context = said["hookSpecificOutput"]["additionalContext"]
+    assert "...." not in said["systemMessage"] and "...." not in context
+    assert f"{ends} Before you say" in context
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="config files need tomllib (3.11+)")
+def test_a_declared_go_command_is_listed_with_one_full_stop(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = tmp_path / ".assurance" / "config.toml"
+    config.parent.mkdir()
+    config.write_text('[audit]\ntests = ["go test ./..."]\n', encoding="utf-8")
+    edit = ("Edit", {"file_path": str(tmp_path / "trade.go"), "old_string": "3", "new_string": "4"}, False, "updated")
+    path = _session(tmp_path, [edit, ("Bash", {"command": "go test ./..."}, False, "ok  \texample.com/app/trade\t0.2s")])
+    assert main([str(path)]) == 0
+    report = capsys.readouterr().out
+    assert "declares them: go test ./...\n" in report and "...." not in report
