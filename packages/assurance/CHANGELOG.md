@@ -1,3 +1,12 @@
+# Unreleased
+
+- **The plugin's script calls `uvx` by name.** Anthropic's plugin directory refused it as an
+  "unpinned uvx launcher": the script found `uvx` and ran it from a variable, which a scanner cannot
+  read. It now puts the places uv installs itself on the end of `PATH` (the macOS desktop app starts
+  hooks without them) and runs `uvx assurance==<version>`, so the program and its pin are both in
+  plain sight. It finds `uvx` in the same places, in the same order, as before.
+- **The plugin has an icon**, `.claude-plugin/icon.svg`, for its listing.
+
 # 0.1.6
 
 - **Requires `assurance-budget` 0.2.6:** Go projects work: `gotestsum`, `staticcheck` and `go tool`
