@@ -1,7 +1,7 @@
 {
   "name": "assurance",
   "version": "0.1.8",
-  "description": "After every turn, says whether anything was tested after Claude's last edit, and what it could not check. No model, no network, no account.",
+  "description": "After every turn, says whether anything was tested after Claude's last edit, and what it could not check.",
   "author": {
     "name": "I-Ops",
     "url": "https://i-ops.dev"

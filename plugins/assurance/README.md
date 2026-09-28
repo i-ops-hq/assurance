@@ -19,12 +19,12 @@ What it runs, all of it: [`hooks/hooks.json`](hooks/hooks.json) (one Stop hook),
 `assurance`), and [`skills/audit/SKILL.md`](skills/audit/SKILL.md) (run only when you type it; its one
 permission is to run that script). Read them before you install it, as you should any plugin.
 
-It runs `uvx assurance@<version>` (or an `assurance` installed with pip), so it needs
+It runs `uvx assurance==<version>` (or an `assurance` installed with pip), so it needs
 [uv](https://docs.astral.sh/uv/) or `pip install assurance`. It fetches the pinned version the first
 time it runs and uses that copy from then on without the network, so a proxy, a private mirror or a
 PyPI outage cannot keep a session from ending; if that first fetch fails, the hook says the turn was
 not audited and lets it end. On Windows the hook is a shell script, so it needs Git Bash, which comes
 with Git for Windows; without it, use `uvx assurance@latest hook install`. What it reads is the
 transcript Claude Code keeps of the session that just ended, on your machine, and it sends that
-nowhere. No model, no network beyond fetching the package once, no account.
+nowhere.
 Source and documentation: https://github.com/i-ops-hq/assurance

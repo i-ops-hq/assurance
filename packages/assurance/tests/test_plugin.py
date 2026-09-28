@@ -39,6 +39,19 @@ def test_the_marketplace_lists_the_plugin_under_the_name_it_installs_by() -> Non
     assert (ROOT / entry["source"]).resolve() == PLUGIN.resolve()
 
 
+def test_the_listing_is_the_same_in_both_places_and_does_not_say_no_network() -> None:
+    # Until 0.1.9 the listing, which is what Anthropic's directory shows, ended "No model, no network,
+    # no account.", and the hook fetches its pinned package the first time it runs. The listing is
+    # written twice, in the manifest and in the marketplace entry, so the two are kept equal. Saying
+    # "no network beyond fetching" the package is true, and allowed.
+    (entry,) = json.loads(MARKETPLACE.read_text(encoding="utf-8"))["plugins"]
+    listing = _manifest()["description"]
+    assert isinstance(listing, str) and entry["description"] == listing
+    readme = " ".join((PLUGIN / "README.md").read_text(encoding="utf-8").split())
+    for text in (listing, readme):
+        assert not re.search(r"no network(?! beyond fetching)", text, re.I), text
+
+
 def test_the_plugin_is_the_release_it_ships_with() -> None:
     # The hook runs after every turn, so like the README pins it runs a version somebody chose, and
     # it moves with each `assurance` release.
