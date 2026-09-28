@@ -94,7 +94,8 @@ each fetches it once (`install` prints the command); `--scope local` is only you
 refuses a settings file it cannot parse, and keeps the file as it was in
 `~/.local/state/assurance/backups/` (Windows: `%LOCALAPPDATA%\assurance\backups\`). It nudges at
 most once per turn, and it never fails or blocks a session: if it can't read the transcript it says
-so and lets Claude finish.
+so and lets Claude finish. Take it out from your own terminal: in auto mode, Claude Code refuses to let
+Claude remove it, as tampering with an audit.
 
 Or install it as a **Claude Code plugin**, and let Claude Code add, pause and remove it:
 
@@ -136,14 +137,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.4 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.5 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.4 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.5 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a

@@ -1,3 +1,18 @@
+# 0.2.5
+
+- **A call Claude Code refused is no longer counted as a failure.** When a permission rule, a hook,
+  auto mode or the user refuses a call, it never runs: Claude Code marks the result `toolDenialKind`,
+  or starts it `<tool_use_error>Blocked:` when it blocks a command itself. The audit counted such a
+  call as failed and as a shell command it could not classify, and a refused test right after an
+  edit read as "the last test run after the last edit failed" when no test had run. A refused call is
+  now none of those, and it is not an edit, a read, or a write to the project's
+  `.assurance/config.toml` either. The report counts it apart (`12 tool calls, 2 failed, 2 refused`)
+  and names it (`Refused, so they never ran: …`); `--json` gains `refused` and `refused_calls`. Found
+  on a real Windows session, in which auto mode refused Claude's attempt to remove the audit hook. On
+  sixteen real transcripts, the only changes are the refused calls themselves.
+- **`permission-mode` records are bookkeeping.** Claude Code 2.1.283 writes one each time the
+  permission mode is set, and the report listed them under "Not read".
+
 # 0.2.4
 
 - **The hook `assurance hook install` writes runs without the network.** It is now
