@@ -1,5 +1,8 @@
-# Unreleased
+# 0.1.5
 
+- **Requires `assurance-budget` 0.2.5:** a call Claude Code refused is no longer counted as a failure,
+  a test, an edit or an unclassified command, and `permission-mode` records are read as bookkeeping.
+  The README's hook command and the plugin are pinned to this version.
 - **The README says to take the hook out yourself.** In auto mode, Claude Code refuses to let Claude
   remove it, as tampering with an audit, so `assurance hook remove` is for your own terminal.
 
