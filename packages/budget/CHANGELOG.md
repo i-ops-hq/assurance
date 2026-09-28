@@ -1,4 +1,4 @@
-# Unreleased
+# 0.2.6
 
 - **Go projects: `gotestsum`, `staticcheck` and `go tool` are recognised, and a piped Go run is
   read.** `gotestsum` counts as a test and `staticcheck` as a check, and so do `go tool gotestsum`,

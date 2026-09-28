@@ -1,5 +1,8 @@
-# Unreleased
+# 0.1.6
 
+- **Requires `assurance-budget` 0.2.6:** Go projects work: `gotestsum`, `staticcheck` and `go tool`
+  are recognised, and a piped Go test or check is read from what it printed. The README's hook
+  command and the plugin are pinned to this version.
 - **The plugin's script names the package it runs.** It ran `assurance@$VERSION`; it now writes the
   version out where it runs it, so what runs can be read without following a variable, including by
   Anthropic's plugin directory, which refuses a launcher it cannot see pinned.
