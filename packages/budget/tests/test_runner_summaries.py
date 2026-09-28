@@ -1,8 +1,9 @@
 """Reading a test or check result from its output, when the exit status belongs to something else.
 
 Every fixture in tests/fixtures/runners is the real output of a real run (2026-09-24: jest 29,
-vitest 2, mocha 10, node 22 with both reporters, bun 1.3, cargo 1.95, mypy, ruff, tsc 5, eslint 9),
-with only the absolute paths replaced. `_pass` runs exited 0, `_fail` runs exited non-zero.
+vitest 2, mocha 10, node 22 with both reporters, bun 1.3, cargo 1.95, mypy, ruff, tsc 5, eslint 9;
+2026-09-27: go test and go vet from Go 1.27.1, gotestsum 1.13, staticcheck 2026.2.1, golangci-lint
+2.14), with only the absolute paths replaced. `_pass` runs exited 0, `_fail` runs exited non-zero.
 """
 
 from __future__ import annotations
@@ -20,8 +21,8 @@ from assurance_budget.sessions import (
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "runners"
-CHECKERS = ("mypy", "ruff", "tsc", "eslint")
-QUIET_WHEN_CLEAN = ("tsc", "eslint")  # print nothing when there is nothing wrong
+CHECKERS = ("mypy", "ruff", "tsc", "eslint", "staticcheck", "golangci", "govet")
+QUIET_WHEN_CLEAN = ("tsc", "eslint", "staticcheck", "govet")  # print nothing when there is nothing wrong
 
 
 def _cases() -> list[tuple[str, str, str | None]]:
@@ -42,7 +43,7 @@ def _read(name: str, runner: str, text: str) -> str | None:
 
 def test_there_is_a_real_run_of_every_runner_both_ways() -> None:
     names = {p.name for p in FIXTURES.glob("*.txt")}
-    for runner in ("jest", "vitest", "mocha", "node", "nodespec", "bun", "cargo", *CHECKERS):
+    for runner in ("jest", "vitest", "mocha", "node", "nodespec", "bun", "cargo", "gotest", "gotestsum", *CHECKERS):
         assert {f"{runner}_pass.txt", f"{runner}_fail.txt"} <= names
 
 
@@ -131,7 +132,9 @@ def test_every_binary_of_one_cargo_run_is_one_run() -> None:
     assert _runner_summary(f"{lib_ok}\n{integration}\nerror: test failed, to rerun pass `--test api`") == "failed"
 
 
-@pytest.mark.parametrize("name", ["mocha_fail.txt", "nodespec_fail.txt", "node_fail.txt", "bun_fail.txt"])
+@pytest.mark.parametrize(
+    "name", ["mocha_fail.txt", "nodespec_fail.txt", "node_fail.txt", "bun_fail.txt", "gotest_fail.txt", "gotestsum_fail.txt"]
+)
 def test_output_cut_by_head_never_reads_as_a_pass(name: str) -> None:
     # `| head` keeps the start, and a failure is printed after the passes: it may be what was cut.
     lines = (FIXTURES / name).read_text(encoding="utf-8").splitlines()

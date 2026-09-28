@@ -214,6 +214,8 @@ _TEST_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("dotnet", "test"),
     ("swift", "test"),
     ("go", "test"),
+    ("gotestsum",),
+    ("go", "tool", "gotestsum"),  # Go 1.24 tools declared in go.mod run as `go tool <name>`
     ("cargo", "test"),
     ("mvn", "test"),
     ("gradle", "test"),
@@ -245,6 +247,9 @@ _CHECK_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("cargo", "clippy"),
     ("go", "vet"),
     ("golangci-lint",),
+    ("staticcheck",),
+    ("go", "tool", "staticcheck"),
+    ("go", "tool", "golangci-lint"),
     ("shellcheck",),
     ("mypy",),
     ("ruff",),
@@ -1128,6 +1133,18 @@ _BUN_COUNT = re.compile(r"^(\d+) (pass|fail)$")
 _BUN_FOOTER = re.compile(r"^Ran \d+ tests? across \d+ files?\.")
 _CARGO_RESULT = re.compile(r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed;")
 _CARGO_FAILED = re.compile(r"^error: (test failed|\d+ targets? failed)")
+# go test prints a line per package and nothing that sums them up, except that a run with any failure
+# ends with a line that says only FAIL. So a pass is a package that ran tests, and the end is read
+# for whether anything failed.
+_GO_PACKAGE = re.compile(r"^(?:ok|FAIL|\?)\s+\S+\s+(?:\(cached\)|[\d.]+s|\[no test files\])|^FAIL\s+\S+ \[(?:build|setup) failed\]$")
+_GO_OK = re.compile(r"^ok\s+\S+\s+(?:\(cached\)|[\d.]+s)")
+_GO_NONE_RUN = re.compile(r"\[no tests to run\]")
+_GO_FAILED = re.compile(r"^(?:FAIL\s+\S+\s+(?:[\d.]+s|\[(?:build|setup) failed\])|--- FAIL: |FAIL$)")
+_GO_TEST = re.compile(r"^--- (?:PASS|FAIL): ")
+# gotestsum prints one line for the whole run: `DONE 3 tests, 1 failure in 0.139s`. Its failures
+# echo go's own `--- FAIL:`, so when this line is there it speaks for the run.
+_GOTESTSUM_DONE = re.compile(r"^DONE (?:\d+ runs?, )?(\d+) tests?((?:, \d+ [a-z]+)*) in [\d.]+m?s$")
+_GOTESTSUM_FAIL = re.compile(r"^=== FAIL: ")
 
 
 @dataclass
@@ -1143,7 +1160,7 @@ def _runner_summary(text: str, cut_from_the_end: bool = False) -> str | None:
     """`failed` or `passed` from test-runner summaries in the output, or None when it cannot tell.
 
     Read only from what a runner prints as its summary: pytest's last line, and the formats of jest,
-    vitest, mocha, node --test, bun and cargo. A failure counted by a run makes that run failed;
+    vitest, mocha, node --test, bun, cargo, go test and gotestsum. A failure counted by a run makes that run failed;
     a run passed only when it counted a pass and said nothing failed, so a run that collected no tests
     is not a pass. One output can hold several runs: when they disagree the answer is unknown, because
     which one describes the code as it stands cannot be read off the output. When the output was cut
@@ -1224,6 +1241,7 @@ def _runner_summary(text: str, cut_from_the_end: bool = False) -> str | None:
                 cargo = _Run()
                 runs.append(cargo)
             cargo.failed = True
+    runs.extend(_go_runs(lines, cut_from_the_end))
     # mocha prints a failing line only when something failed, so its last run says clean by silence;
     # that is only safe to believe when the end of the output was kept.
     for run in runs:
@@ -1236,6 +1254,34 @@ def _runner_summary(text: str, cut_from_the_end: bool = False) -> str | None:
     if verdicts == {"passed"} and not cut_from_the_end:
         return "passed"
     return None
+
+
+def _go_runs(lines: list[str], cut_from_the_end: bool) -> list[_Run]:
+    """What go test or gotestsum printed, as runs; none when neither is in the output."""
+    done = [m for m in (_GOTESTSUM_DONE.search(ln) for ln in lines) if m]
+    if done:
+        runs = []
+        for m in done:
+            counts = {word.rstrip("s"): int(n) for n, word in re.findall(r", (\d+) ([a-z]+)", m.group(2))}
+            bad = counts.get("failure", 0) + counts.get("error", 0)
+            ran = int(m.group(1)) - counts.get("skipped", 0) - bad
+            runs.append(_Run(passed=max(ran, 0), failed=bad > 0, clean=bad == 0))
+        return runs
+    if any(_GOTESTSUM_FAIL.search(ln) for ln in lines):
+        return [_Run(failed=True)]  # the summary was cut away and a failure was not
+    go = [ln for ln in lines if _GO_PACKAGE.search(ln) or _GO_TEST.search(ln) or ln == "FAIL"]
+    if not any(_GO_PACKAGE.search(ln) or _GO_TEST.search(ln) for ln in go):
+        return []  # a bare FAIL on its own could be anybody's
+    failed = any(_GO_FAILED.search(ln) for ln in go)
+    ran = sum(1 for ln in go if _GO_OK.search(ln) and not _GO_NONE_RUN.search(ln))
+    if failed and (go[-1] == "FAIL" or cut_from_the_end):
+        return [_Run(failed=True)]
+    if failed:
+        # A failure, and then output that does not end the way a failing run ends: another run
+        # followed it. Which one describes the code cannot be read off the output.
+        return [_Run(failed=True), _Run(passed=1, clean=True)]
+    # A failing run's last line is FAIL, and nothing cut the end, so a run that ran tests passed.
+    return [_Run(passed=ran, clean=True)] if ran else []
 
 
 def _add_counts(run: _Run, line: str) -> None:
@@ -1252,6 +1298,7 @@ def _add_counts(run: _Run, line: str) -> None:
 _CHECK_PASSED = (
     re.compile(r"^Success: no issues found in \d+ source files?$"),  # mypy
     re.compile(r"^All checks passed!$"),  # ruff
+    re.compile(r"^0 issues\.$"),  # golangci-lint
 )
 _CHECK_FAILED = (
     re.compile(r"^Found [1-9]\d* errors? in \d+ files? \(checked \d+ source files?\)$"),  # mypy
@@ -1259,6 +1306,10 @@ _CHECK_FAILED = (
     re.compile(r"^\S.*\(\d+,\d+\): error TS\d+: "),  # tsc
     re.compile(r"^Found [1-9]\d* errors? in \d+ files?\.$"),  # tsc --pretty
     re.compile(r"^✖ \d+ problems? \([1-9]\d* errors?, \d+ warnings?\)$"),  # eslint
+    re.compile(r"^[1-9]\d* issues:$"),  # golangci-lint
+    # A finding from go vet or staticcheck, or a compile error either one reports. Both print
+    # nothing when clean, so a clean run piped away stays unknown.
+    re.compile(r"^(?:vet: )?\S+\.go:\d+:\d+: "),
 )
 
 

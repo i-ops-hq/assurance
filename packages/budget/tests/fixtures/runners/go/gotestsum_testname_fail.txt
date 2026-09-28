@@ -1,0 +1,15 @@
+EMPTY cmd/tool
+PASS greet.TestGreet (0.00s)
+PASS greet.TestGreetEmpty (0.00s)
+PASS greet
+=== RUN   TestFee
+    trade_test.go:14: Fee(10000) = 3, want 4
+--- FAIL: TestFee (0.00s)
+FAIL trade.TestFee (0.00s)
+FAIL trade
+
+=== Failed
+=== FAIL: trade TestFee (0.00s)
+    trade_test.go:14: Fee(10000) = 3, want 4
+
+DONE 3 tests, 1 failure in 0.136s

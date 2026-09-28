@@ -1,0 +1,1 @@
+lint.go:17:14: fmt.Printf format %d has arg "size" of wrong type string

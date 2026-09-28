@@ -43,8 +43,13 @@ def test_the_plugin_is_the_release_it_ships_with() -> None:
     # The hook runs after every turn, so like the README pins it runs a version somebody chose, and
     # it moves with each `assurance` release.
     assert _manifest()["version"] == _release()
-    pinned = re.search(r"^VERSION=(\S+)$", SCRIPT.read_text(encoding="utf-8"), re.M)
+    script = SCRIPT.read_text(encoding="utf-8")
+    pinned = re.search(r"^VERSION=(\S+)$", script, re.M)
     assert pinned and pinned.group(1) == _release()
+    # The package it runs is written out, not built from a variable, so a reader (and Anthropic's
+    # directory, which blocks an unpinned launcher) sees exactly what runs.
+    runs = re.findall(r"assurance@(\S+)", script)
+    assert runs and set(runs) == {_release()}, runs
 
 
 def test_the_plugin_adds_one_stop_hook_that_runs_the_audit_as_a_hook() -> None:

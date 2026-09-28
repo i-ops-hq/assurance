@@ -1,0 +1,5 @@
+∅  cmd/tool (1ms)
+✓  greet (72ms)
+✓  trade (70ms)
+
+DONE 3 tests in 0.127s

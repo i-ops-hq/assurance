@@ -1,3 +1,16 @@
+# 0.2.6
+
+- **Go projects: `gotestsum`, `staticcheck` and `go tool` are recognised, and a piped Go run is
+  read.** `gotestsum` counts as a test and `staticcheck` as a check, and so do `go tool gotestsum`,
+  `go tool staticcheck` and `go tool golangci-lint`, the form Go 1.24 gives tools declared in
+  `go.mod`. When the exit status belongs to something piped after the run, the result is read from
+  what it printed. `go test` sums nothing up, but a run with any failure ends with a line that says
+  only `FAIL`, so a run whose end was kept, that ran tests, and that does not end that way passed;
+  a package that ran no tests is not a pass. gotestsum's `DONE 3 tests, 1 failure in 0.139s` is
+  read as it stands. golangci-lint says `0 issues.` or `3 issues:`; go vet and staticcheck print
+  their findings, and nothing when clean, so a clean run piped away stays unknown. Each checked
+  against real output from Go 1.27.1, gotestsum 1.13, staticcheck 2026.2.1 and golangci-lint 2.14.
+
 # 0.2.5
 
 - **A call Claude Code refused is no longer counted as a failure.** When a permission rule, a hook,

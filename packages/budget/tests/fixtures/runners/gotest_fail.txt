@@ -1,0 +1,7 @@
+?   	example.com/app/cmd/tool	[no test files]
+ok  	example.com/app/greet	0.084s
+--- FAIL: TestFee (0.00s)
+    trade_test.go:14: Fee(10000) = 3, want 4
+FAIL
+FAIL	example.com/app/trade	0.084s
+FAIL

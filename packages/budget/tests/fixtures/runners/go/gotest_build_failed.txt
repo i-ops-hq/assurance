@@ -1,0 +1,6 @@
+?   	example.com/app/cmd/tool	[no test files]
+# example.com/app/greet [example.com/app/greet.test]
+greet/broken_test.go:3:17: undefined: undefinedName
+FAIL	example.com/app/greet [build failed]
+ok  	example.com/app/trade	0.107s
+FAIL
