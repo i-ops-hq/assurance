@@ -1,3 +1,8 @@
+# 0.1.8
+
+- **Requires `assurance-budget` 0.2.7:** a command that ends in dots, like `go test ./...`, is named
+  with one full stop. The README's hook command and the plugin are pinned to this version.
+
 # 0.1.7
 
 - **The plugin's script calls `uvx` by name.** Anthropic's plugin directory refused it as an

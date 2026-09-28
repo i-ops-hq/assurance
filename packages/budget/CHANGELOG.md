@@ -1,4 +1,4 @@
-# Unreleased
+# 0.2.7
 
 - **A command that ends in dots is named with one full stop.** A failing `go test ./...` was reported
   as `…failed (last edit 13:42): go test ./....`, in the line you see and in what the hook tells
