@@ -46,10 +46,12 @@ def test_the_plugin_is_the_release_it_ships_with() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
     pinned = re.search(r"^VERSION=(\S+)$", script, re.M)
     assert pinned and pinned.group(1) == _release()
-    # The package it runs is written out, not built from a variable, so a reader (and Anthropic's
-    # directory, which blocks an unpinned launcher) sees exactly what runs.
-    runs = re.findall(r"assurance@(\S+)", script)
+    # The program and the package it runs are both written out, never built from a variable, so a
+    # reader sees exactly what runs, and so does Anthropic's plugin directory, which blocks a launcher
+    # it cannot read ("Unpinned uvx launcher": spell the program by name instead of computing it).
+    runs = re.findall(r"\buvx assurance==(\S+)", script)
     assert runs and set(runs) == {_release()}, runs
+    assert not re.search(r'"\$\w+" assurance', script), "the launcher is computed, not named"
 
 
 def test_the_plugin_adds_one_stop_hook_that_runs_the_audit_as_a_hook() -> None:
@@ -88,16 +90,17 @@ def test_the_script_runs_the_pinned_release_with_what_it_was_given(tmp_path: Pat
         input='{"transcript_path": "x"}', capture_output=True, text=True, env=env, check=False,
     )
     assert run.returncode == 0
-    assert run.stdout.splitlines()[0] == f"ARGS: assurance@{_release()} audit --hook --nudge"
+    assert run.stdout.splitlines()[0] == f"ARGS: assurance=={_release()} audit --hook --nudge"
     assert '{"transcript_path": "x"}' in run.stdout  # the Stop hook's input reaches the audit
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
 def test_without_uvx_or_assurance_the_hook_says_so_and_lets_the_session_end(tmp_path: Path) -> None:
-    # The machine running this may have uv where the script looks, so the list it searches is emptied.
+    # The machine running this may have uv where the script looks, so those places are taken back off
+    # PATH, leaving only the PATH the test gives it.
     script = tmp_path / "assurance.sh"
     script.write_text(
-        re.sub(r"^for uvx in .*; do$", 'for uvx in ""; do', SCRIPT.read_text(encoding="utf-8"), flags=re.M),
+        re.sub(r"^PATH=.*$", 'PATH="$PATH"', SCRIPT.read_text(encoding="utf-8"), flags=re.M),
         encoding="utf-8",
     )
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
@@ -136,7 +139,7 @@ def test_as_the_hook_it_runs_the_copy_uv_has_without_the_network(tmp_path: Path)
     env = _uv(tmp_path, "echo AUDIT-RAN; cat\n")
     run = _hook(env)
     assert run.returncode == 0 and run.stdout.startswith("AUDIT-RAN")
-    assert _calls(env) == [f"UV_OFFLINE=1 assurance@{_release()} audit --hook --nudge"]
+    assert _calls(env) == [f"UV_OFFLINE=1 assurance=={_release()} audit --hook --nudge"]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
@@ -173,7 +176,7 @@ def test_by_hand_it_asks_uv_once_and_says_what_uv_said(tmp_path: Path) -> None:
     env = _uv(tmp_path, "echo 'error: Request failed' >&2; exit 2\n")
     run = subprocess.run(["sh", str(SCRIPT), "audit"], capture_output=True, text=True, env=env, check=False)
     assert run.returncode == 2 and "Request failed" in run.stderr
-    assert _calls(env) == [f"UV_OFFLINE= assurance@{_release()} audit"]
+    assert _calls(env) == [f"UV_OFFLINE= assurance=={_release()} audit"]
 
 
 def test_the_script_keeps_unix_line_endings_wherever_it_is_checked_out() -> None:
@@ -185,9 +188,24 @@ def test_the_script_keeps_unix_line_endings_wherever_it_is_checked_out() -> None
 
 
 def test_the_script_looks_for_uvx_where_uv_installs_it_on_every_os() -> None:
-    text = SCRIPT.read_text(encoding="utf-8")
-    for place in ('"$HOME/.local/bin/uvx"', '"$HOME/.local/bin/uvx.exe"', "/opt/homebrew/bin/uvx", "/usr/local/bin/uvx"):
-        assert place in text, place
+    # After the PATH it was given, so a uvx the user put first still wins; Git Bash finds uvx.exe.
+    (path_line,) = re.findall(r"^PATH=(.*)$", SCRIPT.read_text(encoding="utf-8"), re.M)
+    places = path_line.strip('"').split(":")
+    assert places[0] == "$PATH"
+    assert places[1:] == ["$HOME/.local/bin", "$HOME/.cargo/bin", "/opt/homebrew/bin", "/usr/local/bin"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
+def test_a_uvx_the_desktop_apps_path_leaves_out_is_still_found(tmp_path: Path) -> None:
+    # The macOS desktop app starts hooks with PATH=/usr/bin:/bin:/usr/sbin:/sbin, and uv installs to
+    # ~/.local/bin. The hook must still find it there.
+    uvx = tmp_path / ".local" / "bin" / "uvx"
+    uvx.parent.mkdir(parents=True)
+    uvx.write_text('#!/bin/sh\necho "ARGS: $*"\n', encoding="utf-8")
+    uvx.chmod(0o755)
+    env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(tmp_path)}
+    run = subprocess.run(["sh", str(SCRIPT), "audit", "--hook"], input="{}", capture_output=True, text=True, env=env, check=False)
+    assert run.returncode == 0 and run.stdout.startswith(f"ARGS: assurance=={_release()} audit --hook")
 
 
 def test_the_readmes_say_how_long_the_script_is_and_are_right() -> None:
@@ -198,3 +216,13 @@ def test_the_readmes_say_how_long_the_script_is_and_are_right() -> None:
     plugin = (PLUGIN / "README.md").read_text(encoding="utf-8")
     stated = re.findall(r"(\d+)-line shell script", root) + re.findall(r"\((\d+) lines,", plugin)
     assert stated and all(int(n) == lines for n in stated), (stated, lines)
+
+
+def test_the_plugin_has_an_icon_the_directory_accepts() -> None:
+    # Anthropic's directory warns without one: `.claude-plugin/icon.svg`, square, at least 128px.
+    icon = PLUGIN / ".claude-plugin" / "icon.svg"
+    svg = icon.read_text(encoding="utf-8")
+    view = re.search(r'viewBox="0 0 (\d+) (\d+)"', svg)
+    assert svg.lstrip().startswith("<svg") and view
+    width, height = int(view.group(1)), int(view.group(2))
+    assert width == height >= 128
