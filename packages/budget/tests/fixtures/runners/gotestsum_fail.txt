@@ -1,0 +1,9 @@
+∅  cmd/tool
+✓  greet (84ms)
+✖  trade (82ms)
+
+=== Failed
+=== FAIL: trade TestFee (0.00s)
+    trade_test.go:14: Fee(10000) = 3, want 4
+
+DONE 3 tests, 1 failure in 0.139s

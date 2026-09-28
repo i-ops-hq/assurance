@@ -1,0 +1,1 @@
+?   	example.com/app/cmd/tool	[no test files]

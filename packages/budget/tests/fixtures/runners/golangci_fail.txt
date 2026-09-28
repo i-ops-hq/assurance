@@ -1,0 +1,13 @@
+lint.go:18:11: Error return value of `os.Remove` is not checked (errcheck)
+	os.Remove(path)
+	         ^
+lint.go:17:14: printf: fmt.Printf format %d has arg "size" of wrong type string (govet)
+	fmt.Printf("%d bytes\n", "size")
+	            ^
+lint.go:14:2: ineffectual assignment to n (ineffassign)
+	n := len(data)
+	^
+3 issues:
+* errcheck: 1
+* govet: 1
+* ineffassign: 1

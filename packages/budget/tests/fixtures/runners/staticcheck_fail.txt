@@ -1,0 +1,2 @@
+lint.go:14:2: this value of n is never used (SA4006)
+lint.go:17:13: Printf format %d has arg #1 of wrong type string (SA5009)

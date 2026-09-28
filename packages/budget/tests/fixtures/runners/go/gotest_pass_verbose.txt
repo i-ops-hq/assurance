@@ -1,0 +1,11 @@
+?   	example.com/app/cmd/tool	[no test files]
+=== RUN   TestGreet
+--- PASS: TestGreet (0.00s)
+=== RUN   TestGreetEmpty
+--- PASS: TestGreetEmpty (0.00s)
+PASS
+ok  	example.com/app/greet	0.150s
+=== RUN   TestFee
+--- PASS: TestFee (0.00s)
+PASS
+ok  	example.com/app/trade	0.149s

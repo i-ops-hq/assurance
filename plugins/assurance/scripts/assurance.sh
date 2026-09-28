@@ -16,10 +16,10 @@ VERSION=0.1.5
 
 for uvx in "$(command -v uvx 2>/dev/null)" "$HOME/.local/bin/uvx" "$HOME/.local/bin/uvx.exe" "$HOME/.cargo/bin/uvx" "$HOME/.cargo/bin/uvx.exe" /opt/homebrew/bin/uvx /usr/local/bin/uvx; do
   if [ -n "$uvx" ] && [ -x "$uvx" ]; then
-    case " $* " in *" --hook "*) ;; *) exec "$uvx" "assurance@$VERSION" "$@" ;; esac
+    case " $* " in *" --hook "*) ;; *) exec "$uvx" assurance@0.1.5 "$@" ;; esac
     input=$(cat)
-    printf '%s' "$input" | UV_OFFLINE=1 "$uvx" "assurance@$VERSION" "$@" 2>/dev/null && exit 0
-    { err=$(printf '%s' "$input" | "$uvx" "assurance@$VERSION" "$@" 2>&1 >&3); } 3>&1 && exit 0
+    printf '%s' "$input" | UV_OFFLINE=1 "$uvx" assurance@0.1.5 "$@" 2>/dev/null && exit 0
+    { err=$(printf '%s' "$input" | "$uvx" assurance@0.1.5 "$@" 2>&1 >&3); } 3>&1 && exit 0
     why=$(printf '%s\n' "$err" | grep -m 1 '^error:' | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g')
     printf '{"systemMessage": "assurance: %s did not run%s, so this turn was not audited."}\n' "$VERSION" "${why:+ ($why)}"
     exit 0

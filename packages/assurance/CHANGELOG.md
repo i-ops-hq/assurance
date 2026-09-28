@@ -1,3 +1,11 @@
+# Unreleased
+
+- **The plugin's script names the package it runs.** It ran `assurance@$VERSION`; it now writes the
+  version out where it runs it, so what runs can be read without following a variable, including by
+  Anthropic's plugin directory, which refuses a launcher it cannot see pinned.
+- **The plugin README says what the hook reads:** the transcript Claude Code keeps of the session
+  that just ended, on your machine, and it sends that nowhere.
+
 # 0.1.5
 
 - **Requires `assurance-budget` 0.2.5:** a call Claude Code refused is no longer counted as a failure,

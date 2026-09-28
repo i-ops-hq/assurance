@@ -1,0 +1,3 @@
+?   	example.com/app/cmd/tool	[no test files]
+ok  	example.com/app/greet	0.225s
+ok  	example.com/app/trade	0.225s
