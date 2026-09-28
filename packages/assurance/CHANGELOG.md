@@ -1,3 +1,9 @@
+# 0.1.11
+
+- **`/assurance:audit` no longer shows uv's install line.** On a first run, uv printed "Installed 8
+  packages in 7ms" above the report. The plugin's script leaves uv's own progress lines out; uv's
+  errors, the audit's messages and its exit status come through as before. The audit is 0.1.10's.
+
 # 0.1.10
 
 - **Requires `assurance-budget` 0.2.8:** `/assurance:audit` passes its session's id, so the audit
