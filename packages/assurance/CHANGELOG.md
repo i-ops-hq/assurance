@@ -1,3 +1,8 @@
+# 0.1.12
+
+- **Requires `assurance-cli` 0.6.3:** the start screen `assurance` prints no longer carries "No model,
+  no network, no account." The README's hook command and the plugin are pinned to this version.
+
 # 0.1.11
 
 - **`/assurance:audit` no longer shows uv's install line.** On a first run, uv printed "Installed 8

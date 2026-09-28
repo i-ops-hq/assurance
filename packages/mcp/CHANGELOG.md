@@ -1,3 +1,8 @@
+# 0.5.3
+
+- Requires `assurance-cli` 0.6.3. The registry description no longer ends "No model."; no change to
+  the server or its tools.
+
 # 0.5.2
 
 - Requires `assurance-cli` 0.6.2. No change to the server or its tools.
