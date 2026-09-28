@@ -2093,6 +2093,28 @@ def find_latest_session(cwd: Path, projects_dir: Path | None = None) -> Path | N
     return None
 
 
+#: A Claude Code session id, as a skill has it in `${CLAUDE_SESSION_ID}`. Anything else, a path or a
+#: glob pattern above all, names no transcript.
+_SESSION_ID = re.compile(r"[0-9A-Za-z][0-9A-Za-z_-]{0,127}")
+
+
+def find_session(session_id: str, projects_dir: Path | None = None) -> Path | None:
+    """The transcript Claude Code keeps for `session_id`: `<projects>/<folder>/<session_id>.jsonl`.
+
+    Found by its file name, so no other transcript is opened: `find_latest_session` reads the start
+    of every newer transcript to learn its folder, other sessions' included, and a skill that knows
+    its own session's id has no need to. Looks where `find_latest_session` does. `None` when
+    `session_id` is not a plain id, or when there is no such file.
+    """
+    if not _SESSION_ID.fullmatch(session_id):
+        return None
+    root = _projects_root(projects_dir)
+    if root is None or not root.is_dir():
+        return None
+    found = [path for path in root.glob(f"*/{session_id}.jsonl") if path.is_file()]
+    return max(found, key=lambda path: path.stat().st_mtime) if found else None
+
+
 def _assistant_turn_only(blocks: list[Any]) -> bool:
     """True when every block is text / thinking / redacted_thinking (no tool_use, no other kinds)."""
     if not blocks:

@@ -33,6 +33,7 @@ from assurance_budget.sessions import (
     display_path,
     edited_without_read,
     find_latest_session,
+    find_session,
     read_claude_code,
     read_claude_code_tail,
     transcript_changed_limits_file,
@@ -219,8 +220,8 @@ def _hook_print(payload: dict[str, Any]) -> None:
     print(json.dumps(payload))
 
 def build_parser() -> argparse.ArgumentParser:
-    """The `assurance audit` command line: an optional transcript path, `--json`, the two
-    `--fail-on-*` gates, `--demo`, and `--hook` with `--nudge`."""
+    """The `assurance audit` command line: an optional transcript path or `--session`, `--json`, the
+    two `--fail-on-*` gates, `--demo`, and `--hook` with `--nudge`."""
     parser = argparse.ArgumentParser(
         prog="assurance audit",
         description=(
@@ -232,6 +233,14 @@ def build_parser() -> argparse.ArgumentParser:
         "transcript",
         nargs="?",
         help="Path to a Claude Code .jsonl transcript. Omit to use the latest session for cwd",
+    )
+    parser.add_argument(
+        "--session",
+        metavar="ID",
+        help=(
+            "Audit the Claude Code session with this id (a skill has it as ${CLAUDE_SESSION_ID}): "
+            "read that session's transcript, found by its file name, and no other"
+        ),
     )
     parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the report as JSON")
     parser.add_argument(
@@ -272,8 +281,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run `assurance audit` and return its exit code.
 
     0 when the session was read. 1 when `--fail-on-loop` or `--fail-on-unverified` was given and
-    its condition holds. 2 when there was nothing to read: no session recorded for this folder, a
-    transcript that cannot be read, or a limits config that cannot be loaded. A usage error exits 2
+    its condition holds. 2 when there was nothing to read: no session recorded for this folder, no
+    transcript for the `--session` id, a transcript that cannot be read, or a limits config that
+    cannot be loaded. A usage error exits 2
     from argparse. `--hook` hands off to `run_hook`, which always returns 0.
     """
     parser = build_parser()
@@ -285,6 +295,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     _survive_narrow_consoles()
     if args.demo and args.transcript:
         parser.error("--demo audits the bundled sample; leave out the transcript path")
+    if args.session is not None and (args.demo or args.transcript):
+        parser.error("--session names the transcript to read; leave out the path and --demo")
     try:
         ceilings = load_ceilings(Path.cwd(), os.environ)
     except ConfigError as exc:
@@ -296,6 +308,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         path = SAMPLE_SESSION
     elif args.transcript:
         path = Path(args.transcript).expanduser()
+    elif args.session is not None:
+        # Never a search by folder instead, which reads other sessions: an empty id is what a
+        # Claude Code that does not fill in ${CLAUDE_SESSION_ID} passes, and it is said as such.
+        path = find_session(args.session)
+        if path is None:
+            print(
+                f"assurance audit: no transcript for session {args.session!r} in {_looked_in()}."
+                if args.session
+                else "assurance audit: --session was given no id, so there is no transcript to read.",
+                file=sys.stderr,
+            )
+            return EXIT_UNREADABLE
     else:
         cwd = Path.cwd()
         path = find_latest_session(cwd)

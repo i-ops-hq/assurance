@@ -109,7 +109,7 @@ claude plugin uninstall assurance@i-ops-hq   # take it out; `claude plugin marke
 The plugin runs the same hook, pinned to the release, and finds `uvx` even when Claude Code starts
 hooks without your terminal's PATH. It fetches that version the first time it runs and uses the copy
 from then on, without the network. It also adds `/assurance:audit`, which shows the whole report
-inside a session; only you can run it, so it adds nothing to Claude's context until you do. Use the
+for the session you run it in; only you can run it, so it adds nothing to Claude's context until you do. Use the
 plugin or `assurance hook install`, not both: together they audit twice per turn, and
 `assurance hook status` says so.
 
@@ -119,7 +119,7 @@ kind Claude Code, Cursor and OpenClaw load: 36.82% had at least one security fla
 one, and 76 carried confirmed malicious payloads for credential theft, backdoors and data exfiltration
 ([ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/)). This plugin is
 [`plugins/assurance/`](plugins/assurance): one Stop hook, one 40-line shell script that runs the pinned
-`uvx assurance@<version>`, and one skill that only you can run. Its only permission is to run that
+`uvx assurance==<version>`, and one skill that only you can run. Its only permission is to run that
 script when you type `/assurance:audit`. It calls no model and sends nothing anywhere; the network is
 used once, by `uvx`, to fetch the pinned package from PyPI.
 

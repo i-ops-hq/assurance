@@ -12,7 +12,7 @@ claude plugin disable assurance@i-ops-hq                  # pause it
 claude plugin uninstall assurance@i-ops-hq                # take it out
 ```
 
-`/assurance:audit` shows the whole report inside a session.
+`/assurance:audit` shows the whole report for the session you run it in.
 
 What it runs, all of it: [`hooks/hooks.json`](hooks/hooks.json) (one Stop hook),
 [`scripts/assurance.sh`](scripts/assurance.sh) (40 lines, which find `uvx` and run the pinned
@@ -25,6 +25,6 @@ time it runs and uses that copy from then on without the network, so a proxy, a 
 PyPI outage cannot keep a session from ending; if that first fetch fails, the hook says the turn was
 not audited and lets it end. On Windows the hook is a shell script, so it needs Git Bash, which comes
 with Git for Windows; without it, use `uvx assurance@latest hook install`. What it reads is the
-transcript Claude Code keeps of the session that just ended, on your machine, and it sends that
-nowhere.
+transcript Claude Code keeps, on your machine, of the session it audits, and no other session's;
+it sends that nowhere. [Privacy](https://github.com/i-ops-hq/assurance/blob/main/plugins/assurance/PRIVACY.md) says what it reads, keeps and sends.
 Source and documentation: https://github.com/i-ops-hq/assurance

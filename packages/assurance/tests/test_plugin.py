@@ -52,6 +52,18 @@ def test_the_listing_is_the_same_in_both_places_and_does_not_say_no_network() ->
         assert not re.search(r"no network(?! beyond fetching)", text, re.I), text
 
 
+def test_the_readme_links_the_privacy_policy_the_directory_asks_for() -> None:
+    # Anthropic's directory asks a plugin that reads personal data for a privacy policy, as
+    # `privacyPolicyUrl` in plugin.json or a "Privacy" link in the README. `claude plugin validate`
+    # (2.1.86) refuses the key as unrecognised, and a manifest an older Claude Code refuses is a
+    # plugin it will not load, so the README carries the link, to this folder's PRIVACY.md on main.
+    readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
+    linked = re.findall(r"\[Privacy\]\(https://github\.com/i-ops-hq/assurance/blob/main/([^)\s]+)\)", readme)
+    assert linked == ["plugins/assurance/PRIVACY.md"], linked
+    assert (ROOT / linked[0]).is_file()
+    assert "privacyPolicyUrl" not in _manifest()
+
+
 def test_the_plugin_is_the_release_it_ships_with() -> None:
     # The hook runs after every turn, so like the README pins it runs a version somebody chose, and
     # it moves with each `assurance` release.
@@ -83,8 +95,11 @@ def test_the_audit_skill_costs_nothing_until_you_run_it() -> None:
     front = text.split("---")[1]
     # Only the user can invoke it, so its description is not in Claude's context on every turn.
     assert "disable-model-invocation: true" in front
-    # The report is the tool's own output, injected before Claude sees the skill.
-    assert '!`"${CLAUDE_PLUGIN_ROOT}/scripts/assurance.sh" audit 2>&1`' in text
+    # The report is the tool's own output, injected before Claude sees the skill. It names the
+    # session it is run in, so the audit opens that session's transcript and no other: without an id
+    # it would find this folder's session by reading the start of each newer transcript.
+    runs = re.findall(r"!`([^`]*)`", text)
+    assert runs == ['"${CLAUDE_PLUGIN_ROOT}/scripts/assurance.sh" audit --session "${CLAUDE_SESSION_ID}" 2>&1'], runs
 
 
 def test_the_script_is_executable() -> None:
