@@ -1,3 +1,10 @@
+# Unreleased
+
+- **A command that ends in dots is named with one full stop.** A failing `go test ./...` was reported
+  as `…failed (last edit 13:42): go test ./....`, in the line you see and in what the hook tells
+  Claude, and a declared `go test ./...` the same way in the report. A sentence that already ends
+  is left as it is; every other one still gets its full stop.
+
 # 0.2.6
 
 - **Go projects: `gotestsum`, `staticcheck` and `go tool` are recognised, and a piped Go run is

@@ -84,7 +84,7 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
 
     if finding is None:
         return EXIT_OK
-    message = f"assurance: {finding}."
+    message = f"assurance: {_end_sentence(finding)}"
     if declared_note:
         message += f" {declared_note}"
     elif after is not None and int(after.get("unclassified") or 0) and not (after.get("tests") or after.get("checks")):
@@ -93,7 +93,7 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     out: dict[str, Any] = {"systemMessage": message}
     if nudge and not data.get("stop_hook_active"):
         context = (
-            f"Assurance audit of this session: {finding}.{' ' + declared_note if declared_note else ''} Before you say the work is done, run "
+            f"Assurance audit of this session: {_end_sentence(finding)}{' ' + declared_note if declared_note else ''} Before you say the work is done, run "
             "the project's tests or checks for what you changed, without piping the test "
             "command into another (or with `set -o pipefail`) so its result is visible, or say "
             "plainly why they cannot be run here."
@@ -193,7 +193,7 @@ def _hook_declared(session: Session, limits_changed: bool) -> tuple[Declared | N
             _project_dir(session), trust_project=not limits_changed
         )
     except ConfigError as exc:
-        return None, f"Declared tests and checks were not used: {exc}."
+        return None, _end_sentence(f"Declared tests and checks were not used: {exc}")
     return declared, " ".join(notes)
 
 
@@ -561,7 +561,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     if declared:
         commands = [*declared["tests"], *declared["checks"]]
         shown = ", ".join(commands[:3]) + (f", {len(commands) - 3} more" if len(commands) > 3 else "")
-        body.append(f"Counted as tests and checks because {' and '.join(declared['from'])} declares them: {shown}.")
+        body.append(_end_sentence(f"Counted as tests and checks because {' and '.join(declared['from'])} declares them: {shown}"))
     for note in report.get("declared_notes") or []:
         body.append(note)
 
@@ -619,6 +619,12 @@ def _refused_label(call: ToolCall, cwd: str) -> str:
 
 
 _REFUSED_LABEL_MAX = 60
+
+
+def _end_sentence(text: str) -> str:
+    """`text` with a full stop, unless it already ends like a sentence: a finding or a list can end in
+    a command, and `go test ./...` followed by a full stop read as `./....`."""
+    return text if text.endswith((".", "!", "?", "…")) else f"{text}."
 
 
 def _count_phrase(n: int, singular: str, plural: str) -> str:
