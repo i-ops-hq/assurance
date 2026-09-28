@@ -1,3 +1,9 @@
+# 0.1.9
+
+- **The plugin's listing says what it does, and no more.** It ended "No model, no network, no
+  account."; the plugin fetches its pinned package the first time it runs, so "no network" was not
+  true. The line is gone from the listing and from the plugin's README. The audit is 0.1.8's.
+
 # 0.1.8
 
 - **Requires `assurance-budget` 0.2.7:** a command that ends in dots, like `go test ./...`, is named
