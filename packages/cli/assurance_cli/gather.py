@@ -846,7 +846,7 @@ def _no_series_summary(root: Path, by_key: dict[str, list[Path]]) -> str:
     # says "if these really are", names what it would take, and does not recommend it.
     return (
         f"No dated or numbered series detected. {where}, and they look {named[0]}, but their "
-        f"spacing agrees on no cadence. **If these really are a {named[0]} series** you can say so "
+        f"spacing agrees on no cadence. If these really are a {named[0]} series you can say so "
         f"— both flags are needed, neither works alone: --expect {named[0]} "
         f"--from {keys[0]} --to {keys[-1]}. If they are not a series, this refusal is the answer."
     )

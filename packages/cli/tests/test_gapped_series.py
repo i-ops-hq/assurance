@@ -60,6 +60,19 @@ def test_an_irregular_set_is_still_refused(tmp_path: Path) -> None:
     assert "If these really are" in summary
 
 
+def test_refusal_message_carries_no_markdown_emphasis(tmp_path: Path) -> None:
+    """No ``**`` reaches the summary the terminal prints (issue #33).
+
+    The emphasis used to arrive as literal asterisks. It is gone from the
+    rendered message, and the load-bearing phrase survives without it.
+    """
+    folder = _days(tmp_path, "2025-01-08", "2025-01-09", "2025-01-23", "2025-02-02", "2025-03-14")
+    summary = check_coverage(str(folder))["summary"]
+
+    assert "**" not in summary, summary
+    assert "If these really are" in summary
+
+
 # ── where the line sits ────────────────────────────────────────────────────────────────────────
 
 
