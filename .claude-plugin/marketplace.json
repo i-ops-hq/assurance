@@ -10,7 +10,7 @@
     {
       "name": "assurance",
       "source": "./plugins/assurance",
-      "description": "After every turn, says whether anything was tested after Claude's last edit, and what it could not check. No model, no network, no account."
+      "description": "After every turn, says whether anything was tested after Claude's last edit, and what it could not check."
     }
   ]
 }
