@@ -1,4 +1,4 @@
-# Unreleased
+# 0.1.7
 
 - **The plugin's script calls `uvx` by name.** Anthropic's plugin directory refused it as an
   "unpinned uvx launcher": the script found `uvx` and ran it from a variable, which a scanner cannot
