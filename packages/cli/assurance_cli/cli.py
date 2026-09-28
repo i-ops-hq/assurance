@@ -30,7 +30,6 @@ FORWARDED: dict[str, tuple[str, str]] = {
 
 _START_HERE = """\
 assurance — your AI agent says it's done. This tells you what it didn't check.
-No model, no network, no account.
 
   assurance audit                         what the Claude Code session in this folder did, and skipped
   assurance audit --demo                  the same report on a bundled sample session

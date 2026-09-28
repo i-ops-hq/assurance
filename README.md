@@ -9,8 +9,6 @@
 [![tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-2563eb)](LICENSE)
 
-No model · No network · No account
-
 [Quick start](#quick-start) · [After every session](#run-it-after-every-session) · [Commands](#commands) · [MCP](#use-it-from-an-mcp-client) · [Limits](#limits-the-agent-cant-raise) · [Feedback](#tell-us-where-its-wrong)
 
 </div>
