@@ -15,7 +15,7 @@ claude plugin uninstall assurance@i-ops-hq                # take it out
 `/assurance:audit` shows the whole report for the session you run it in.
 
 What it runs, all of it: [`hooks/hooks.json`](hooks/hooks.json) (one Stop hook),
-[`scripts/assurance.sh`](scripts/assurance.sh) (40 lines, which find `uvx` and run the pinned
+[`scripts/assurance.sh`](scripts/assurance.sh) (50 lines, which find `uvx` and run the pinned
 `assurance`), and [`skills/audit/SKILL.md`](skills/audit/SKILL.md) (run only when you type it; its one
 permission is to run that script). Read them before you install it, as you should any plugin.
 

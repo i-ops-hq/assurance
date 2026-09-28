@@ -118,7 +118,7 @@ February 2026 Snyk scanned 3,984 agent skills from two public registries, ClawHu
 kind Claude Code, Cursor and OpenClaw load: 36.82% had at least one security flaw, 13.4% a critical
 one, and 76 carried confirmed malicious payloads for credential theft, backdoors and data exfiltration
 ([ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/)). This plugin is
-[`plugins/assurance/`](plugins/assurance): one Stop hook, one 40-line shell script that runs the pinned
+[`plugins/assurance/`](plugins/assurance): one Stop hook, one 50-line shell script that runs the pinned
 `uvx assurance==<version>`, and one skill that only you can run. Its only permission is to run that
 script when you type `/assurance:audit`. It calls no model and sends nothing anywhere; the network is
 used once, by `uvx`, to fetch the pinned package from PyPI.

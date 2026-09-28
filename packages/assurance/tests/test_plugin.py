@@ -207,6 +207,25 @@ def test_by_hand_it_asks_uv_once_and_says_what_uv_said(tmp_path: Path) -> None:
     assert _calls(env) == [f"UV_OFFLINE= assurance=={_release()} audit"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
+@pytest.mark.parametrize("uv_said, kept", [
+    ("Installed 8 packages in 7ms\nResolved 8 packages in 120ms\n", ""),
+    ("Installed 8 packages in 7ms\nassurance audit: a note of its own\n", "assurance audit: a note of its own\n"),
+    ("", ""),  # nothing on stderr stays nothing, not an empty line
+])
+@pytest.mark.parametrize("code", [0, 1, 2])
+def test_by_hand_uvs_progress_lines_are_left_out_and_the_rest_is_kept(
+    tmp_path: Path, uv_said: str, kept: str, code: int
+) -> None:
+    # /assurance:audit shows everything the script prints, stderr too, and on a first run uv put
+    # "Installed 8 packages in 7ms" above the report. The report, the audit's own messages and its exit
+    # status, the --fail-on gates' 1 included, are the audit's and come through as they were.
+    env = _uv(tmp_path, f"printf '{uv_said}' >&2\necho REPORT\nexit {code}\n")
+    run = subprocess.run(["sh", str(SCRIPT), "audit", "--session", "s1"], capture_output=True, text=True, env=env, check=False)
+    assert (run.returncode, run.stdout, run.stderr) == (code, "REPORT\n", kept)
+    assert _calls(env) == [f"UV_OFFLINE= assurance=={_release()} audit --session s1"]
+
+
 def test_the_script_keeps_unix_line_endings_wherever_it_is_checked_out() -> None:
     # Git for Windows checks files out with CRLF by default, and bash, Git Bash's included, stops at a
     # `\r`. `.gitattributes` pins the script to LF so a Windows clone of the marketplace can run it.

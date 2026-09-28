@@ -17,7 +17,17 @@ PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin"
 export PATH
 
 if command -v uvx >/dev/null 2>&1; then
-  case " $* " in *" --hook "*) ;; *) exec uvx assurance==0.1.10 "$@" ;; esac
+  case " $* " in
+    *" --hook "*) ;;
+    *)
+      # By hand or from /assurance:audit. uv's own progress lines ("Installed 8 packages in 7ms" on a
+      # first run) are left out of what it prints; uv's errors and the audit's own messages are not.
+      { err=$(uvx assurance==0.1.10 "$@" 2>&1 >&3); } 3>&1
+      status=$?
+      [ -n "$err" ] && printf '%s\n' "$err" | grep -v -E '^(Downloading|Downloaded|Installed|Prepared|Resolved|Uninstalled|Audited|Built|Building|Updated) ' >&2
+      exit "$status"
+      ;;
+  esac
   input=$(cat)
   printf '%s' "$input" | UV_OFFLINE=1 uvx assurance==0.1.10 "$@" 2>/dev/null && exit 0
   { err=$(printf '%s' "$input" | uvx assurance==0.1.10 "$@" 2>&1 >&3); } 3>&1 && exit 0
