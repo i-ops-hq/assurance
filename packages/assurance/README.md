@@ -27,7 +27,8 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 
 **Run it after every session.** When Claude finishes without testing its last edit, you're told, and
 Claude is sent back to run the tests. `assurance hook install` adds the Stop hook after showing you the
-change, and `assurance hook remove` takes it out again:
+change, and `assurance hook remove` takes it out again. Run that one yourself: in auto mode, Claude Code
+refuses to let Claude remove the hook, as tampering with an audit.
 
 ```bash
 uvx assurance@latest hook install    # --scope project to share it with everyone on the repository
