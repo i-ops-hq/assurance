@@ -181,7 +181,7 @@ def test_the_hook_names_the_failed_command_with_one_full_stop(
     assert said["systemMessage"].endswith(ends)
     context = said["hookSpecificOutput"]["additionalContext"]
     assert "...." not in said["systemMessage"] and "...." not in context
-    assert f"{ends} Before you say" in context
+    assert f"{ends} Fix what failed" in context
 
 
 @pytest.mark.skipif(sys.version_info < (3, 11), reason="config files need tomllib (3.11+)")

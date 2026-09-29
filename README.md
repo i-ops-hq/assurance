@@ -69,12 +69,20 @@ What "All done" left out:
 
 ## Run it after every session
 
-Add a Stop hook, and Claude Code runs the audit each time Claude says it's finished. It stays quiet
-when the last edit (with Edit or Write, or with `sed -i`, `>`, `git apply` and the like) was followed
-by a test or check that visibly passed. When it wasn't, it tells you, and with `--nudge` it tells
-Claude too, so Claude runs the tests before it stops. A test piped into `tail` or followed by `; echo`
-doesn't count as passed: its exit status is the other command's, so the result is read from the
-runner's summary line or reported as unknown.
+Add a Stop hook, and Claude Code runs the audit each time Claude says it's finished. It speaks when
+something is at stake, and names which first:
+
+- **check before proceeding**: the turn pushed, merged, published, deployed, ran a migration or
+  committed on main, while code edited before it (with Edit or Write, or with `sed -i`, `>`,
+  `git apply` and the like) had no test or check after it that visibly passed.
+- **review suggested**: the last test or check after the last code edit failed, or Claude's last
+  message says the tests pass when nothing verified the edit.
+
+Otherwise it stays quiet: editing is what Claude does, and edits to prose and assets (`.md`, images,
+`LICENSE`, …) need no test. It says each finding once, and with `--nudge` it asks Claude to act on it
+too. A test piped into `tail` or followed by `; echo` doesn't count as passed: its exit status is the
+other command's, so the result is read from the runner's summary line or reported as unknown.
+`assurance audit` still reports everything, whether the hook spoke or not.
 
 ```bash
 uvx assurance@latest hook install   # shows the change to ~/.claude/settings.json, asks, then writes it
@@ -88,7 +96,7 @@ without the flag uv asks PyPI again every few minutes and exits 2 when it cannot
 hook that exits 2 tells Claude to keep going. `--scope project` writes it to the repository's
 `.claude/settings.json`, so everyone who works on the project gets the audit once they commit it and
 each fetches it once (`install` prints the command); `--scope local` is only you, in this repository.
-`--no-nudge` tells you without asking Claude to run the tests. It only ever touches the assurance hook,
+`--no-nudge` tells you without asking Claude to act. It only ever touches the assurance hook,
 refuses a settings file it cannot parse, and keeps the file as it was in
 `~/.local/state/assurance/backups/` (Windows: `%LOCALAPPDATA%\assurance\backups\`). It nudges at
 most once per turn, and it never fails or blocks a session: if it can't read the transcript it says
@@ -135,14 +143,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.12 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.13 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.12 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.13 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a

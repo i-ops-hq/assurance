@@ -23,6 +23,7 @@ from assurance_budget.config import (
     project_overreach_notes,
 )
 from assurance_budget.events import LogError
+from assurance_budget.notice import Notice, needs_earlier_lines, stop_notice
 from assurance_budget.sessions import (
     Declared,
     Session,
@@ -57,11 +58,13 @@ SAMPLE_SESSION = Path(__file__).resolve().parent / "data" / "sample-session.json
 def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     """Claude Code Stop hook. Reads the hook input, audits the transcript, and always exits 0.
 
-    Speaks only when the session's last edit inside the project was not followed by a passing test
-    or check: then it shows you one line (`systemMessage`), and with `nudge` also tells Claude
-    (`additionalContext`) so it can run them before it stops. It does not nudge twice in one turn
-    (`stop_hook_active`). A hook that cannot read its input says so and lets the session end; an
-    audit tool must never be the reason a session breaks.
+    Speaks only when something is at stake (`assurance_budget.notice`): code that no passing test or
+    check followed was pushed, merged, published, deployed or committed on main (check before
+    proceeding), or a test or check after the last code edit failed, or Claude's last message says
+    the tests pass when nothing verified the edit (review suggested). The line you see names the
+    level first; with `nudge` Claude is also asked to act (`additionalContext`), never twice in one
+    turn (`stop_hook_active`). A hook that cannot read its input says so and lets the session end;
+    an audit tool must never be the reason a session breaks.
     """
     try:
         data = json.loads(stdin_text) if stdin_text.strip() else {}
@@ -72,10 +75,11 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         return EXIT_OK
     try:
         transcript = Path(data["transcript_path"]).expanduser()
-        session, whole = _hook_session(transcript)
+        session, whole = read_claude_code_tail(transcript, HOOK_WINDOW)
         declared, declared_note = _hook_declared(session, _limits_file_changed(transcript, session, whole))
-        after = after_last_edit(session, declared)
-        finding = _hook_finding(after)
+        if not whole and needs_earlier_lines(session, declared):
+            session, whole = read_claude_code(transcript), True
+        notice = stop_notice(session, declared)
     except LogError as exc:
         _hook_print({"systemMessage": f"assurance: could not read this session ({exc}); nothing audited."})
         return EXIT_OK
@@ -83,23 +87,16 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         _hook_print({"systemMessage": f"assurance: the audit failed ({type(exc).__name__}: {exc}); nothing audited."})
         return EXIT_OK
 
-    if finding is None:
+    if notice is None:
         return EXIT_OK
-    message = f"assurance: {_end_sentence(finding)}"
-    if declared_note:
-        message += f" {declared_note}"
-    elif after is not None and int(after.get("unclassified") or 0) and not (after.get("tests") or after.get("checks")):
-        # Told to you, not to Claude: an agent should not be the one declaring what counts as its check.
-        message += " If one of them is this project's own test or check, declare it under [audit] in .assurance/config.toml and it will count."
-    out: dict[str, Any] = {"systemMessage": message}
+    out: dict[str, Any] = {"systemMessage": _notice_line(notice, declared_note)}
     if nudge and not data.get("stop_hook_active"):
-        context = (
-            f"Assurance audit of this session: {_end_sentence(finding)}{' ' + declared_note if declared_note else ''} Before you say the work is done, run "
-            "the project's tests or checks for what you changed, without piping the test "
-            "command into another (or with `set -o pipefail`) so its result is visible, or say "
-            "plainly why they cannot be run here."
-        )
-        if after is not None and int(after.get("unclassified") or 0):
+        finding = notice.finding.replace("Claude's last message says", "Your last message says")
+        context = f"Assurance audit of this session ({notice.level}): {_end_sentence(finding)}"
+        if declared_note:
+            context += f" {declared_note}"
+        context += f" {notice.ask}"
+        if notice.unclassified:
             context += (
                 " If one of the commands it could not classify was the project's test or check, "
                 "say which one and what it returned instead of running it again."
@@ -109,68 +106,26 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     return EXIT_OK
 
 
-def _hook_finding(after: dict[str, Any] | None) -> str | None:
-    if after is None:
-        return None
-    when = _clock(after.get("at"))
-    since = f" (last edit {when})" if when else ""
-    if int(after.get("tests") or 0) == 0 and int(after.get("checks") or 0) == 0:
-        unclassified = int(after.get("unclassified") or 0)
-        if not unclassified:
-            return f"files were edited and no test or check ran after the last edit{since}"
-        # A project's own check script is unclassified, so "no check ran" would be a guess.
-        which = _unclassified_breakdown(after.get("unclassified_by_command") or {})
-        which = f" ({which})" if which else ""
-        ran = _count_phrase(unclassified, "command", "commands")
-        one = "it was" if unclassified == 1 else "one of them was"
-        return (
-            f"files were edited and no test or check it recognises ran after the last edit{since}; "
-            f"{ran} after it could not be classified{which}, so whether {one} a test or check "
-            "is unknown"
+def _notice_line(notice: Notice, declared_note: str) -> str:
+    """The one line you see: the level first, then what happened."""
+    line = f"assurance · {notice.level}: {_end_sentence(notice.finding)}"
+    if declared_note:
+        return f"{line} {declared_note}"
+    if notice.unclassified:
+        # Told to you, not to Claude: an agent should not be the one declaring what counts as its check.
+        n = sum(notice.unclassified.values())
+        ran = _count_phrase(n, "command", "commands")
+        line += (
+            f" {ran} after the last code edit could not be classified "
+            f"({_unclassified_breakdown(notice.unclassified)}); if one of them is this project's own "
+            "test or check, declare it under [audit] in .assurance/config.toml and it will count."
         )
-    return _last_run_finding(list(after.get("test_runs") or []), "test run", since) or _last_run_finding(
-        list(after.get("check_runs") or []), "check", since
-    )
+    return line
 
 
-def _last_run_finding(runs: list[dict[str, Any]], noun: str, since: str) -> str | None:
-    """What to say about the last run of a test or a check: nothing when it visibly passed.
-
-    Checks get the same rule as tests. A type checker that failed after the last edit used to leave
-    the hook silent, because only test runs were looked at.
-    """
-    if not runs:
-        return None
-    last = runs[-1]
-    label = str(last.get("label") or last.get("command") or "")
-    outcome = last.get("outcome") or ("failed" if last.get("failed") else "passed")
-    if outcome == "failed":
-        return f"the last {noun} after the last edit failed{since}: {label}"
-    if outcome == "unknown":
-        whose = noun.split()[0]
-        return (
-            f"the last {noun} after the last edit ({label}) was piped or followed by another "
-            f"command, so its exit status is not the {whose}'s and whether it passed is unknown{since}"
-        )
-    return None
-
-
-#: How much of the end of a transcript the Stop hook reads first; it widens until it holds the last edit.
+#: How much of the end of a transcript the Stop hook reads first; `needs_earlier_lines` says when it
+#: must read all of it.
 HOOK_WINDOW = 2_000_000
-
-
-def _hook_session(transcript: Path) -> tuple[Session, bool]:
-    """The end of the transcript when it holds the last edit, else all of it; and which it was.
-
-    The hook runs after every turn and needs only what happened since the last edit, which in a
-    session that is still editing is near the end. When the window holds no edit inside the project,
-    the whole file is read: widening step by step re-read the same bytes and was slower than that on
-    real sessions whose last edit was hours back. What it says is what reading the whole file says.
-    """
-    session, whole = read_claude_code_tail(transcript, HOOK_WINDOW)
-    if whole or after_last_edit(session) is not None:
-        return session, whole
-    return read_claude_code(transcript), True
 
 
 def _limits_file_changed(transcript: Path, session: Session, whole: bool) -> bool:
@@ -265,14 +220,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--hook",
         action="store_true",
         help=(
-            "Run as a Claude Code Stop hook: read the hook's JSON on stdin and tell you when the "
-            "session's edits were not followed by a passing test or check. Never fails the session"
+            "Run as a Claude Code Stop hook: read the hook's JSON on stdin and tell you when something "
+            "is at stake: untested code pushed, merged, published or committed on main, a failed test "
+            "or check, or a claim that the tests pass with nothing behind it. Never fails the session"
         ),
     )
     parser.add_argument(
         "--nudge",
         action="store_true",
-        help="With --hook: also tell Claude, so it runs the tests before it finishes (once per turn)",
+        help="With --hook: also ask Claude to act on what it says (once per turn)",
     )
     return parser
 

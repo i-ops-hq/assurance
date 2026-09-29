@@ -75,7 +75,14 @@ def test_a_refused_test_after_an_edit_is_not_a_failed_test(tmp_path: Path, capsy
     ])
     after = after_last_edit(read_claude_code(path))
     assert after is not None and after["tests"] == 0 and after["tests_failed"] == 0
-    assert "files were edited and no test or check ran after the last edit" in _hook_message(path, tmp_path, capsys)
+    assert _hook_message(path, tmp_path, capsys) == ""  # not "the last test run … failed"
+    pushed = _transcript(tmp_path, [
+        _edit(tmp_path),
+        _step("Bash", {"command": "pytest -q"}, AUTO_MODE, error=True, denial="automode-blocked"),
+        _step("Bash", {"command": "git push"}, ""),
+    ])
+    message = _hook_message(pushed, tmp_path, capsys)
+    assert "with no passing test or check after the last edit to app.py (" in message and "failed" not in message
 
 
 def test_a_refused_call_is_counted_apart_from_failures_and_named(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

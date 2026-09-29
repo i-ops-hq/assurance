@@ -110,7 +110,8 @@ def test_the_piped_failing_run_from_the_desktop_report_is_caught(tmp_path: Path,
         ("Bash", {"command": "python3 -m pytest -q 2>&1 | tail -8"}, False, PYTEST_FAIL_TAIL),
     ])
     out = _hook(path, capsys)
-    assert out is not None and "the last test run after the last edit failed" in str(out["systemMessage"])
+    assert out is not None and "review suggested: the last test run after the last edit to greet.py (" in str(out["systemMessage"])
+    assert " failed: " in str(out["systemMessage"])
 
 
 def test_a_piped_run_with_no_summary_is_unknown_and_nudged(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -119,6 +120,7 @@ def test_a_piped_run_with_no_summary_is_unknown_and_nudged(tmp_path: Path, capsy
         ("Read", {"file_path": app}, False, "..."),
         ("Edit", {"file_path": app, "old_string": "a", "new_string": "b"}, False, "ok"),
         ("Bash", {"command": "python3 -m pytest -q 2>&1 | head -3"}, False, "F\nFAILED test_greet.py::t\n"),
+        ("Bash", {"command": "git push"}, False, ""),
     ])
     out = _hook(path, capsys)
     assert out is not None
@@ -129,9 +131,11 @@ def test_a_piped_run_with_no_summary_is_unknown_and_nudged(tmp_path: Path, capsy
 def test_a_sed_edit_with_no_test_after_is_caught(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = _transcript(tmp_path, [
         ("Bash", {"command": "sed -i '' 's/Hello/Hi/' app.py"}, False, ""),
+        ("Bash", {"command": "git push"}, False, ""),
     ])
     out = _hook(path, capsys)
-    assert out is not None and "no test or check ran after the last edit" in str(out["systemMessage"])
+    assert out is not None
+    assert "with no passing test or check after the last edit to app.py (" in str(out["systemMessage"])
     after = after_last_edit(read_claude_code(path))
     assert after is not None and after["by"] == "Bash"
 

@@ -18,7 +18,7 @@ import shlex
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Mapping, Sequence
 
 from assurance_budget.events import LogError
@@ -338,6 +338,10 @@ class ToolCall:
     """The last few thousand characters of the result: where a test runner prints its summary."""
     refused: bool = False
     """Claude Code refused to run it, so it did nothing: no edit, no read, no test. See `_refused`."""
+    branch: str = ""
+    """The git branch the transcript records for the message that made the call (`gitBranch`)."""
+    seq: int = -1
+    """The line of the transcript that made the call, counted from the first line read."""
 
 
 _RESULT_TAIL_CHARS = 4000
@@ -388,6 +392,14 @@ class Session:
     """Files the harness put in front of the model without a Read call, as (tool calls before it,
     path): an @-mentioned file, a file carried across a compaction, a file changed outside the
     session. Claude Code treats each as read."""
+    prompts: tuple[int, ...] = ()
+    """The line of each prompt from the person (as `ToolCall.seq` counts lines). The last one starts
+    the current turn."""
+    notices: tuple[int, ...] = ()
+    """The line of each of this tool's earlier Stop-hook notices: what came before one was already
+    there to be said."""
+    last_text: tuple[int, str] = (-1, "")
+    """Claude's last message that was text only, and its line."""
 
 
 #: `attachment` records that give the model a file's contents, so Claude Code counts it as read.
@@ -526,6 +538,9 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     unmatched_results = 0
     saw_session = False
     attached_reads: list[tuple[int, str]] = []
+    prompts: list[int] = []
+    notices: list[int] = []
+    last_text: tuple[int, str] = (-1, "")
 
     def _mark(reason: str) -> None:
         nonlocal not_read
@@ -569,6 +584,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 and isinstance(attached.get("filename"), str)
             ):
                 attached_reads.append((len(order), attached["filename"]))
+            elif kind == "attachment" and isinstance(attached, dict) and _own_stop_notice(attached):
+                notices.append(lines)
             continue
 
         message = record.get("message")
@@ -596,11 +613,25 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                     if not tool_id:
                         _mark("tool_use without id")
                         continue
-                    pending[tool_id] = {"name": name, "input": tool_input, "at": at}
+                    branch = record.get("gitBranch")
+                    pending[tool_id] = {
+                        "name": name,
+                        "input": tool_input,
+                        "at": at,
+                        "branch": branch if isinstance(branch, str) else "",
+                        "seq": lines,
+                    }
                     order.append(tool_id)
                 continue
             if _assistant_turn_only(blocks):
                 assistant_turns += 1
+                said = "\n".join(
+                    str(block.get("text") or "")
+                    for block in blocks
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ).strip()
+                if said:
+                    last_text = (lines, said)
                 continue
             marked = False
             for block in blocks:
@@ -620,6 +651,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
         if kind == "user":
             if isinstance(content, str):
                 user_turns += 1
+                if not record.get("isMeta"):
+                    prompts.append(lines)
                 continue
             if not isinstance(content, list):
                 ctype = type(content).__name__ if content is not None else "None"
@@ -644,6 +677,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 continue
             # List of text / image / … with no tool_result: a user turn.
             user_turns += 1
+            if not record.get("isMeta"):
+                prompts.append(lines)
             continue
 
         if isinstance(kind, str) and kind:
@@ -674,6 +709,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                     result_first_line=first,
                     result_tail=text[-_RESULT_TAIL_CHARS:],
                     refused=refused,
+                    branch=str(meta.get("branch") or ""),
+                    seq=int(meta.get("seq", -1)),
                 )
             )
         else:
@@ -686,6 +723,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                     error=False,
                     result_digest="",
                     has_result=False,
+                    branch=str(meta.get("branch") or ""),
+                    seq=int(meta.get("seq", -1)),
                 )
             )
 
@@ -705,6 +744,21 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
         unmatched_results=unmatched_results,
         not_read_reasons=dict(not_read_reasons),
         attached_reads=tuple(attached_reads),
+        prompts=tuple(prompts),
+        notices=tuple(notices),
+        last_text=last_text,
+    )
+
+
+def _own_stop_notice(attached: Mapping[str, Any]) -> bool:
+    """Whether an attachment is a notice this tool's Stop hook showed: `assurance: …` before 0.1.13,
+    `assurance · …` from it."""
+    content = attached.get("content")
+    return (
+        attached.get("type") == "hook_system_message"
+        and attached.get("hookEvent") == "Stop"
+        and isinstance(content, str)
+        and content.startswith(("assurance:", "assurance ·"))
     )
 
 
@@ -1337,14 +1391,28 @@ def bash_edits_project(command: str, cwd: str) -> bool:
     `cp` / `mv` / `install`) that resolves inside `cwd`, and git or patch commands that rewrite the
     working tree. After a `cd` elsewhere, relative targets are not taken to be the project's.
     """
+    return bash_edit_targets(command, cwd) is not None
+
+
+def bash_edit_targets(command: str, cwd: str) -> tuple[str, ...] | None:
+    """The files inside the project `cwd` a shell command changed, as typed; None when it changed none.
+
+    The rules are `bash_edits_project`'s. A command that rewrites the working tree without naming the
+    files (`patch`, `git checkout -- .`, `git stash pop`, …) gives `""` for them: changed, but which is
+    unknown; `tree_rewrites` names the command. `cp` and `mv` into a folder give the files they put
+    there (`docs/a.md` for `mv a.md docs`). A token no one means as a file name is not one: what
+    quoting can leave where a redirection's target would be (`tr '>' '>\\n'`), and the `=0.4` of an
+    unquoted `pip install pkg>=0.4`, which the shell does write, and nobody wanted.
+    """
     # Every edit below needs one of these in the command as typed (nothing is expanded), so a command
     # with none of them is not an edit, and the shell parser, the slow part, is skipped for it.
     if not any(hint in command for hint in _EDIT_HINTS):
-        return False
+        return None
     try:
         segments = split_shell_segments(strip_heredoc_bodies(command))
     except ValueError:
-        return False
+        return None
+    found: list[str] = []
     left_cwd = False
     for tokens in segments:
         if not tokens:
@@ -1352,30 +1420,74 @@ def bash_edits_project(command: str, cwd: str) -> bool:
         if _segment_cds_away(tokens, cwd):
             left_cwd = True
         argv = _strip_git_globals(_normalise_argv(_drop_redirections(tokens)) or [])
-        if not left_cwd and argv:
-            if argv[0] == "patch":
-                return True
-            if argv[0] == "git" and len(argv) >= 2:
-                sub, rest = argv[1], argv[2:]
-                if sub in _GIT_TREE_WRITES:
-                    return True
-                if sub == "stash" and rest[:1] in (["pop"], ["apply"]):
-                    return True
-                if sub == "reset" and "--hard" in rest:
-                    return True
-                if sub == "checkout" and "--" in rest:
-                    return True
-        targets = list(_write_targets(tokens))
+        if not left_cwd and argv and _rewrites_tree(argv):
+            found.append("")
+        targets = _into_folder(argv, list(_write_targets(tokens)))
         if argv and argv[0] == "perl" and any(a.startswith("-") and "i" in a[1:] for a in argv[1:-1]):
             targets.append(argv[-1])
         for target in targets:
             if left_cwd and not _is_absolute_path_token(target):
                 continue
-            if target in _DISCARD_TARGETS or "$" in target:
+            if target in _DISCARD_TARGETS or "$" in target or not target or target[0] in "<>&=" or "\n" in target:
                 continue
             if _path_inside_cwd(target, cwd):
-                return True
-    return False
+                found.append(target)
+    return tuple(found) if found else None
+
+
+def tree_rewrites(command: str, cwd: str) -> tuple[str, ...]:
+    """The commands in `command` that rewrote the project's working tree without naming the files:
+    `git pull`, `git checkout`, `patch`."""
+    try:
+        segments = split_shell_segments(strip_heredoc_bodies(command))
+    except ValueError:
+        return ()
+    found: list[str] = []
+    for tokens in segments:
+        if tokens and _segment_cds_away(tokens, cwd):
+            break
+        argv = _strip_git_globals(_normalise_argv(_drop_redirections(tokens)) or [])
+        if argv and _rewrites_tree(argv):
+            words = " ".join(argv[:2]) if argv[0] == "git" else argv[0]
+            if words not in found:
+                found.append(words)
+    return tuple(found)
+
+
+def _into_folder(argv: list[str], targets: list[str]) -> list[str]:
+    """`cp`/`mv`/`install` into a folder: the files it put there, so `mv notes.md docs` is
+    `docs/notes.md`, which says what kind of file it is. A destination is taken for a folder when it
+    ends in `/`, or has no suffix while every file moved has one."""
+    if len(argv) < 3 or argv[0] not in ("cp", "mv", "install") or not targets or targets[-1] != argv[-1]:
+        return targets
+    dest = argv[-1]
+    sources = [arg for arg in argv[1:-1] if not arg.startswith("-")]
+    names = [PurePosixPath(src.replace("\\", "/")).name for src in sources]
+    dest_name = PurePosixPath(dest.replace("\\", "/")).name
+    into_folder = dest.endswith(("/", "\\")) or (
+        not PurePosixPath(dest_name).suffix
+        and all(PurePosixPath(name).suffix for name in names)
+        and dest_name not in names
+    )
+    if not sources or not into_folder:
+        return targets  # `cp ../LICENSE LICENSE` is a file, though it has no suffix
+    sep = "\\" if "\\" in dest and "/" not in dest else "/"
+    return targets[:-1] + [dest.rstrip("/\\") + sep + PurePosixPath(src.replace("\\", "/")).name for src in sources]
+
+
+def _rewrites_tree(argv: list[str]) -> bool:
+    """`patch`, or a git command that rewrites the working tree without naming each file."""
+    if argv[0] == "patch":
+        return True
+    if argv[0] != "git" or len(argv) < 2:
+        return False
+    sub, rest = argv[1], argv[2:]
+    return (
+        sub in _GIT_TREE_WRITES
+        or (sub == "stash" and rest[:1] in (["pop"], ["apply"]))
+        or (sub == "reset" and "--hard" in rest)
+        or (sub == "checkout" and "--" in rest)
+    )
 
 
 def _path_inside_cwd(path: str, cwd: str) -> bool:

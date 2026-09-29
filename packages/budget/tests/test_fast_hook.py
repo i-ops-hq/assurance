@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from assurance_budget import config, session_cli
+from assurance_budget.notice import needs_earlier_lines
 from assurance_budget.sessions import (
     changed_limits_file,
     read_claude_code,
@@ -27,10 +28,16 @@ def _small_window_and_no_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def _transcript(tmp_path: Path, calls: list[tuple[str, dict[str, object], bool, str]], cwds: list[str] | None = None) -> Path:
+    """One tool call per entry; an entry `PROMPT` is a prompt from the person, which starts a turn."""
     lines = []
-    for i, (tool, tool_input, failed, output) in enumerate(calls):
+    for i, step in enumerate(calls):
         cwd = (cwds or [])[i] if cwds and i < len(cwds) else str(tmp_path)
         ts = f"2026-09-24T10:{i // 60:02d}:{i % 60:02d}.000Z"
+        if step is PROMPT:
+            lines.append(json.dumps({"type": "user", "sessionId": "fast-1", "cwd": cwd, "timestamp": ts,
+                                     "message": {"role": "user", "content": "go on"}}))
+            continue
+        tool, tool_input, failed, output = step
         lines.append(json.dumps({
             "type": "assistant", "sessionId": "fast-1", "cwd": cwd, "timestamp": ts,
             "message": {"role": "assistant", "content": [{"type": "tool_use", "id": f"toolu_{i:04d}", "name": tool, "input": tool_input}]},
@@ -48,6 +55,10 @@ def _transcript(tmp_path: Path, calls: list[tuple[str, dict[str, object], bool, 
 
 def _edit(tmp_path: Path) -> tuple[str, dict[str, object], bool, str]:
     return ("Edit", {"file_path": str(tmp_path / "app.py"), "old_string": "a", "new_string": "b"}, False, "ok")
+
+
+PROMPT: tuple[str, dict[str, object], bool, str] = ("prompt", {}, False, "")
+PUSH: tuple[str, dict[str, object], bool, str] = ("Bash", {"command": "git push"}, False, "")
 
 
 def _padding(n: int) -> list[tuple[str, dict[str, object], bool, str]]:
@@ -69,18 +80,39 @@ def _whole_file_answer(path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
         monkeypatch.setattr(session_cli, "HOOK_WINDOW", WINDOW)
 
 
-@pytest.mark.parametrize("shape", ["recent edit", "edit far back", "no edit at all"])
-def test_the_hook_says_what_a_whole_file_read_says(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shape: str) -> None:
+PASSED = ("Bash", {"command": "pytest -q"}, False, "3 passed in 0.10s")
+FAILED = ("Bash", {"command": "pytest -q"}, True, "1 failed in 0.10s")
+
+
+@pytest.mark.parametrize("shape, says", [
+    ("the turn is inside the window", True),
+    ("the edit is far back, the push is now", True),  # only a whole read knows the edit was never tested
+    ("the test is far back, the push is now", False),  # and only a whole read knows it was
+    ("one turn longer than the window", True),  # its failed test is before the window
+    ("no edit at all", False),
+])
+def test_the_hook_says_what_a_whole_file_read_says(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shape: str, says: bool) -> None:
     calls = {
-        "recent edit": _padding(10) + [_edit(tmp_path), ("Bash", {"command": "pytest -q | tail -3"}, False, "")],
-        "edit far back": [_edit(tmp_path), ("Bash", {"command": "mypy src"}, True, "")] + _padding(10),
+        "the turn is inside the window": _padding(10) + [PROMPT, _edit(tmp_path), PUSH],
+        "the edit is far back, the push is now": [PROMPT, _edit(tmp_path)] + _padding(10) + [PROMPT, PUSH],
+        "the test is far back, the push is now": [PROMPT, _edit(tmp_path), PASSED] + _padding(10) + [PROMPT, PUSH],
+        "one turn longer than the window": [PROMPT, _edit(tmp_path), FAILED] + _padding(10),
         "no edit at all": _padding(10),
     }[shape]
     path = _transcript(tmp_path, calls)
     assert path.stat().st_size > 2 * WINDOW
     assert _hook(path) == _whole_file_answer(path, monkeypatch)
-    if shape != "no edit at all":
-        assert _hook(path) != ""  # each of these has something to say, so equal means equally right
+    assert (_hook(path) != "") is says  # equal, and right: each shape has a known answer
+
+
+def test_a_turn_inside_the_window_is_decided_without_reading_the_rest(tmp_path: Path) -> None:
+    # The window exists so a long session costs little per turn; a whole read must stay the exception.
+    path = _transcript(tmp_path, _padding(10) + [PROMPT, _edit(tmp_path), PUSH])
+    tail, whole = read_claude_code_tail(path, WINDOW)
+    assert not whole and not needs_earlier_lines(tail)
+    far = _transcript(tmp_path, [PROMPT, _edit(tmp_path)] + _padding(10) + [PROMPT, PUSH])
+    tail, whole = read_claude_code_tail(far, WINDOW)
+    assert not whole and needs_earlier_lines(tail)
 
 
 def test_a_window_that_starts_after_a_cd_keeps_the_project_the_session_started_in(tmp_path: Path) -> None:
@@ -117,7 +149,7 @@ def test_a_limits_file_written_early_in_a_long_session_still_counts(tmp_path: Pa
     (tmp_path / ".assurance").mkdir()
     (tmp_path / ".assurance" / "config.toml").write_text(body, encoding="utf-8")
     write = ("Write", {"file_path": str(tmp_path / ".assurance" / "config.toml"), "content": body}, False, "ok")
-    path = _transcript(tmp_path, [write] + _padding(10) + [_edit(tmp_path), ("Bash", {"command": "python -c 'print(1)'"}, False, "1")])
+    path = _transcript(tmp_path, [write] + _padding(10) + [_edit(tmp_path), ("Bash", {"command": "python -c 'print(1)'"}, False, "1"), PUSH])
     out = _hook(path)
     assert "This session changed .assurance/config.toml, so the tests and checks it declares were not used." in out
 

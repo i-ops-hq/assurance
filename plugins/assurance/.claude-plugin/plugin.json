@@ -1,7 +1,7 @@
 {
   "name": "assurance",
-  "version": "0.1.12",
-  "description": "After every turn, says whether anything was tested after Claude's last edit, and what it could not check.",
+  "version": "0.1.13",
+  "description": "Checks each turn's code changes against the tests that ran, and speaks up before untested code is pushed, merged, published or committed on main.",
   "author": {
     "name": "I-Ops",
     "url": "https://i-ops.dev"
