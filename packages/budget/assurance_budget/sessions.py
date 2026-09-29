@@ -371,6 +371,34 @@ def _refused(record: Mapping[str, Any], is_error: bool, text: str) -> bool:
 
 
 @dataclass(frozen=True)
+class Setup:
+    """What the session had around it, as the transcript records it: tools made available, MCP servers,
+    skills and agents listed, skills loaded, hooks run, commands typed.
+
+    Only what the transcript records. Tools loaded into the prompt from the start, rather than on
+    demand, are not in it, so which of those went unused cannot be told; `inventory` says so.
+    """
+
+    tools: tuple[str, ...] = ()
+    """Tools made available on demand (`deferred_tools_delta`, `deferred_tools_record`), in order."""
+    mcp_titles: Mapping[str, str] = field(default_factory=dict)
+    """MCP servers that gave the model instructions, by name, with the title their instructions open
+    with when there is one (`Claude Docs` for a server named by an id)."""
+    mcp_state: Mapping[str, str] = field(default_factory=dict)
+    """MCP servers that did not connect: `failed`, `needs sign-in` or `pending`."""
+    skills: tuple[str, ...] = ()
+    """Skills listed to the model (`skill_listing`)."""
+    skills_loaded: Mapping[str, int] = field(default_factory=dict)
+    """Skills whose instructions were loaded (`invoked_skills`), by name, with how often."""
+    agents: tuple[str, ...] = ()
+    """Agent types listed to the model (`agent_listing_delta`)."""
+    hooks: tuple[tuple[str, str, str, int, int | None], ...] = ()
+    """Each hook run: (event, name, command, exit code, milliseconds)."""
+    commands: Mapping[str, int] = field(default_factory=dict)
+    """Slash commands typed, with how often."""
+
+
+@dataclass(frozen=True)
 class Session:
     """A Claude Code session transcript, reduced to what an audit can say about it."""
 
@@ -400,6 +428,8 @@ class Session:
     there to be said."""
     last_text: tuple[int, str] = (-1, "")
     """Claude's last message that was text only, and its line."""
+    setup: Setup = field(default_factory=Setup)
+    """What the session had around it: see `Setup`."""
 
 
 #: `attachment` records that give the model a file's contents, so Claude Code counts it as read.
@@ -541,6 +571,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     prompts: list[int] = []
     notices: list[int] = []
     last_text: tuple[int, str] = (-1, "")
+    setup = _SetupReader()
 
     def _mark(reason: str) -> None:
         nonlocal not_read
@@ -586,6 +617,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 attached_reads.append((len(order), attached["filename"]))
             elif kind == "attachment" and isinstance(attached, dict) and _own_stop_notice(attached):
                 notices.append(lines)
+            if kind == "attachment" and isinstance(attached, dict):
+                setup.read(attached)
             continue
 
         message = record.get("message")
@@ -653,6 +686,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 user_turns += 1
                 if not record.get("isMeta"):
                     prompts.append(lines)
+                setup.read_prompt(content)
                 continue
             if not isinstance(content, list):
                 ctype = type(content).__name__ if content is not None else "None"
@@ -747,7 +781,119 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
         prompts=tuple(prompts),
         notices=tuple(notices),
         last_text=last_text,
+        setup=setup.done(),
     )
+
+
+_COMMAND_NAME = re.compile(r"<command-name>\s*(/[^<\s]+)\s*</command-name>")
+_MCP_STATES = (("failedMcpServers", "failed"), ("needsAuthMcpServers", "needs sign-in"), ("pendingMcpServers", "pending"))
+
+
+class _SetupReader:
+    """Collects a `Setup` from the attachments and prompts as `_parse_lines` meets them."""
+
+    def __init__(self) -> None:
+        self.tools: dict[str, None] = {}
+        self.mcp_titles: dict[str, str] = {}
+        self.mcp_state: dict[str, str] = {}
+        self.skills: dict[str, None] = {}
+        self.skills_loaded: Counter[str] = Counter()
+        self.agents: dict[str, None] = {}
+        self.hooks: list[tuple[str, str, str, int, int | None]] = []
+        self.commands: Counter[str] = Counter()
+
+    def read(self, attached: Mapping[str, Any]) -> None:
+        kind = attached.get("type")
+        if kind == "deferred_tools_delta":
+            for name in _names(attached.get("addedNames")) + _names(attached.get("readdedNames")):
+                self.tools[name] = None
+            for name in _names(attached.get("removedNames")):
+                self.tools.pop(name, None)
+            for key, state in _MCP_STATES:
+                for server in _names(attached.get(key)):
+                    self.mcp_state[server] = state
+        elif kind == "deferred_tools_record":
+            entries = attached.get("entries")
+            for entry in entries if isinstance(entries, list) else []:
+                if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                    self.tools[entry["name"]] = None
+        elif kind == "mcp_instructions_delta":
+            blocks = attached.get("addedBlocks")
+            blocks = blocks if isinstance(blocks, list) else []
+            for i, server in enumerate(_names(attached.get("addedNames"))):
+                block = blocks[i] if i < len(blocks) and isinstance(blocks[i], str) else ""
+                self.mcp_titles[server] = _mcp_title(block, server)
+                self.mcp_state.pop(server, None)
+            for server in _names(attached.get("removedNames")):
+                self.mcp_titles.pop(server, None)
+        elif kind == "skill_listing":
+            for name in _names(attached.get("names")):
+                self.skills[name] = None
+        elif kind == "invoked_skills":
+            skills = attached.get("skills")
+            for skill in skills if isinstance(skills, list) else []:
+                if isinstance(skill, dict) and isinstance(skill.get("name"), str):
+                    self.skills_loaded[skill["name"]] += 1
+        elif kind == "agent_listing_delta":
+            for name in _names(attached.get("addedTypes")):
+                self.agents[name] = None
+            for name in _names(attached.get("removedTypes")):
+                self.agents.pop(name, None)
+        elif isinstance(kind, str) and kind.startswith("hook_") and isinstance(attached.get("exitCode"), int):
+            ms = attached.get("durationMs")
+            self.hooks.append((
+                str(attached.get("hookEvent") or ""),
+                str(attached.get("hookName") or ""),
+                str(attached.get("command") or ""),
+                int(attached["exitCode"]),
+                int(ms) if isinstance(ms, (int, float)) else None,
+            ))
+
+    def read_prompt(self, content: str) -> None:
+        match = _COMMAND_NAME.search(content)
+        if match:
+            self.commands[match.group(1)] += 1
+
+    def done(self) -> Setup:
+        return Setup(
+            tools=tuple(self.tools),
+            mcp_titles=dict(self.mcp_titles),
+            mcp_state=dict(self.mcp_state),
+            skills=tuple(self.skills),
+            skills_loaded=dict(self.skills_loaded),
+            agents=tuple(self.agents),
+            hooks=tuple(self.hooks),
+            commands=dict(self.commands),
+        )
+
+
+def _names(value: Any) -> list[str]:
+    """A list of names from a record: strings, or objects that carry a `name`."""
+    out: list[str] = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, str) and item:
+            out.append(item)
+        elif isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]:
+            out.append(item["name"])
+    return out
+
+
+_OPAQUE_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+_TITLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .&'+-]{0,39}")
+
+
+def _mcp_title(block: str, server: str) -> str:
+    """A name for an MCP server that has only an id: `## <id>` then `Claude Docs: …` gives
+    `Claude Docs`. A server that is named keeps its name, and a heading that is not a name
+    (`**IMPORTANT: …`) gives none."""
+    if not _OPAQUE_ID.fullmatch(server):
+        return server
+    lines = [line.strip() for line in block.splitlines() if line.strip()]
+    if len(lines) >= 2 and lines[0].lstrip("#").strip() == server:
+        head, colon, _ = lines[1].partition(":")
+        if colon and _TITLE.fullmatch(head.strip()):
+            return head.strip()
+    return server
 
 
 def _own_stop_notice(attached: Mapping[str, Any]) -> bool:

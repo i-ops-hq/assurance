@@ -39,10 +39,10 @@ act (once per turn, and it never fails the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.13 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.14 audit --hook --nudge" } ] } ] } }
 ```
 
-By hand, run `uvx assurance@0.1.13 --version` once first: `--offline` runs the copy uv already has, so
+By hand, run `uvx assurance@0.1.14 --version` once first: `--offline` runs the copy uv already has, so
 the hook never waits on PyPI.
 
 **Run-log budget** (JSONL with a per-run id):
@@ -90,6 +90,24 @@ assert spend.tool_calls <= 20
 - Edits with no visible read, in `--json` (Claude Code itself refuses those, so the text stays quiet)
 - Which runs in a JSONL log hit a ceiling or stalled with nothing new read
 - Which configured limits the log never exercised (silence, not a pass)
+- What the session touched next to what it had: MCP servers used and loaded but never used, skills
+  listed and used, agents, hooks with their runs and failures, and commands typed
+
+### The inventory
+
+`assurance audit --json` carries it as `inventory`, shape `assurance.inventory/1`. Rooms draws it as a
+page. It is read from the transcript alone, and it counts; whether a server or skill the session
+carried and never used helped or got in the way is not something a count can say.
+
+| key | what |
+|---|---|
+| `tools` | built-in tools called, with how often |
+| `mcp_servers` | each server: `name`, `title` (a readable name for one known only by an id), `state` (`used`, `not used`, `failed`, `needs sign-in`, `pending`), `calls`, `tools_used`, `tools_available` |
+| `skills` | `listed` to the model, and `used`, with how often |
+| `agents` | `listed` types, and `used`, with how often |
+| `hooks` | each hook: `name`, `command`, `runs`, `failed`, `median_ms` |
+| `commands` | slash commands typed, with how often |
+| `not_recorded` | what the transcript does not hold: tools loaded into the prompt from the start are not in it, so an unused one among them cannot be counted |
 
 ## In CI
 

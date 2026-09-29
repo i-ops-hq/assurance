@@ -1,3 +1,11 @@
+# 0.2.10
+
+- **What the session touched, next to what it had.** `assurance audit` ends with the MCP servers it
+  used and the ones it loaded and never used (and any that failed or wanted sign-in), the skills
+  listed and used, agents, hooks with their runs and failures, and commands typed. `--json` carries
+  them as `inventory`, shape `assurance.inventory/1`, documented under "The inventory"; Rooms draws
+  it as a page. It counts and does not judge, and it says what the transcript does not record.
+
 # 0.2.9
 
 - **The Stop hook speaks when something is at stake, and names the level first.** It spoke after

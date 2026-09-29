@@ -1,3 +1,10 @@
+# 0.1.14
+
+- **Requires `assurance-budget` 0.2.10:** the report ends with what the session touched next to what
+  it had (MCP servers, skills, agents, hooks, commands), and `--json` carries it as `inventory`. The
+  plugin's privacy policy says the transcript is used for this too. The README's hook command and the
+  plugin are pinned to this version.
+
 # 0.1.13
 
 - **Requires `assurance-budget` 0.2.9:** the Stop hook speaks when something is at stake and names the
