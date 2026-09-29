@@ -19,7 +19,8 @@ A transcript holds whatever the session held, which can include personal data.
 
 ## What it uses it for
 
-To find the edits Claude made, the tests and checks that ran after them, and whether they passed,
+To find the edits Claude made, the tests and checks that ran after them, and whether they passed;
+to list which tools, MCP servers, skills and hooks the session used, and which it had and never used;
 and to tell you and Claude what it found. Nothing else.
 
 ## How long it keeps it

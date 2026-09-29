@@ -23,6 +23,7 @@ from assurance_budget.config import (
     project_overreach_notes,
 )
 from assurance_budget.events import LogError
+from assurance_budget.inventory import inventory, inventory_lines
 from assurance_budget.notice import Notice, needs_earlier_lines, stop_notice
 from assurance_budget.sessions import (
     Declared,
@@ -439,6 +440,7 @@ def build_report(
             else None
         ),
         "declared_notes": list(declared_notes),
+        "inventory": inventory(session),
     }
     if limits:
         payload["limits"] = limits
@@ -544,6 +546,8 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         body.append(_end_sentence(f"Counted as tests and checks because {' and '.join(declared['from'])} declares them: {shown}"))
     for note in report.get("declared_notes") or []:
         body.append(note)
+
+    body.extend(inventory_lines(report.get("inventory") or {}))
 
     bookkeeping = sum(session.records.values())
     body.append(
