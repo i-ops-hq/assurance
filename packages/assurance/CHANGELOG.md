@@ -1,3 +1,11 @@
+# 0.1.13
+
+- **Requires `assurance-budget` 0.2.9:** the Stop hook speaks when something is at stake and names the
+  level first: *check before proceeding* when untested code is pushed, merged, published, deployed or
+  committed on main, *review suggested* when a test fails or Claude says the tests pass with nothing
+  behind it. Routine editing is silent, and each finding is said once. The plugin's listing says so,
+  and the README's hook command and the plugin are pinned to this version.
+
 # 0.1.12
 
 - **Requires `assurance-cli` 0.6.3:** the start screen `assurance` prints no longer carries "No model,

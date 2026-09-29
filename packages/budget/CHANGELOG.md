@@ -1,3 +1,22 @@
+# 0.2.9
+
+- **The Stop hook speaks when something is at stake, and names the level first.** It spoke after
+  every turn whose last edit had no passing test after it, which is most turns: replayed over 857
+  turn ends of 17 real sessions, it spoke at 578. Now it speaks at 78, at two levels:
+  - `assurance · check before proceeding:` the turn pushed, merged, published, deployed, ran a
+    migration or committed on main, while code edited before it had no passing test or check after
+    it.
+  - `assurance · review suggested:` the last test or check after the last code edit failed, or
+    Claude's last message says the tests pass when nothing verified the edit.
+
+  Routine editing is silent, and so are edits to prose and assets (`.md`, images, `LICENSE`, …). A
+  finding is said once: nothing before this turn's prompt or an earlier notice is said again, and a
+  second push over the same untested code is not news. It is all read from the transcript by code
+  (`assurance_budget.notice`); `assurance audit` still reports everything.
+- **`bash_edit_targets` names the files a shell command wrote**, so `cat > NOTES.md` is prose and
+  `mv a.md docs` is `docs/a.md`. A quoted `'>'`, or the `=0.4` of an unquoted `pkg>=0.4`, is not
+  taken for a file written.
+
 # 0.2.8
 
 - **`assurance audit --session ID` reads one session's transcript and no other.** Without a path,
