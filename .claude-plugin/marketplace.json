@@ -10,7 +10,7 @@
     {
       "name": "assurance",
       "source": "./plugins/assurance",
-      "description": "After every turn, says whether anything was tested after Claude's last edit, and what it could not check."
+      "description": "Checks each turn's code changes against the tests that ran, and speaks up before untested code is pushed, merged, published or committed on main."
     }
   ]
 }

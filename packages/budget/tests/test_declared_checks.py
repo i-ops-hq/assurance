@@ -138,8 +138,8 @@ def test_a_declared_check_that_failed_after_the_last_edit_is_said(tmp_path: Path
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("python scripts/check.py", failed=True)])
     out = _hook(path, capsys)
     assert out is not None
-    assert "the last check after the last edit failed" in str(out["systemMessage"])
-    assert "python scripts/check.py" in str(out["systemMessage"])
+    assert "review suggested: the last check after the last edit to app.py (" in str(out["systemMessage"])
+    assert str(out["systemMessage"]).endswith("failed: python scripts/check.py.")
 
 
 def test_a_type_checker_that_failed_after_the_last_edit_is_no_longer_passed_over(
@@ -148,19 +148,23 @@ def test_a_type_checker_that_failed_after_the_last_edit_is_no_longer_passed_over
     # Only test runs were looked at, so a failed mypy with no test after it left the hook silent.
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("mypy src", failed=True)])
     out = _hook(path, capsys)
-    assert out is not None and "the last check after the last edit failed" in str(out["systemMessage"])
+    assert out is not None and "the last check after the last edit to app.py (" in str(out["systemMessage"])
+    assert str(out["systemMessage"]).endswith("failed: mypy src.")
 
 
 def test_a_piped_check_is_unknown_not_passed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("ruff check . | head -20")])
+    # Unknown is not passed: a push after it is a push of unverified code.
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("ruff check . | head -20"), _bash("git push")])
     out = _hook(path, capsys)
-    assert out is not None and "whether it passed is unknown" in str(out["systemMessage"])
+    assert out is not None and "check before proceeding: pushed at " in str(out["systemMessage"])
+    assert "whether it passed is unknown" in str(out["systemMessage"])
 
 
 def test_a_passing_test_then_a_failing_check_is_said(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("pytest -q"), _bash("mypy src", failed=True)])
     out = _hook(path, capsys)
-    assert out is not None and "check after the last edit failed" in str(out["systemMessage"])
+    assert out is not None and "the last check after the last edit to app.py (" in str(out["systemMessage"])
+    assert str(out["systemMessage"]).endswith("failed: mypy src.")
 
 
 def test_a_session_cannot_declare_its_own_check_and_pass_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -170,18 +174,18 @@ def test_a_session_cannot_declare_its_own_check_and_pass_it(tmp_path: Path, caps
     body = "[audit]\nchecks = [\"python -c 'print(1)'\"]\n"
     config_path = _project(tmp_path, body)
     write = ("Write", {"file_path": str(config_path), "content": body}, False)
-    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), write, _bash("python -c 'print(1)'")])
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), write, _bash("python -c 'print(1)'"), _bash("git push")])
     out = _hook(path, capsys)
     assert out is not None
     message = str(out["systemMessage"])
-    assert "no test or check ran after the last edit" in message or "no test or check it recognises" in message
+    assert "with no passing test or check it recognises after the edits to app.py and .assurance/config.toml" in message
     assert "This session changed .assurance/config.toml, so the tests and checks it declares were not used." in message
 
 
 def test_the_hint_to_declare_a_check_is_told_to_you_and_not_to_claude(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("python scripts/check.py")])
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("python scripts/check.py"), _bash("git push")])
     out = _hook(path, capsys)
     assert out is not None
     assert "declare it under [audit]" in str(out["systemMessage"])
@@ -191,7 +195,7 @@ def test_the_hint_to_declare_a_check_is_told_to_you_and_not_to_claude(
 
 def test_a_config_file_it_cannot_read_does_not_break_the_session(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _project(tmp_path, "[audit\nchecks = [")
-    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path)])
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("git push")])
     out = _hook(path, capsys)
     assert out is not None and "Declared tests and checks were not used" in str(out["systemMessage"])
 

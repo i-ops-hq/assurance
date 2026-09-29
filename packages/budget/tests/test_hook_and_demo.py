@@ -52,29 +52,40 @@ def _read(tmp_path: Path) -> tuple[str, dict[str, object], bool]:
     return ("Read", {"file_path": str(tmp_path / "app.py")}, False)
 
 
+#: Since 0.1.13 the hook speaks when something is at stake, and a push is the plainest case.
+PUSH: tuple[str, dict[str, object], bool] = ("Bash", {"command": "git push"}, False)
+
+
 # --- the Stop hook -------------------------------------------------------------------------------
 
 
-def test_hook_tells_you_and_claude_when_edits_were_never_tested(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path)])
+def test_hook_tells_you_and_claude_when_untested_edits_were_pushed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), PUSH])
     out = _hook(path, nudge=True, capsys=capsys)
     assert out is not None
-    assert "no test or check ran after the last edit" in str(out["systemMessage"])
+    assert "check before proceeding: pushed at " in str(out["systemMessage"])
+    assert "with no passing test or check after the last edit to app.py (" in str(out["systemMessage"])
     context = out["hookSpecificOutput"]
     assert isinstance(context, dict)
     assert context["hookEventName"] == "Stop"
     assert "run the project's tests" in context["additionalContext"]
 
 
-def test_hook_without_nudge_only_tells_you(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_hook_is_silent_about_edits_nothing_was_done_with(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Editing is what Claude does; the report has it, and the notice is for what is at stake.
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path)])
+    assert _hook(path, nudge=True, capsys=capsys) is None
+
+
+def test_hook_without_nudge_only_tells_you(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), PUSH])
     out = _hook(path, nudge=False, capsys=capsys)
     assert out is not None and "systemMessage" in out and "hookSpecificOutput" not in out
 
 
 def test_hook_never_nudges_twice_in_one_turn(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # stop_hook_active: Claude is already continuing because of a Stop hook. Nudging again loops.
-    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path)])
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), PUSH])
     out = _hook(path, nudge=True, active=True, capsys=capsys)
     assert out is not None and "hookSpecificOutput" not in out
 
@@ -87,24 +98,22 @@ def test_hook_is_silent_when_tests_passed_after_the_last_edit(tmp_path: Path, ca
 def test_hook_flags_a_last_test_run_that_failed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), ("Bash", {"command": "pytest -q"}, True)])
     out = _hook(path, nudge=True, capsys=capsys)
-    assert out is not None and "last test run after the last edit failed" in str(out["systemMessage"])
-    assert "pytest -q" in str(out["systemMessage"])
+    assert out is not None
+    assert "review suggested: the last test run after the last edit to app.py (" in str(out["systemMessage"])
+    assert str(out["systemMessage"]).endswith("failed: pytest -q.")
 
 
 def test_hook_does_not_say_no_check_ran_when_it_could_not_classify_what_did(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # Found in a real desktop session: the project's check was a Python script, it ran and passed
     # after the last edit, and the hook said no test or check had run. It cannot know that.
     check = ("Bash", {"command": "python scripts/check.py"}, False)
-    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), check])
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), check, PUSH])
     out = _hook(path, nudge=True, capsys=capsys)
-    assert out is not None  # unknown is still worth saying: silence is not a pass
+    assert out is not None  # unknown is still worth saying when it is pushed: silence is not a pass
     message = str(out["systemMessage"])
-    assert "no test or check ran after the last edit" not in message
-    assert "no test or check it recognises ran after the last edit" in message
-    assert (
-        "1 command after it could not be classified (python script), so whether it was a test or "
-        "check is unknown"
-    ) in message
+    assert "with no passing test or check after" not in message
+    assert "with no passing test or check it recognises after the last edit to app.py (" in message
+    assert "1 command after the last code edit could not be classified (python script)" in message
     context = out["hookSpecificOutput"]
     assert isinstance(context, dict)
     assert "say which one and what it returned" in context["additionalContext"]
@@ -116,8 +125,10 @@ def test_only_unclassified_commands_after_the_last_edit_count(tmp_path: Path, ca
     after = after_last_edit(read_claude_code(path))
     assert after is not None
     assert after["unclassified"] == 0 and after["unclassified_by_command"] == {}
+    path = _session(tmp_path, [before, _read(tmp_path), _edit(tmp_path), PUSH])
     out = _hook(path, nudge=True, capsys=capsys)
-    assert out is not None and "no test or check ran after the last edit" in str(out["systemMessage"])
+    assert out is not None
+    assert "with no passing test or check after the last edit to app.py (" in str(out["systemMessage"])
     context = out["hookSpecificOutput"]
     assert isinstance(context, dict) and "say which one" not in context["additionalContext"]
 
@@ -153,7 +164,7 @@ def test_hook_with_a_missing_transcript_lets_the_session_end(tmp_path: Path, cap
 def test_hook_reads_stdin_through_main(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     import io
 
-    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path)])
+    path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), PUSH])
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"transcript_path": str(path)})))
     assert main(["--hook", "--nudge"]) == 0
     assert "hookSpecificOutput" in json.loads(capsys.readouterr().out)
@@ -256,6 +267,6 @@ def test_an_unexpected_error_in_the_audit_still_lets_the_session_end(
     def boom(*_: object) -> None:
         raise RuntimeError("simulated bug")
 
-    monkeypatch.setattr(session_cli, "after_last_edit", boom)
+    monkeypatch.setattr(session_cli, "stop_notice", boom)
     assert run_hook(json.dumps({"transcript_path": str(path)}), nudge=True) == 0
     assert "the audit failed (RuntimeError: simulated bug)" in json.loads(capsys.readouterr().out)["systemMessage"]

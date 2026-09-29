@@ -1,9 +1,11 @@
 # assurance, the Claude Code plugin
 
-After every turn, the Stop hook audits the session: whether anything was tested after Claude's last
-edit, whether that run passed, and what it could not check. When the last edit was not followed by a
-passing test or check, you are told, and Claude is asked to run them before it stops. It nudges at
-most once per turn and never blocks a session.
+After every turn, the Stop hook checks Claude's code changes against the tests and checks that ran,
+and speaks when something is at stake, naming it first. *Check before proceeding*: untested code was
+pushed, merged, published, deployed or committed on main. *Review suggested*: a test or check after
+the last code edit failed, or Claude says the tests pass when nothing verified the edit. Routine
+editing, and edits to prose and assets, pass quietly. Claude is asked to act too, at most once per
+turn, and a session is never blocked.
 
 ```bash
 claude plugin marketplace add i-ops-hq/assurance
