@@ -25,6 +25,7 @@ from assurance_budget.config import (
 from assurance_budget.events import LogError
 from assurance_budget.inventory import inventory, inventory_lines
 from assurance_budget.notice import Notice, needs_earlier_lines, stop_notice
+from assurance_budget.outcome import outcome, outcome_lines
 from assurance_budget.sessions import (
     Declared,
     Session,
@@ -59,13 +60,15 @@ SAMPLE_SESSION = Path(__file__).resolve().parent / "data" / "sample-session.json
 def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     """Claude Code Stop hook. Reads the hook input, audits the transcript, and always exits 0.
 
-    Speaks only when something is at stake (`assurance_budget.notice`): code that no passing test or
-    check followed was pushed, merged, published, deployed or committed on main (check before
-    proceeding), or a test or check after the last code edit failed, or Claude's last message says
-    the tests pass when nothing verified the edit (review suggested). The line you see names the
-    level first; with `nudge` Claude is also asked to act (`additionalContext`), never twice in one
-    turn (`stop_hook_active`). A hook that cannot read its input says so and lets the session end;
-    an audit tool must never be the reason a session breaks.
+    Speaks only when something is at stake (`assurance_budget.notice`). Check before proceeding: code
+    was pushed, merged, published, deployed or committed on main while no passing test or check
+    followed it, or while a command the project says must pass, or one the last prompt names, had not
+    passed after it. Review suggested: a test or check after the last code edit failed, a path under
+    `must_not_touch` or the project's own settings file changed without the last prompt naming it, or
+    Claude's last message says the tests pass when nothing verified the edit. The line you see names
+    the level first; with `nudge` Claude is also asked to act (`additionalContext`), never twice in
+    one turn (`stop_hook_active`). A hook that cannot read its input says so and lets the session
+    end; an audit tool must never be the reason a session breaks.
     """
     try:
         data = json.loads(stdin_text) if stdin_text.strip() else {}
@@ -77,10 +80,10 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     try:
         transcript = Path(data["transcript_path"]).expanduser()
         session, whole = read_claude_code_tail(transcript, HOOK_WINDOW)
-        declared, declared_note = _hook_declared(session, _limits_file_changed(transcript, session, whole))
-        if not whole and needs_earlier_lines(session, declared):
+        declared, declared_note, set_aside = _hook_declared(session, _limits_file_changed(transcript, session, whole))
+        if not whole and needs_earlier_lines(session, declared, set_aside=set_aside):
             session, whole = read_claude_code(transcript), True
-        notice = stop_notice(session, declared)
+        notice = stop_notice(session, declared, set_aside=set_aside)
     except LogError as exc:
         _hook_print({"systemMessage": f"assurance: could not read this session ({exc}); nothing audited."})
         return EXIT_OK
@@ -90,6 +93,8 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
 
     if notice is None:
         return EXIT_OK
+    if "[audit]" in notice.finding:
+        declared_note = ""  # the finding says it already
     out: dict[str, Any] = {"systemMessage": _notice_line(notice, declared_note)}
     if nudge and not data.get("stop_hook_active"):
         finding = notice.finding.replace("Claude's last message says", "Your last message says")
@@ -140,8 +145,9 @@ def _limits_file_changed(transcript: Path, session: Session, whole: bool) -> boo
     return transcript_changed_limits_file(transcript, session.cwd)
 
 
-def _hook_declared(session: Session, limits_changed: bool) -> tuple[Declared | None, str]:
-    """Declared tests and checks for the hook, and a sentence when some could not be used.
+def _hook_declared(session: Session, limits_changed: bool) -> tuple[Declared | None, str, bool]:
+    """What is declared under `[audit]` for the hook, a sentence when some of it could not be used,
+    and whether that is because this session changed the project's file.
 
     A config file that cannot be read must not break the session, so it becomes a sentence.
     """
@@ -150,8 +156,8 @@ def _hook_declared(session: Session, limits_changed: bool) -> tuple[Declared | N
             _project_dir(session), trust_project=not limits_changed
         )
     except ConfigError as exc:
-        return None, _end_sentence(f"Declared tests and checks were not used: {exc}")
-    return declared, " ".join(notes)
+        return None, _end_sentence(f"What is declared under [audit] was not used: {exc}"), False
+    return declared, " ".join(notes), bool(notes)
 
 
 def _project_dir(session: Session) -> Path:
@@ -223,7 +229,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Run as a Claude Code Stop hook: read the hook's JSON on stdin and tell you when something "
             "is at stake: untested code pushed, merged, published or committed on main, a failed test "
-            "or check, or a claim that the tests pass with nothing behind it. Never fails the session"
+            "or check, a change to a path your settings protect, or a claim that the tests pass with "
+            "nothing behind it. Never fails the session"
         ),
     )
     parser.add_argument(
@@ -435,11 +442,18 @@ def build_report(
         "ceilings_source": None if caps is None or caps.source == "built-in defaults" else caps.source,
         "changed_limits_file": limits_changed,
         "declared": (
-            {"tests": list(declared.tests), "checks": list(declared.checks), "from": list(declared_from)}
-            if declared is not None and (declared.tests or declared.checks)
+            {
+                "tests": list(declared.tests),
+                "checks": list(declared.checks),
+                "must_run": list(declared.must_run),
+                "must_not_touch": list(declared.must_not_touch),
+                "from": list(declared_from),
+            }
+            if declared is not None and (declared.tests or declared.checks or declared.must_run or declared.must_not_touch)
             else None
         ),
         "declared_notes": list(declared_notes),
+        "outcome": outcome(session, declared),
         "inventory": inventory(session),
     }
     if limits:
@@ -505,6 +519,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     after = report.get("after_last_edit")
     if after is not None:
         body.append(_after_last_edit_line(after))
+    body.extend(outcome_lines(report.get("outcome") or {}))
 
     if refused:
         they = "it" if len(refused) == 1 else "they"
@@ -540,7 +555,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         body.append("This session changed .assurance/config.toml — the limits file for this project.")
 
     declared = report.get("declared")
-    if declared:
+    if declared and (declared["tests"] or declared["checks"]):
         commands = [*declared["tests"], *declared["checks"]]
         shown = ", ".join(commands[:3]) + (f", {len(commands) - 3} more" if len(commands) > 3 else "")
         body.append(_end_sentence(f"Counted as tests and checks because {' and '.join(declared['from'])} declares them: {shown}"))

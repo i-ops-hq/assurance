@@ -24,6 +24,10 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 
   Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
   After the last edit (14:09): no test or check it recognises; 2 unclassified commands ran after it (make lint-fix, python script)
+  Against the last prompt (14:00, "The invoice totals are off by a cent for EUR. Fix it in inv…"):
+    invoice.py: changed at 14:04 (src/billing/invoice.py).
+    pytest -q tests/test_invoice.py: did not run after the last edit to src/billing/rates.py (14:09); it last failed at 14:08, before that.
+    Only what the last prompt names is checked here; whether the work does what it asks is not.
   Not classified: 2 shell commands (make lint-fix, python script), so whether they read, wrote or tested anything is unknown.
   Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
   Not read: 0 lines.
@@ -33,9 +37,11 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 session by its id, opening that session's transcript and no other (the Claude Code plugin's
 `/assurance:audit` passes its own). As a Claude Code **Stop hook**, it runs after
 every turn and speaks when something is at stake: untested code pushed, merged, published, deployed or
-committed on main (*check before proceeding*), or a failed test or check after the last code edit, or
-Claude saying the tests pass with nothing behind it (*review suggested*). `--nudge` also asks Claude to
-act (once per turn, and it never fails the session).
+committed on main, or shipped while a command the project says must pass or a test the last prompt
+names had not passed after the edit (*check before proceeding*); a failed test or check after the last
+code edit, a change to a path the project protects, or Claude saying the tests pass with nothing
+behind it (*review suggested*). `--nudge` also asks Claude to act (once per turn, and it never fails
+the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
@@ -92,6 +98,28 @@ assert spend.tool_calls <= 20
 - Which configured limits the log never exercised (silence, not a pass)
 - What the session touched next to what it had: MCP servers used and loaded but never used, skills
   listed and used, agents, hooks with their runs and failures, and commands typed
+- The outcome against what was asked: what happened to the files, tests and commands the last prompt
+  names, and to the project's `must_run` commands and `must_not_touch` paths, each with what it could
+  not check
+
+### The outcome
+
+`assurance audit --json` carries it as `outcome`, shape `assurance.outcome/1`. Each check is a typed
+decision: a question, an answer from a fixed set, the evidence, and why when the answer is `unknown`.
+Whether the work does what the prompt asks is not one of them; `not_checked` says so.
+
+| key | what |
+|---|---|
+| `prompt` | the person's last prompt: `at`, an `excerpt`, and how many `images` came with it; `null` when there is none |
+| `checks` | each check: `from` (`prompt`, `must_run`, `must_not_touch`), `kind`, `subject`, `question`, `answer`, `evidence`, `unknown_because`; a prompt's command says whether it was `asked` for, and a rule says where it was `declared_in` |
+| `not_checked` | what it could not look at: a prompt that names nothing, an image, a file outside the project, and whether the work does what was asked |
+
+| kind | answers |
+|---|---|
+| `file` | `changed`, `read`, `not opened`, `unknown` |
+| `command` | `passed`, `failed`, `unknown`, `not run`, `no code edited` |
+| `test` | `passed`, `failed`, `unknown`, `not run` |
+| `paths` | `untouched`, `changed`, `unknown` |
 
 ### The inventory
 

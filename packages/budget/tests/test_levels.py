@@ -145,6 +145,14 @@ def test_a_check_that_failed_after_a_passing_test_still_stops_a_push(tmp_path: P
     assert "while the last check after the last edit to app.py (" in message and "had failed: mypy src" in message
 
 
+def test_a_push_after_a_failed_check_still_names_what_it_could_not_classify(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Dropped once, found replaying real sessions: the command it could not classify may be the
+    # project's own check, and a failed mypy does not change that.
+    steps = [("prompt", "ship it"), _edit(tmp_path), _bash("mypy src", failed=True, output="error: 1"), _bash("python scripts/verify.py"), PUSH]
+    message = _said(_transcript(tmp_path, steps), capsys)
+    assert "had failed: mypy src. 1 command after the last code edit could not be classified (python script)" in message
+
+
 @pytest.mark.parametrize("branch, said", [("main", "committed on main"), ("master", "committed on master"), ("feature", None)])
 def test_committing_on_main_counts_and_on_a_branch_does_not(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], branch: str, said: str | None

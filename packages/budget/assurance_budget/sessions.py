@@ -160,7 +160,8 @@ BashKind = Literal["test", "check", "read", "write", "unclassified", "neutral"]
 
 @dataclass(frozen=True)
 class Declared:
-    """The commands a project, or the person running the audit, says are its tests and checks.
+    """The commands a project, or the person running the audit, says are its tests and checks, and
+    the rules its sessions are held to.
 
     A project's own check script (`python scripts/check.py`, `make verify`) is nothing this reader can
     recognise, so undeclared it is reported as unclassified and "no test or check ran" cannot be said.
@@ -168,13 +169,20 @@ class Declared:
     command gets: `python scripts/check.py` matches `.venv/bin/python scripts/check.py --fast >
     out.txt`. A declaration only adds to what is recognised as a test or check; it never turns a
     command into a read or a write.
+
+    `must_run` names commands that must pass after the last code edit: each is a check unless it is
+    already recognised as a test. `must_not_touch` names paths inside the project a session must not
+    change. `origins` says which file declared each of those, as (entry, file) pairs.
     """
 
     tests: tuple[str, ...] = ()
     checks: tuple[str, ...] = ()
+    must_run: tuple[str, ...] = ()
+    must_not_touch: tuple[str, ...] = ()
+    origins: tuple[tuple[str, str], ...] = ()
 
     def kind(self, argv: Sequence[str]) -> BashKind | None:
-        """`test` or `check` when `argv` begins with a declared command, else None."""
+        """`test` or `check` when `argv` begins with a declared test or check, else None."""
         head = tuple(argv)
         for command in self.tests:
             want = declared_argv(command)
@@ -185,6 +193,19 @@ class Declared:
             if want and head[: len(want)] == want:
                 return "check"
         return None
+
+    def required(self, argv: Sequence[str]) -> str | None:
+        """The `must_run` command `argv` begins with, else None."""
+        head = tuple(argv)
+        for command in self.must_run:
+            want = declared_argv(command)
+            if want and head[: len(want)] == want:
+                return command
+        return None
+
+    def origin(self, entry: str) -> str:
+        """The file that declared a `must_run` or `must_not_touch` entry."""
+        return next((source for declared, source in self.origins if declared == entry), "")
 
 
 @functools.lru_cache(maxsize=256)
@@ -399,6 +420,57 @@ class Setup:
 
 
 @dataclass(frozen=True)
+class Prompt:
+    """What the person typed to start a turn: its line (as `ToolCall.seq` counts lines), when, the text,
+    and how many images came with it."""
+
+    seq: int
+    at: float | None
+    text: str
+    images: int = 0
+
+
+#: How a user record opens when Claude Code wrote it rather than the person: a slash command and its
+#: output, a background task's notice, a `!` shell command, an interruption.
+_NOT_TYPED = (
+    "<command-name>",
+    "<command-message>",
+    "<command-args>",
+    "<local-command-",
+    "<task-notification>",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "[Request interrupted",
+)
+
+
+def _typed_prompt(record: Mapping[str, Any], content: Any, seq: int, at: float | None) -> Prompt | None:
+    """The record as a `Prompt` when the person typed it; None for everything Claude Code wrote in the
+    person's place: meta records, a compaction's summary, a background task's notice, a message from
+    another session (`origin.kind` other than `human`), a slash command and its output."""
+    if record.get("isMeta") or record.get("isCompactSummary") or record.get("isVisibleInTranscriptOnly"):
+        return None
+    origin = record.get("origin")
+    if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
+        return None
+    images = 0
+    if isinstance(content, str):
+        text = content
+    else:
+        parts: list[str] = []
+        for block in content if isinstance(content, list) else ():
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+            elif isinstance(block, dict) and block.get("type") == "image":
+                images += 1
+        text = "\n".join(parts)
+    if text.lstrip().startswith(_NOT_TYPED) or not (text.strip() or images):
+        return None
+    return Prompt(seq, at, text, images)
+
+
+@dataclass(frozen=True)
 class Session:
     """A Claude Code session transcript, reduced to what an audit can say about it."""
 
@@ -430,6 +502,9 @@ class Session:
     """Claude's last message that was text only, and its line."""
     setup: Setup = field(default_factory=Setup)
     """What the session had around it: see `Setup`."""
+    last_prompt: Prompt | None = None
+    """The last prompt the person typed, as opposed to the other lines that start a turn (a slash
+    command, a background task's notice): what the outcome is checked against."""
 
 
 #: `attachment` records that give the model a file's contents, so Claude Code counts it as read.
@@ -571,6 +646,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     prompts: list[int] = []
     notices: list[int] = []
     last_text: tuple[int, str] = (-1, "")
+    last_prompt: Prompt | None = None
     setup = _SetupReader()
 
     def _mark(reason: str) -> None:
@@ -686,6 +762,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 user_turns += 1
                 if not record.get("isMeta"):
                     prompts.append(lines)
+                last_prompt = _typed_prompt(record, content, lines, at) or last_prompt
                 setup.read_prompt(content)
                 continue
             if not isinstance(content, list):
@@ -713,6 +790,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
             user_turns += 1
             if not record.get("isMeta"):
                 prompts.append(lines)
+            last_prompt = _typed_prompt(record, content, lines, at) or last_prompt
             continue
 
         if isinstance(kind, str) and kind:
@@ -782,6 +860,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
         notices=tuple(notices),
         last_text=last_text,
         setup=setup.done(),
+        last_prompt=last_prompt,
     )
 
 
@@ -917,21 +996,23 @@ def changed_limits_file(session: Session) -> bool:
     Write/Edit/MultiEdit/NotebookEdit use their path; Bash needs the limits path as the target of
     a write in a segment (`>`, `>>`, `tee`, `sed -i`, `cp`/`mv`/`install`, curl/wget `-o`).
     """
-    for call in session.tool_calls:
-        if call.name in _CHANGE_TOOLS:
-            if call.error:
-                continue
-            path = _call_path(call)
-            if path is not None and _is_session_limits_file(path, session.cwd):
-                return True
-        if call.name in _SHELL_TOOLS:
-            command = shell_command(call)
-            if command is None or call.refused:
-                continue
-            # A write target is compared as written, never expanded, so a command that writes the
-            # limits file names it; the shell parser is only needed for the ones that do.
-            if "config.toml" in command and _bash_writes_session_limits(command, session.cwd):
-                return True
+    return any(changes_limits_file(call, session.cwd) for call in session.tool_calls)
+
+
+def changes_limits_file(call: ToolCall, cwd: str) -> bool:
+    """Whether one call wrote or edited the project's `.assurance/config.toml`: see `changed_limits_file`."""
+    if call.name in _CHANGE_TOOLS:
+        if call.error:
+            return False
+        path = _call_path(call)
+        return path is not None and _is_session_limits_file(path, cwd)
+    if call.name in _SHELL_TOOLS:
+        command = shell_command(call)
+        if command is None or call.refused:
+            return False
+        # A write target is compared as written, never expanded, so a command that writes the
+        # limits file names it; the shell parser is only needed for the ones that do.
+        return "config.toml" in command and _bash_writes_session_limits(command, cwd)
     return False
 
 
@@ -2184,6 +2265,8 @@ def _classify_segment(tokens: list[str], declared: Declared | None = None) -> Ba
         if own is not None:
             return own
     kind = _classify_argv(argv, tokens)
+    if declared is not None and kind not in ("test", "check") and declared.required(argv) is not None:
+        return "check"  # a command that must pass verifies something, whatever it is otherwise
     # `cat a > b` read `a` and wrote `b`. Output to /dev/null or a stream writes nothing.
     if kind in ("read", "neutral") and _redirects_output_to_a_file(tokens):
         return "write"
