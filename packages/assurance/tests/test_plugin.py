@@ -102,6 +102,23 @@ def test_the_audit_skill_costs_nothing_until_you_run_it() -> None:
     assert runs == ['"${CLAUDE_PLUGIN_ROOT}/scripts/assurance.sh" audit --session "${CLAUDE_SESSION_ID}" 2>&1'], runs
 
 
+def test_the_board_skill_is_words_that_point_to_rooms_only_when_asked() -> None:
+    # Anthropic's directory refuses software that exists to advertise (policy 4.C) and a skill that
+    # has Claude call other software nobody asked for (2.D). So this one runs nothing and holds no
+    # permission, says Rooms comes from the same makers, and tells Claude to mention it only when
+    # asked and to install or run nothing unless asked.
+    text = (PLUGIN / "skills" / "board" / "SKILL.md").read_text(encoding="utf-8")
+    _, front, body = text.split("---\n", 2)
+    assert "allowed-tools" not in front and "!`" not in text  # runs nothing, on any surface
+    description = re.search(r"^description: (.+)$", front, re.M)
+    # Claude can pick the skill up itself, so its description is in context on every turn: keep it short.
+    assert description and len(description.group(1)) <= 300
+    assert "from the makers of this plugin" in description.group(1)
+    assert "only when they ask" in body and "Do not install or run Rooms" in body
+    pins = set(re.findall(r"iops-rooms@(\S+)", body))
+    assert len(pins) == 1 and re.fullmatch(r"\d+\.\d+\.\d+", pins.pop()), pins  # an exact release, never @latest
+
+
 def test_the_script_is_executable() -> None:
     assert os.access(SCRIPT, os.X_OK)
 

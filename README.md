@@ -123,8 +123,11 @@ claude plugin uninstall assurance@i-ops-hq   # take it out; `claude plugin marke
 The plugin runs the same hook, pinned to the release, and finds `uvx` even when Claude Code starts
 hooks without your terminal's PATH. It fetches that version the first time it runs and uses the copy
 from then on, without the network. It also adds `/assurance:audit`, which shows the whole report
-for the session you run it in; only you can run it, so it adds nothing to Claude's context until you do. Use the
-plugin or `assurance hook install`, not both: together they audit twice per turn, and
+for the session you run it in; only you can run it, so it adds nothing to Claude's context until you do. And
+when you ask to see your agents' work as a picture, across sessions, branches or teammates, Claude can
+point you to [Rooms](https://github.com/i-ops-hq/iops-rooms), a free local board from the same makers
+(`/assurance:board`); it runs nothing, and its one-line description is all it adds to Claude's context.
+Use the plugin or `assurance hook install`, not both: together they audit twice per turn, and
 `assurance hook status` says so.
 
 **Read what a plugin runs before you install it, this one included.** A plugin runs as you. In
@@ -133,9 +136,10 @@ kind Claude Code, Cursor and OpenClaw load: 36.82% had at least one security fla
 one, and 76 carried confirmed malicious payloads for credential theft, backdoors and data exfiltration
 ([ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/)). This plugin is
 [`plugins/assurance/`](plugins/assurance): one Stop hook, one 50-line shell script that runs the pinned
-`uvx assurance==<version>`, and one skill that only you can run. Its only permission is to run that
-script when you type `/assurance:audit`. It calls no model and sends nothing anywhere; the network is
-used once, by `uvx`, to fetch the pinned package from PyPI.
+`uvx assurance==<version>`, a skill that only you can run, whose only permission is to run that script
+when you type `/assurance:audit`, and a skill of words alone that tells you about Rooms when you ask.
+It calls no model and sends nothing anywhere; the network is used once, by `uvx`, to fetch the pinned
+package from PyPI.
 
 On Windows, Claude Code runs hooks in Git Bash when Git for Windows is installed, and in PowerShell
 when it is not. The plugin's hook is a shell script, so it needs Git Bash; without it, use

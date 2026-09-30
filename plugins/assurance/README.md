@@ -17,12 +17,16 @@ claude plugin uninstall assurance@i-ops-hq                # take it out
 ```
 
 `/assurance:audit` shows the whole report for the session you run it in, including what happened to
-the files, tests and commands your last prompt names.
+the files, tests and commands your last prompt names. When you ask to see your agents' work as a
+picture, across sessions, branches or teammates, Claude can point you to
+[Rooms](https://github.com/i-ops-hq/iops-rooms), a free local board from the same makers
+(`/assurance:board`). It runs nothing, and installs nothing unless you ask.
 
 What it runs, all of it: [`hooks/hooks.json`](hooks/hooks.json) (one Stop hook),
 [`scripts/assurance.sh`](scripts/assurance.sh) (50 lines, which find `uvx` and run the pinned
-`assurance`), and [`skills/audit/SKILL.md`](skills/audit/SKILL.md) (run only when you type it; its one
-permission is to run that script). Read them before you install it, as you should any plugin.
+`assurance`), [`skills/audit/SKILL.md`](skills/audit/SKILL.md) (run only when you type it; its one
+permission is to run that script), and [`skills/board/SKILL.md`](skills/board/SKILL.md) (words only,
+no permissions). Read them before you install it, as you should any plugin.
 
 It runs `uvx assurance==<version>` (or an `assurance` installed with pip), so it needs
 [uv](https://docs.astral.sh/uv/) or `pip install assurance`. It fetches the pinned version the first
