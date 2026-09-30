@@ -59,3 +59,26 @@ def test_every_readme_showing_the_sample_audit_shows_what_the_tool_prints(
         block = re.search(r"\n(Claude Code session demo-8f2.*?)\n```", readme.read_text(encoding="utf-8"), re.S)
         assert block, f"{readme} no longer shows the sample audit"
         assert block.group(1).strip().splitlines() == printed, readme
+
+
+RUN_RECORD = ROOT / "examples" / "run-record" / "refund-run.jsonl"
+
+
+@pytest.mark.skipif(not RUN_RECORD.is_file(), reason="not running from a source checkout")
+def test_the_readme_run_record_block_is_what_the_tool_prints(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The same rule for the run record an agent's own code writes: pinned to UTC, run, compared.
+    # Regenerate it with:  TZ=UTC assurance audit examples/run-record/refund-run.jsonl
+    monkeypatch.setenv("TZ", "UTC")
+    if hasattr(time, "tzset"):
+        time.tzset()
+    else:
+        pytest.skip("cannot pin the timezone on this platform")
+    assert main([str(RUN_RECORD)]) == 0
+    printed = capsys.readouterr().out.strip().splitlines()
+    block = re.search(
+        r"\$ assurance audit examples/run-record/refund-run\.jsonl\n(.*?)\n```", README.read_text(encoding="utf-8"), re.S
+    )
+    assert block, "the README no longer shows the sample run record"
+    assert block.group(1).strip().splitlines() == printed

@@ -19,7 +19,7 @@ from assurance_core.run_budget import (
     Stalled,
 )
 
-from assurance_budget.events import UNATTRIBUTED, UNCLASSIFIED, Event, by_run
+from assurance_budget.events import NOTED, UNATTRIBUTED, UNCLASSIFIED, Event, by_run
 
 
 @dataclass(frozen=True)
@@ -175,6 +175,8 @@ def audit(events: list[Event], budget: Budget | None = None) -> Audit:
 
         unclassified = 0
         for event in run_events:
+            if event.kind == NOTED:
+                continue  # a run record's task, decision, outcome or claim: part of the run, a charge of nothing
             if event.kind == UNCLASSIFIED:
                 # Charged to nothing and shown to nobody as a stall: a line that is not an event
                 # cannot be a round of anything. Counted, so the report can say how much was unread.

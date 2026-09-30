@@ -101,6 +101,9 @@ assert spend.tool_calls <= 20
 - The outcome against what was asked: what happened to the files, tests and commands the last prompt
   names, and to the project's `must_run` commands and `must_not_touch` paths, each with what it could
   not check
+- The same for an agent you wrote, or code that calls a model, from a run record its code writes
+  (`assurance.run/1`, in the root README): its task, model calls, tools, edits, commands, the checks it
+  made, its last word, and each gate's decision held against what the step then did
 
 ### The outcome
 
@@ -113,6 +116,11 @@ Whether the work does what the prompt asks is not one of them; `not_checked` say
 | `prompt` | the person's last prompt: `at`, an `excerpt`, and how many `images` came with it; `null` when there is none |
 | `checks` | each check: `from` (`prompt`, `must_run`, `must_not_touch`), `kind`, `subject`, `question`, `answer`, `evidence`, `unknown_because`; a prompt's command says whether it was `asked` for, and a rule says where it was `declared_in` |
 | `not_checked` | what it could not look at: a prompt that names nothing, an image, a file outside the project, and whether the work does what was asked |
+
+A run record adds `run` (its id, the other runs in the file, the task's rules and expected outputs,
+and its last word with what goes against it), `model_calls`, `decisions` (shape
+`assurance.decisions/1`: each gate's verdict, and `held`, `failed`, `not checked`, `did not run`, `ran
+anyway` or `ran before it`), and `not_recorded`, what the record left out that a check needed.
 
 | kind | answers |
 |---|---|

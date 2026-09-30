@@ -363,6 +363,9 @@ class ToolCall:
     """The git branch the transcript records for the message that made the call (`gitBranch`)."""
     seq: int = -1
     """The line of the transcript that made the call, counted from the first line read."""
+    exit_known: bool | None = None
+    """Whether `error` is the command's exit status. None leaves it to the tool: Bash's is, the
+    PowerShell tool's is not known to be. A run record says so itself, per command."""
 
 
 _RESULT_TAIL_CHARS = 4000
@@ -2180,8 +2183,11 @@ def exit_status_is_reported(call: ToolCall) -> bool:
 
     True for Bash. How the PowerShell tool reports a native program's exit status has not been
     checked against a real transcript, so a test or check run there is judged only by what the
-    runner printed, and is otherwise unknown. Not knowing is said; a guess is not made.
+    runner printed, and is otherwise unknown. Not knowing is said; a guess is not made. A command in
+    a run record says whether its exit code was written down (`ToolCall.exit_known`).
     """
+    if call.exit_known is not None:
+        return call.exit_known
     return call.name == "Bash"
 
 
