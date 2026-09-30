@@ -1,3 +1,11 @@
+# 0.1.15
+
+- **Requires `assurance-budget` 0.2.11:** the report checks the outcome against the last prompt (what
+  happened to the files, tests and commands it names) and against two new settings under `[audit]`:
+  `must_run`, commands that must pass after the last code edit, and `must_not_touch`, paths a session
+  must not change. The Stop hook weighs each turn against both at its two levels. The plugin's listing
+  and privacy policy say so, and the README's hook command and the plugin are pinned to this version.
+
 # 0.1.14
 
 - **Requires `assurance-budget` 0.2.10:** the report ends with what the session touched next to what

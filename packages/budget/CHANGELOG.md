@@ -1,3 +1,29 @@
+# 0.2.11
+
+- **The outcome, checked against what was asked.** `assurance audit` reads the person's last prompt
+  for the files, test names and test or check commands it names, and says what happened to each: a
+  file changed, read or not opened after the prompt; a test or command passed, failed or did not run
+  after the last edit. It reads only what a prompt marks plainly (a path or file name, a `test_…` name
+  or pytest id, a command in backticks or a shell block), and every time it says what it could not
+  check: an image, a file outside the project, a prompt that names nothing, and whether the work does
+  what was asked. `--json` carries it as `outcome`, shape `assurance.outcome/1`, documented under "The
+  outcome".
+- **`must_run` and `must_not_touch` under `[audit]`.** `must_run` names commands that must pass after
+  the last code edit; each counts as a check, and the report says whether it passed. `must_not_touch`
+  names paths a session must not change, read as `.gitignore` reads them. A session that changes the
+  file does not get to use what it declares, as before, and the hook now says so in the turn it
+  happens.
+- **The Stop hook weighs the turn against both, at the levels it already had.** *Check before
+  proceeding*: a push, merge, publish or commit on main while a `must_run` command, or a test or check
+  the last prompt names, had not passed after the edit. *Review suggested*: a `must_run` command
+  failed after the edit, or the turn changed a `must_not_touch` path or `.assurance/config.toml`
+  without the last prompt naming it. A command the prompt says not to run, or that sits in pasted
+  text, is not held against the turn. Replayed turn by turn over 775 turn ends of 15 real sessions,
+  it says what 0.2.10 said at 764 and speaks at 11 more, each a commit or push after the person's
+  prompt named a test that had not run since.
+- **The bundled sample's prompt names the file and the test it asks for**, so `assurance audit --demo`
+  shows the check: the test it named last failed before the last edit and did not run after it.
+
 # 0.2.10
 
 - **What the session touched, next to what it had.** `assurance audit` ends with the MCP servers it
