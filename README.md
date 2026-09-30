@@ -46,8 +46,8 @@ Open a new terminal afterwards so `uvx` is on your `PATH`. Or skip uv entirely a
 </details>
 
 Here is the real output on [a sample session](examples/audit/sample-session.jsonl) in this repo. The
-agent was asked to fix a rounding bug *"and make sure the tests pass"*, and ended with
-*"All done — the totals are correct now."*
+agent was asked to fix a rounding bug in `invoice.py` *"and make sure `pytest -q tests/test_invoice.py`
+passes"*, and ended with *"All done — the totals are correct now."*
 
 ```
 $ assurance audit examples/audit/sample-session.jsonl
@@ -56,6 +56,10 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 
   Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
   After the last edit (14:09): no test or check it recognises; 2 unclassified commands ran after it (make lint-fix, python script)
+  Against the last prompt (14:00, "The invoice totals are off by a cent for EUR. Fix it in inv…"):
+    invoice.py: changed at 14:04 (src/billing/invoice.py).
+    pytest -q tests/test_invoice.py: did not run after the last edit to src/billing/rates.py (14:09); it last failed at 14:08, before that.
+    Only what the last prompt names is checked here; whether the work does what it asks is not.
   Not classified: 2 shell commands (make lint-fix, python script), so whether they read, wrote or tested anything is unknown.
   Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
   Not read: 0 lines.
@@ -66,6 +70,8 @@ What "All done" left out:
 - ❌ The tests failed **three times in a row**, the same way each time.
 - ❔ **No test it recognises** ran after the last edit. Two commands did, and it **can't vouch for
   them either way**, so it names them. Silence is not a pass.
+- ❔ The test the prompt asked for **last ran before the last edit, and failed**. The file it named was
+  changed. Whether the fix is right is not something it claims to know, and it says so.
 
 ## Run it after every session
 
@@ -74,9 +80,11 @@ something is at stake, and names which first:
 
 - **check before proceeding**: the turn pushed, merged, published, deployed, ran a migration or
   committed on main, while code edited before it (with Edit or Write, or with `sed -i`, `>`,
-  `git apply` and the like) had no test or check after it that visibly passed.
-- **review suggested**: the last test or check after the last code edit failed, or Claude's last
-  message says the tests pass when nothing verified the edit.
+  `git apply` and the like) had no test or check after it that visibly passed, or while a command
+  your project says must pass, or a test your last prompt names, had not passed after it.
+- **review suggested**: the last test or check after the last code edit failed, a path your project
+  protects was changed without your last prompt naming it, or Claude's last message says the tests
+  pass when nothing verified the edit.
 
 Otherwise it stays quiet: editing is what Claude does, and edits to prose and assets (`.md`, images,
 `LICENSE`, …) need no test. It says each finding once, and with `--nudge` it asks Claude to act on it
@@ -143,14 +151,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.14 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.15 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.14 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.15 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
@@ -247,7 +255,16 @@ pip install assurance-mcp
 > [!IMPORTANT]
 > `--root` is the only folder the tools may read. You set it in your config; the model can't widen it.
 
-## Your project's own tests and checks
+## Checked against what you asked
+
+The report reads your last prompt for the files, tests and commands it names, and says what happened
+to each: a file was changed, read or not opened; a test or a command in backticks passed, failed or
+did not run after the last edit. It reads only what a prompt marks plainly: a path or file name, a
+`test_…` name, a test or check command in backticks or a shell block. Every time, it says what it
+could not check: an image, a file outside the project, a prompt that names nothing, and whether the
+work does what you asked, which is yours to judge. `--json` carries it as `outcome`.
+
+## Your project's own tests, checks and rules
 
 The audit knows pytest, `npm test`, `cargo test`, mypy, ruff, eslint, tsc and the like. A project's own
 script is nothing it can recognise, so it says it couldn't classify it rather than guess. Declare it,
@@ -258,13 +275,23 @@ and it counts:
 [audit]
 tests = ["./scripts/test.sh"]
 checks = ["python scripts/check.py", "make lint"]
+must_run = ["make lint"]                     # must pass after the last code edit
+must_not_touch = ["migrations/", "*.lock"]   # a session must not change these
 ```
 
 A declared command counts however it is run: `.venv/bin/python scripts/check.py --fast > out.txt`
 matches `python scripts/check.py`. Its result follows the same rule as a test's, so a check piped into
-`tail` is still unknown. A session that changes this file does not get to use what it declares, and
-the report says so: an agent that could declare a do-nothing command a check could pass its own audit.
-The same table in `~/.config/assurance/config.toml` applies to every project on your machine.
+`tail` is still unknown.
+
+`must_run` commands count as checks, and the report says for each whether it passed after the last
+code edit. `must_not_touch` takes paths as `.gitignore` does: `migrations/` anywhere, `src/gen/` from
+the project folder, `*.lock` at any depth. The hook tells you when a turn changes one, unless your last
+prompt names it.
+
+A session that changes this file does not get to use what it declares, and the report and the hook
+say so: an agent that could declare a do-nothing command a check, or take a path off
+`must_not_touch`, could pass its own audit. The same table in `~/.config/assurance/config.toml`
+applies to every project on your machine.
 
 ## Limits the agent can't raise
 

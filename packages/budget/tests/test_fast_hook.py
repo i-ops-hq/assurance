@@ -151,7 +151,7 @@ def test_a_limits_file_written_early_in_a_long_session_still_counts(tmp_path: Pa
     write = ("Write", {"file_path": str(tmp_path / ".assurance" / "config.toml"), "content": body}, False, "ok")
     path = _transcript(tmp_path, [write] + _padding(10) + [_edit(tmp_path), ("Bash", {"command": "python -c 'print(1)'"}, False, "1"), PUSH])
     out = _hook(path)
-    assert "This session changed .assurance/config.toml, so the tests and checks it declares were not used." in out
+    assert "whose [audit] declarations are not used for this session" in out
 
 
 @pytest.mark.parametrize("write, counts", [

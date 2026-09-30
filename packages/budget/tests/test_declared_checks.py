@@ -179,7 +179,9 @@ def test_a_session_cannot_declare_its_own_check_and_pass_it(tmp_path: Path, caps
     assert out is not None
     message = str(out["systemMessage"])
     assert "with no passing test or check it recognises after the edits to app.py and .assurance/config.toml" in message
-    assert "This session changed .assurance/config.toml, so the tests and checks it declares were not used." in message
+    # The finding says the file's declarations were set aside, so the note that says it too is left out.
+    assert "and after changing .assurance/config.toml, whose [audit] declarations are not used for this session." in message
+    assert "This session changed .assurance/config.toml, so what it declares" not in message
 
 
 def test_the_hint_to_declare_a_check_is_told_to_you_and_not_to_claude(
@@ -197,7 +199,7 @@ def test_a_config_file_it_cannot_read_does_not_break_the_session(tmp_path: Path,
     _project(tmp_path, "[audit\nchecks = [")
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("git push")])
     out = _hook(path, capsys)
-    assert out is not None and "Declared tests and checks were not used" in str(out["systemMessage"])
+    assert out is not None and "What is declared under [audit] was not used" in str(out["systemMessage"])
 
 
 # --- the report -----------------------------------------------------------------------------------
@@ -215,7 +217,9 @@ def test_the_report_names_what_was_declared_and_labels_the_checks(
     assert "Every shell command was classified." in out
     assert main([str(path), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["declared"] == {"tests": [], "checks": ["python scripts/check.py"], "from": [".assurance/config.toml"]}
+    assert report["declared"] == {
+        "tests": [], "checks": ["python scripts/check.py"], "must_run": [], "must_not_touch": [], "from": [".assurance/config.toml"],
+    }
     assert report["after_last_edit"]["checks_failed"] == 1
     assert report["unclassified_commands"] == 0
 

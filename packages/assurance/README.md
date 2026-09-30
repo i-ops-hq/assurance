@@ -11,8 +11,8 @@ No `uvx`? Install [uv](https://github.com/astral-sh/uv) (`brew install uv`, or
 `curl -LsSf https://astral.sh/uv/install.sh | sh`, or `pipx install uv`), or use
 `pip install assurance` and run `assurance audit`.
 
-Real output on the bundled sample. The agent was asked to fix a rounding bug "and make sure the tests
-pass", and ended with *"All done — the totals are correct now."*
+Real output on the bundled sample. The agent was asked to fix a rounding bug in `invoice.py` "and make
+sure `pytest -q tests/test_invoice.py` passes", and ended with *"All done — the totals are correct now."*
 
 ```
 Claude Code session demo-8f2 — 13 min in /home/you/my-app
@@ -20,6 +20,10 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 
   Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
   After the last edit (14:09): no test or check it recognises; 2 unclassified commands ran after it (make lint-fix, python script)
+  Against the last prompt (14:00, "The invoice totals are off by a cent for EUR. Fix it in inv…"):
+    invoice.py: changed at 14:04 (src/billing/invoice.py).
+    pytest -q tests/test_invoice.py: did not run after the last edit to src/billing/rates.py (14:09); it last failed at 14:08, before that.
+    Only what the last prompt names is checked here; whether the work does what it asks is not.
   Not classified: 2 shell commands (make lint-fix, python script), so whether they read, wrote or tested anything is unknown.
   Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
   Not read: 0 lines.
@@ -45,10 +49,10 @@ claude plugin install assurance@i-ops-hq
 Or add it to `~/.claude/settings.json` yourself:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.14 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.15 audit --hook --nudge" } ] } ] } }
 ```
 
-Run `uvx assurance@0.1.14 --version` once first: `--offline` runs the copy uv already has, so the hook
+Run `uvx assurance@0.1.15 --version` once first: `--offline` runs the copy uv already has, so the hook
 never waits on PyPI.
 
 ## Every command

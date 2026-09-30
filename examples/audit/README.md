@@ -1,8 +1,8 @@
 # Sample session for `assurance audit`
 
 `sample-session.jsonl` is a short, made-up Claude Code session in the real transcript format: the
-agent is asked to fix an invoice-rounding bug "and make sure the tests pass", and ends by saying
-"All done". Run the audit on it to see what that claim leaves out:
+agent is asked to fix an invoice-rounding bug in `invoice.py` "and make sure `pytest -q
+tests/test_invoice.py` passes", and ends by saying "All done". Run the audit on it to see what that claim leaves out:
 
 ```bash
 uvx assurance audit examples/audit/sample-session.jsonl

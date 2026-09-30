@@ -25,11 +25,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import PurePosixPath, PureWindowsPath
 
+from assurance_budget.asked import NamedCommand, includes, names_cover, names_in, pattern_covers
 from assurance_budget.sessions import (
     _CHANGE_TOOLS,
     _GIT_GLOBAL_FLAGS,
     _GIT_GLOBAL_WITH_VALUE,
     _SHELL_TOOLS,
+    _WINDOWS_PATH,
     Declared,
     Session,
     ToolCall,
@@ -43,6 +45,7 @@ from assurance_budget.sessions import (
     _unclassified_counts,
     bash_edit_targets,
     bash_label,
+    changes_limits_file,
     classify_bash,
     display_path,
     exit_status_is_reported,
@@ -79,6 +82,9 @@ _AUTHORED_REWRITES = frozenset({"patch", "git apply", "git am", "git stash", "gi
 #: What a shell-made edit is called in a sentence, since the command does not name one file.
 SHELL_EDIT = "files changed by a shell command"
 
+#: The project's own settings file, as a path relative to the project.
+LIMITS_FILE = ".assurance/config.toml"
+
 
 @dataclass(frozen=True)
 class Notice:
@@ -113,24 +119,87 @@ class _Run:
     noun: str
     label: str
     outcome: str
+    command: str = ""
+    at: float | None = None
+    tail: str = ""
+    """The end of what it printed, where a runner says which tests passed."""
 
 
-def stop_notice(session: Session, declared: Declared | None = None) -> Notice | None:
-    """What the Stop hook should say after the session's latest turn; None when nothing is at stake."""
+@dataclass(frozen=True)
+class _Finding:
+    """One thing the hook could say: the line of the newest record it rests on, the words, the ask,
+    and the commands after the last code edit it could not classify, when those bear on it."""
+
+    evidence: int
+    text: str
+    ask: str
+    unclassified: dict[str, int] = field(default_factory=dict)
+
+
+_ASK_VERIFY = (
+    "Before you go further, run the project's tests or checks for what you changed, without "
+    "piping the test command into another (or with `set -o pipefail`) so its result is "
+    "visible, or say plainly why they cannot be run here."
+)
+_ASK_FIX = "Fix what failed and run it again, or say plainly why it cannot pass here."
+_ASK_CONFIG = f"Say what you changed in {LIMITS_FILE} and why."
+
+
+class _Asked:
+    """The person's last prompt, read only when a finding needs it."""
+
+    def __init__(self, session: Session, declared: Declared) -> None:
+        self.prompt = session.last_prompt
+        self._cwd = session.cwd
+        self._declared = declared
+        self._commands: tuple[NamedCommand, ...] | None = None
+        self._covers: dict[str, bool] = {}
+
+    def commands(self) -> tuple[NamedCommand, ...]:
+        """The tests and checks it names in the person's own words, and does not say to skip."""
+        if self._commands is None:
+            found = names_in(self.prompt.text, self._cwd, self._declared).commands if self.prompt else ()
+            self._commands = tuple(named for named in found if named.asked)
+        return self._commands
+
+    def covers(self, path: str) -> bool:
+        """Whether it names `path`, or a folder holding it, in the person's own words."""
+        if path not in self._covers:
+            named = (
+                names_in(self.prompt.text, self._cwd, self._declared, frozenset({path})).asked_files
+                if self.prompt
+                else ()
+            )
+            self._covers[path] = any(names_cover(name, path) for name in named)
+        return self._covers[path]
+
+
+def stop_notice(session: Session, declared: Declared | None = None, *, set_aside: bool = False) -> Notice | None:
+    """What the Stop hook should say after the session's latest turn; None when nothing is at stake.
+
+    `set_aside` says the project's `.assurance/config.toml` declares something under `[audit]` that
+    is not being used, because this session changed the file: the turn that changed it is told so.
+    """
     boundary = max(session.prompts[-1:] + session.notices[-1:], default=-1)
     told = session.notices[-1] if session.notices else -1
     calls = session.tool_calls
+    rules = declared if declared is not None else Declared()
+    asked = _Asked(session, rules)
     pending = _Edits()  # code edited since the last passing test or check
-    last_edit: tuple[str, float | None, int] | None = None
+    last_edit: tuple[str, float | None, int, int] | None = None  # label, time, index, line
     runs: list[_Run] = []  # tests and checks after the last code edit
-    shipped: tuple[ToolCall, str, str, dict[str, int]] | None = None
+    protected: list[tuple[int, str]] = []  # (line, path): changed since the last prompt, protected, not asked for
+    since_prompt = asked.prompt.seq if asked.prompt is not None else -1
+    shipped: tuple[ToolCall, str, list[_Finding], list[tuple[int, str]], dict[str, int]] | None = None
     for i, call in enumerate(calls):
         if call.refused:
             continue
+        if not call.error and call.seq > since_prompt:  # before it, the turn that did it was told, or asked
+            protected.extend((call.seq, path) for path in _protected_changes(call, session.cwd, rules, set_aside, asked))
         edited = None if call.error else _code_edit(call, session.cwd)
         if edited is not None:
             pending.add(edited, call.at, i, call.seq)
-            last_edit = (edited, call.at, i)
+            last_edit = (edited, call.at, i, call.seq)
             runs.clear()
             continue
         command = shell_command(call) if call.name in _SHELL_TOOLS else None
@@ -144,50 +213,137 @@ def stop_notice(session: Session, declared: Declared | None = None) -> Notice | 
                 pending.paths.clear()
             continue
         what = None if call.error else ship_action(command, call.branch)
-        if not what or call.seq <= boundary or last_edit is None:
+        if not what or call.seq <= boundary:
             continue
-        failing = _failing(runs)
-        newest = max(failing.seq if failing else -1, pending.last_seq if pending.paths else -1)
-        if newest <= told:
-            continue  # the last notice already covered what this would say
-        between = dict(_unclassified_counts(calls[last_edit[2] + 1 : i], declared))
-        if failing is not None:
-            why = f"while the last {failing.noun} after {_edit(last_edit)} had failed: {failing.label}"
-        elif pending.paths and runs and runs[-1].outcome == "unknown":
-            why = (
-                f"while {runs[-1].label}, the last {runs[-1].noun} after {_edit(last_edit)}, was piped "
-                "or followed by another command, so whether it passed is unknown"
-            )
-        elif pending.paths:
-            recognised = " it recognises" if between else ""
-            why = f"with no passing test or check{recognised} after {_edits(tuple(pending.paths), pending.last_at)}"
-        else:
-            continue
-        shipped = (call, what, why, between)
+        reasons: list[_Finding] = []
+        between: dict[str, int] = {}
+        if last_edit is not None:
+            between = dict(_unclassified_counts(calls[last_edit[2] + 1 : i], declared))
+            reasons = _ship_reasons(pending, last_edit, runs, rules, asked, between)
+        fresh = [reason for reason in reasons if reason.evidence > told][:1]
+        news = [(seq, path) for seq, path in protected if seq > told]
+        if fresh or news:  # the last notice already covered anything else this would say
+            shipped = (call, what, fresh, news, between)
 
     if shipped is not None:
-        call, what, why, between = shipped
-        return Notice(
-            CHECK_BEFORE_PROCEEDING,
-            f"{what}{_at(call.at)} {why}",
-            "Before you go further, run the project's tests or checks for what you changed, without "
-            "piping the test command into another (or with `set -o pipefail`) so its result is "
-            "visible, or say plainly why they cannot be run here.",
-            between,
-        )
-    if last_edit is None:
+        call, what, fresh, news, between = shipped
+        parts = [reason.text for reason in fresh]
+        asks = [reason.ask for reason in fresh]
+        if news:
+            parts.append(f"after changing {_protected_phrase(news, rules, session.cwd)}")
+            asks.append(_protected_ask(news))
+        # What ran after the last code edit that could not be classified bears on any of these: one of
+        # those commands may have been the project's own check.
+        return Notice(CHECK_BEFORE_PROCEEDING, f"{what}{_at(call.at)} {', and '.join(parts)}", " ".join(asks), between if fresh else {})
+
+    findings: list[_Finding] = []
+    now = [(seq, path) for seq, path in protected if seq > boundary]
+    paths = [(seq, path) for seq, path in now if path != LIMITS_FILE]
+    if paths:
+        findings.append(_Finding(paths[-1][0], f"this turn changed {_protected_phrase(paths, rules, session.cwd)}", _protected_ask(paths)))
+    if len(paths) < len(now):
+        findings.append(_Finding(
+            now[-1][0],
+            f"this turn changed {LIMITS_FILE}, so what it declares under [audit] is not used for this session",
+            _ASK_CONFIG,
+        ))
+    if last_edit is not None:
+        failed = [run for run in _failures(runs, rules) if run.seq > boundary]
+        findings.extend(_Finding(run.seq, _failure_phrase(run, last_edit, rules), _ASK_FIX) for run in failed)
+        if not failed:
+            claim = _claim(session, boundary, pending, runs, last_edit, declared)
+            if claim is not None:
+                findings.append(claim)
+    if not findings:
         return None
+    unclassified: dict[str, int] = {}
+    for finding in findings:
+        unclassified.update(finding.unclassified)
+    return Notice(
+        REVIEW_SUGGESTED,
+        "; ".join(finding.text for finding in findings),
+        " ".join(dict.fromkeys(finding.ask for finding in findings)),
+        unclassified,
+    )
+
+
+def _ship_reasons(
+    pending: _Edits,
+    last_edit: tuple[str, float | None, int, int],
+    runs: list[_Run],
+    rules: Declared,
+    asked: _Asked,
+    between: dict[str, int],
+) -> list[_Finding]:
+    """Why a push, merge, publish or commit on main is at stake, most pressing first: a required
+    command that failed, a failed test or check, code no passing one followed, a required command
+    that did not run, and a test or check the last prompt names that did not pass after the edit."""
+    edit = _edit(last_edit)
+    required = _required_runs(runs, rules)
+    reasons: list[_Finding] = []
+    for entry, run in required:
+        if run is not None and run.outcome == "failed":
+            reasons.append(_Finding(run.seq, f"while {_must_pass(entry, rules)}, had failed after {edit}", _ask_required(entry, rules)))
     failing = _failing(runs)
-    if failing is not None and failing.seq > boundary:
-        return Notice(
-            REVIEW_SUGGESTED,
-            f"the last {failing.noun} after {_edit(last_edit)} failed: {failing.label}",
-            "Fix what failed and run it again, or say plainly why it cannot pass here.",
-        )
+    if failing is not None:
+        reasons.append(_Finding(failing.seq, f"while the last {failing.noun} after {edit} had failed: {failing.label}", _ASK_VERIFY))
+    if pending.paths and runs and runs[-1].outcome == "unknown":
+        reasons.append(_Finding(
+            pending.last_seq,
+            f"while {runs[-1].label}, the last {runs[-1].noun} after {edit}, was piped "
+            "or followed by another command, so whether it passed is unknown",
+            _ASK_VERIFY,
+        ))
+    elif pending.paths:
+        recognised = " it recognises" if between else ""
+        why = f"with no passing test or check{recognised} after {_edits(tuple(pending.paths), pending.last_at)}"
+        reasons.append(_Finding(pending.last_seq, why, _ASK_VERIFY, between))
+    for entry, run in required:
+        if run is None:
+            reasons.append(_Finding(last_edit[3], f"while {_must_pass(entry, rules)}, did not run after {edit}", _ask_required(entry, rules)))
+        elif run.outcome == "unknown":
+            reasons.append(_Finding(
+                run.seq,
+                f"while {_must_pass(entry, rules)}, was piped or followed by another command after {edit}, "
+                "so whether it passed is unknown",
+                _ask_required(entry, rules),
+            ))
+    prompt = asked.prompt
+    for named in asked.commands():
+        later = prompt is not None and prompt.seq > last_edit[3]
+        since = prompt.seq if later and prompt is not None else last_edit[3]
+        where = f"the prompt{_paren(_clock(prompt.at))}" if later and prompt is not None else edit
+        run = next((r for r in reversed(runs) if r.seq > since and includes(r.command, named.argv)), None)
+        if run is None:
+            text, evidence = f"while {named.label}, named in the last prompt, did not run after {where}", since
+        elif run.outcome == "failed":
+            text, evidence = f"while {named.label}, named in the last prompt, had failed after {where}", run.seq
+        elif run.outcome == "unknown":
+            text = (
+                f"while {named.label}, named in the last prompt, was piped or followed by another command "
+                f"after {where}, so whether it passed is unknown"
+            )
+            evidence = run.seq
+        else:
+            continue
+        reasons.append(_Finding(evidence, text, _ask_named(named.label)))
+    return reasons
+
+
+def _claim(
+    session: Session,
+    boundary: int,
+    pending: _Edits,
+    runs: list[_Run],
+    last_edit: tuple[str, float | None, int, int],
+    declared: Declared | None,
+) -> _Finding | None:
+    """Claude's last message says the tests pass, when nothing verified the last code edit."""
     text_seq, text = session.last_text
+    failing = _failing(runs)
     if text_seq <= boundary or not claims_tests_pass(text) or not (failing or pending.paths):
         return None
-    after = dict(_unclassified_counts(calls[last_edit[2] + 1 :], declared))
+    after = dict(_unclassified_counts(session.tool_calls[last_edit[2] + 1 :], declared))
     ask = "Run the tests for what you changed, so that what you said rests on a result that can be seen, or correct it."
     if failing is not None:
         why = f"the last {failing.noun} after {_edit(last_edit)} failed: {failing.label}"
@@ -204,7 +360,7 @@ def stop_notice(session: Session, declared: Declared | None = None) -> Notice | 
     else:
         recognised = " it recognises" if after else ""
         why = f"no test or check{recognised} ran after {_edits(tuple(pending.paths), pending.last_at)}"
-    return Notice(REVIEW_SUGGESTED, f"Claude's last message says the tests pass, but {why}", ask, after)
+    return _Finding(text_seq, f"Claude's last message says the tests pass, but {why}", ask, after)
 
 
 def _failing(runs: list[_Run]) -> _Run | None:
@@ -217,35 +373,163 @@ def _failing(runs: list[_Run]) -> _Run | None:
     return None
 
 
-def needs_earlier_lines(session: Session, declared: Declared | None = None) -> bool:
+def _failures(runs: list[_Run], rules: Declared) -> list[_Run]:
+    """What failed after the last code edit and was not put right: `_failing`'s run, and each
+    required command whose last run failed, in the order they ran."""
+    found = {run.seq: run for run in [_failing(runs)] if run is not None}
+    for _, run in _required_runs(runs, rules):
+        if run is not None and run.outcome == "failed":
+            found[run.seq] = run
+    return [found[seq] for seq in sorted(found)]
+
+
+def _failure_phrase(run: _Run, last_edit: tuple[str, float | None, int, int], rules: Declared) -> str:
+    entry = next((entry for entry in rules.must_run if _runs_required(run.command, entry, rules)), None)
+    if entry is not None:
+        return f"{_must_pass(entry, rules)}, failed after {_edit(last_edit)}"
+    return f"the last {run.noun} after {_edit(last_edit)} failed: {run.label}"
+
+
+def _required_runs(runs: list[_Run], rules: Declared) -> list[tuple[str, _Run | None]]:
+    """Each `must_run` command with its last run after the last code edit, or None."""
+    return [
+        (entry, next((run for run in reversed(runs) if _runs_required(run.command, entry, rules)), None))
+        for entry in rules.must_run
+    ]
+
+
+def _runs_required(command: str, entry: str, rules: Declared) -> bool:
+    try:
+        segments = split_shell_segments(strip_heredoc_bodies(command))
+    except ValueError:
+        return False
+    for tokens in segments:
+        argv = _normalise_argv(_drop_redirections(tokens))
+        if argv and rules.required(argv) == entry:
+            return True
+    return False
+
+
+def _must_pass(entry: str, rules: Declared) -> str:
+    return f"{entry}, which {rules.origin(entry) or 'your settings'} says must pass after an edit"
+
+
+def _ask_required(entry: str, rules: Declared) -> str:
+    return (
+        f"Before you go further, run {entry}, which {rules.origin(entry) or 'your settings'} says must "
+        "pass after an edit, so its result can be seen, or say plainly why it cannot be run here."
+    )
+
+
+def _ask_named(label: str) -> str:
+    return (
+        f"Before you go further, run {label}, which the last prompt names, so its result can be seen, "
+        "or say plainly why it cannot be run here."
+    )
+
+
+def _protected_changes(call: ToolCall, cwd: str, rules: Declared, set_aside: bool, asked: _Asked) -> list[str]:
+    """What a call changed that a rule protects and the last prompt did not name: a path under
+    `must_not_touch`, and the project's own `.assurance/config.toml` when that set its rules aside."""
+    found: list[str] = []
+    if set_aside and changes_limits_file(call, cwd) and not asked.covers(LIMITS_FILE):
+        found.append(LIMITS_FILE)
+    if rules.must_not_touch:
+        windows = bool(_WINDOWS_PATH.match(cwd))
+        for path in changed_paths(call, cwd)[0]:
+            if path in found or not any(pattern_covers(pattern, path, windows) for pattern in rules.must_not_touch):
+                continue
+            if not asked.covers(path):
+                found.append(path)
+    return found
+
+
+def _touches_protected(call: ToolCall, cwd: str, rules: Declared) -> bool:
+    if not rules.must_not_touch:
+        return False
+    windows = bool(_WINDOWS_PATH.match(cwd))
+    return any(
+        pattern_covers(pattern, path, windows) for path in changed_paths(call, cwd)[0] for pattern in rules.must_not_touch
+    )
+
+
+def _protected_phrase(changes: list[tuple[int, str]], rules: Declared, cwd: str) -> str:
+    """`migrations/1.sql and migrations/2.sql, which .assurance/config.toml lists under must_not_touch`."""
+    windows = bool(_WINDOWS_PATH.match(cwd))
+    by_source: dict[str, list[str]] = {}
+    config = False
+    for _, path in changes:
+        if path == LIMITS_FILE:
+            config = True
+            continue
+        pattern = next((p for p in rules.must_not_touch if pattern_covers(p, path, windows)), "")
+        listed = by_source.setdefault(rules.origin(pattern) or "your settings", [])
+        if path not in listed:
+            listed.append(path)
+    parts = [f"{_listed(paths)}, which {source} lists under must_not_touch" for source, paths in by_source.items()]
+    if config:
+        parts.append(f"{LIMITS_FILE}, whose [audit] declarations are not used for this session")
+    return " and ".join(parts)
+
+
+def _protected_ask(changes: list[tuple[int, str]]) -> str:
+    paths = list(dict.fromkeys(path for _, path in changes if path != LIMITS_FILE))
+    asks = []
+    if paths:
+        asks.append(f"Say what you changed in {_listed(paths)} and why; if it was not needed for what was asked, put it back.")
+    if len(paths) < len(changes):
+        asks.append(_ASK_CONFIG)
+    return " ".join(asks)
+
+
+def _listed(items: list[str]) -> str:
+    if len(items) == 1:
+        return items[0]
+    if len(items) <= 3:
+        return ", ".join(items[:-1]) + f" and {items[-1]}"
+    return ", ".join(items[:3]) + f" and {len(items) - 3} more"
+
+
+def needs_earlier_lines(session: Session, declared: Declared | None = None, *, set_aside: bool = False) -> bool:
     """Whether a session read from the end of its transcript is too short to decide the notice.
 
-    Two things can lie before the window. The start of this turn, when the window holds no prompt
-    and no earlier notice: something this turn did may be before it. And the last code edit, when
-    the window holds something at stake but no code edit: whether that edit was ever verified, and
-    which it was, is only in the lines before.
+    Three things can lie before the window. The start of this turn, when the window holds no prompt
+    and no earlier notice: something this turn did may be before it. The last code edit, when the
+    window holds something at stake but no code edit: whether that edit was ever verified, and which
+    it was, is only in the lines before. And the person's last prompt, when a push or a change to a
+    protected path is in the window and the prompt is not: what it names decides what is said.
     """
     if not session.prompts and not session.notices:
         return True
     boundary = max(session.prompts[-1:] + session.notices[-1:])
-    at_stake = False
+    rules = declared if declared is not None else Declared()
+    edited = at_stake = uses_prompt = False
     for call in session.tool_calls:
         if call.refused:
             continue
-        if not call.error and _code_edit(call, session.cwd) is not None:
-            return False
-        if call.seq <= boundary or at_stake:
+        if not edited and not call.error and _code_edit(call, session.cwd) is not None:
+            if session.last_prompt is not None:
+                return False  # the last code edit, the turn and the prompt are all in the window
+            edited = True
+        if call.seq <= boundary:
             continue
+        if not call.error and (
+            (set_aside and changes_limits_file(call, session.cwd)) or _touches_protected(call, session.cwd, rules)
+        ):
+            at_stake = uses_prompt = True
         command = shell_command(call) if call.name in _SHELL_TOOLS else None
-        if command is None:
+        if command is None or at_stake:
             continue
         run = _verification(call, command, declared, session.cwd)
         if run is not None:
             at_stake = run.outcome == "failed"
         elif not call.error and ship_action(command, call.branch):
-            at_stake = True
+            at_stake = uses_prompt = True
     text_seq, text = session.last_text
-    return at_stake or (text_seq > boundary and claims_tests_pass(text))
+    at_stake = at_stake or (text_seq > boundary and claims_tests_pass(text))
+    if uses_prompt and session.last_prompt is None:
+        return True
+    return at_stake and not edited
 
 
 def _code_edit(call: ToolCall, cwd: str) -> str | None:
@@ -286,11 +570,36 @@ def _verification(call: ToolCall, command: str, declared: Declared | None, cwd: 
     exit_known = exit_status_is_reported(call)
     if kind == "test":
         outcome = outcome_of_test_run(command, call.error, call.result_tail, declared, exit_known)
-        return _Run(call.seq, "test run", _project_label(command, "test", declared, cwd), outcome)
+        return _Run(call.seq, "test run", _project_label(command, "test", declared, cwd), outcome, command, call.at, call.result_tail)
     if kind == "check":
         outcome = outcome_of_check_run(command, call.error, call.result_tail, declared, exit_known)
-        return _Run(call.seq, "check", _project_label(command, "check", declared, cwd), outcome)
+        return _Run(call.seq, "check", _project_label(command, "check", declared, cwd), outcome, command, call.at, call.result_tail)
     return None
+
+
+def changed_paths(call: ToolCall, cwd: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The files inside the project a call changed, prose or code, relative to it; and the commands in
+    it that changed files without naming them (`git apply`, `git pull`)."""
+    if call.error or call.refused:
+        return (), ()
+    if call.name in _CHANGE_TOOLS:
+        path = _call_path(call)
+        if path is None or not _path_inside_cwd(path, cwd):
+            return (), ()
+        return (display_path(path, cwd),), ()
+    if call.name in _SHELL_TOOLS:
+        command = shell_command(call)
+        targets = bash_edit_targets(command, cwd) if command is not None else None
+        if not targets or command is None:
+            return (), ()
+        named = tuple(dict.fromkeys(display_path(target, cwd) for target in targets if target))
+        return named, tree_rewrites(command, cwd) if "" in targets else ()
+    return (), ()
+
+
+def authored(words: tuple[str, ...]) -> tuple[str, ...]:
+    """The rewrites among `words` that put the session's own changes in the tree (`git apply`)."""
+    return tuple(word for word in words if word in _AUTHORED_REWRITES)
 
 
 def _project_label(command: str, kind: str, declared: Declared | None, cwd: str) -> str:
@@ -362,7 +671,7 @@ def _cd_leaves_project(tokens: list[str], cwd: str) -> bool:
     return not _path_inside_cwd(dest, cwd)
 
 
-def _edit(last: tuple[str, float | None, int]) -> str:
+def _edit(last: tuple[str, float | None, int, int]) -> str:
     """`the last edit to app.py (13:58)`."""
     return f"the last edit to {last[0]}{_paren(_clock(last[1]))}"
 
