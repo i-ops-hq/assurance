@@ -1,3 +1,10 @@
+# 0.1.18
+
+- **Requires `assurance-budget` 0.2.13:** `assurance audit` reads a run record any agent's own code can
+  write (`assurance.run/1`), not only Claude Code sessions, and holds each gate's decision against what
+  the step then did. `--fail-on-outcome` makes the audit a gate on what was declared. The README's
+  hook command and the plugin are pinned to this version.
+
 # 0.1.17
 
 - **The plugin can point you to Rooms.** When you ask to see your agents' work as a picture, across
