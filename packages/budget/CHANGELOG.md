@@ -1,3 +1,17 @@
+# 0.2.12
+
+- **Settings are read on Python 3.10.** `.assurance/config.toml` and `~/.config/assurance/config.toml`
+  were refused on 3.10, which has no `tomllib`, so wherever `uvx` ran 3.10 the Stop hook left
+  `must_run`, `must_not_touch` and declared checks unused. `assurance_budget.toml_subset` now reads
+  them there: tables, numbers, true and false, strings and arrays of them, which is what the file is
+  written in. Anything else is refused with the line named, and nothing is added to the package's
+  dependencies. Over 1,069 TOML files on one machine it read 65, each exactly as `tomllib` does, and
+  refused the other 1,004 (arrays of tables, inline tables) rather than guess.
+- **The Stop hook says once when it cannot read your settings.** It said so only alongside something
+  else at stake, so a settings file it could not read turned the rules off in silence. Now the next
+  turn says `assurance could not read your settings, so what they declare is not used: …`, to you
+  and not to Claude, once per session. It is not a finding, so what later turns do is still said.
+
 # 0.2.11
 
 - **The outcome, checked against what was asked.** `assurance audit` reads the person's last prompt

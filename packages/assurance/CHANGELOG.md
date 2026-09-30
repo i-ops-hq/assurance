@@ -1,3 +1,10 @@
+# 0.1.16
+
+- **Requires `assurance-budget` 0.2.12:** your settings (`must_run`, `must_not_touch`, declared tests
+  and checks) are read on Python 3.10 too, with no new dependency, and the Stop hook says once when it
+  cannot read them instead of going quiet. The README's hook command and the plugin are pinned to this
+  version.
+
 # 0.1.15
 
 - **Requires `assurance-budget` 0.2.11:** the report checks the outcome against the last prompt (what
