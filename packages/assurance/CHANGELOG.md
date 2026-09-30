@@ -1,3 +1,11 @@
+# 0.1.17
+
+- **The plugin can point you to Rooms.** When you ask to see your agents' work as a picture, across
+  sessions, branches or teammates, Claude can tell you about Rooms, a free local board from the same
+  makers, and how to open it (`/assurance:board`). It is words only: it runs nothing, holds no
+  permission, and says to install or change nothing unless you ask. The audit is 0.1.16's; the
+  README's hook command and the plugin are pinned to this version.
+
 # 0.1.16
 
 - **Requires `assurance-budget` 0.2.12:** your settings (`must_run`, `must_not_touch`, declared tests
