@@ -291,7 +291,9 @@ prompt names it.
 A session that changes this file does not get to use what it declares, and the report and the hook
 say so: an agent that could declare a do-nothing command a check, or take a path off
 `must_not_touch`, could pass its own audit. The same table in `~/.config/assurance/config.toml`
-applies to every project on your machine.
+applies to every project on your machine. On Python 3.10, which has no TOML reader of its own,
+assurance reads these files itself, with no extra dependency: tables, numbers, strings and lists of
+them, which is all they need. Anything else is refused with the line named.
 
 ## Limits the agent can't raise
 

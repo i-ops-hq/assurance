@@ -8,7 +8,6 @@ speak only at the two levels that already exist, so a routine turn stays quiet.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -230,7 +229,6 @@ def test_a_push_whose_prompt_lies_before_the_window_reads_the_rest(tmp_path: Pat
 
 # --- the settings file --------------------------------------------------------------------------------------
 
-pytestmark_toml = pytest.mark.skipif(sys.version_info < (3, 11), reason="config files need tomllib (3.11+)")
 
 
 @pytest.fixture
@@ -245,7 +243,6 @@ def _project(tmp_path: Path, body: str) -> Path:
     return path
 
 
-@pytestmark_toml
 def test_the_settings_file_declares_rules_with_where_they_came_from(tmp_path: Path, no_user_config: None) -> None:
     _project(tmp_path, '[audit]\nmust_run = ["make lint"]\nmust_not_touch = ["./migrations/", "db\\\\seeds"]\n')
     declared, sources, notes = load_declared(tmp_path)
@@ -254,7 +251,6 @@ def test_the_settings_file_declares_rules_with_where_they_came_from(tmp_path: Pa
     assert sources == [SRC] and notes == []
 
 
-@pytestmark_toml
 @pytest.mark.parametrize("body, says", [
     ('[audit]\nmust_not_touch = ["/etc/passwd"]\n', "is not a path inside the project"),
     ('[audit]\nmust_not_touch = ["../other/"]\n', "is not a path inside the project"),
@@ -269,7 +265,6 @@ def test_a_rule_that_cannot_mean_what_it_says_is_refused(tmp_path: Path, no_user
         load_declared(tmp_path)
 
 
-@pytestmark_toml
 def test_the_hook_holds_the_session_to_the_projects_rules(tmp_path: Path, no_user_config: None, capsys: pytest.CaptureFixture[str]) -> None:
     _project(tmp_path, '[audit]\nmust_not_touch = ["migrations/"]\n')
     path = _transcript(tmp_path, [("prompt", "fix the report"), _edit(tmp_path, "migrations/0042.sql")])
@@ -279,7 +274,6 @@ def test_the_hook_holds_the_session_to_the_projects_rules(tmp_path: Path, no_use
     assert "Say what you changed in migrations/0042.sql and why" in out["hookSpecificOutput"]["additionalContext"]
 
 
-@pytestmark_toml
 def test_a_session_that_rewrites_the_rules_is_told_and_not_held_to_them(tmp_path: Path, no_user_config: None, capsys: pytest.CaptureFixture[str]) -> None:
     # The agent takes migrations/ off the list, then changes it: the rule it removed is not the one
     # used, and the turn that changed the file says so.

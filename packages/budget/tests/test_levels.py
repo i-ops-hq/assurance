@@ -10,7 +10,6 @@ suggested". A finding is said once.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -255,7 +254,6 @@ def test_a_command_it_cannot_classify_is_named_to_you_and_not_to_claude(tmp_path
     assert "[audit]" not in context and "say which one and what it returned" in context
 
 
-@pytest.mark.skipif(sys.version_info < (3, 11), reason="config files need tomllib (3.11+)")
 def test_a_declared_check_that_passed_lets_a_push_through(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (tmp_path / ".assurance").mkdir()
     (tmp_path / ".assurance" / "config.toml").write_text('[audit]\nchecks = ["python scripts/check.py"]\n', encoding="utf-8")

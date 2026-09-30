@@ -20,12 +20,19 @@ from typing import Any, Mapping
 
 from assurance_core.run_budget import Ceilings, built_in_ceilings
 
+from assurance_budget import toml_subset
 from assurance_budget.sessions import Declared, declared_argv
 
 if sys.version_info >= (3, 11):
     import tomllib
-else:  # pragma: no cover — 3.10 has no tomllib; tests stub this to None on newer Pythons too
+else:  # pragma: no cover — 3.10 has no tomllib, so `toml_subset` reads the file; tests stub this too
     tomllib = None
+
+#: Said with anything the 3.10 reader refuses, so a file that 3.11 reads is not taken for a bad one.
+_SUBSET_NOTE = (
+    "Python 3.10 reads this file with assurance's own reader, which takes tables, numbers, true and "
+    "false, strings and arrays of them; Python 3.11 and later read any TOML."
+)
 
 _ENV_KEYS = {
     "ASSURANCE_MAX_ITERATIONS": "iterations",
@@ -54,8 +61,8 @@ def load_ceilings(cwd: Path, env: Mapping[str, str]) -> Ceilings:
     is ignored for that key and recorded on ``Ceilings.project_asked_more``.
 
     Unknown keys and non-positive or non-numeric values refuse with the file and key named — never
-    ignored. On Python 3.10, a present TOML file is refused (no `tomllib`); environment variables
-    still apply.
+    ignored. On Python 3.10, which has no `tomllib`, the file is read by `toml_subset`, and what that
+    cannot read is refused with the line named.
     """
     base = built_in_ceilings()
     values: dict[str, float] = {
@@ -205,17 +212,17 @@ def _user_config_path() -> Path:
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
-    if tomllib is None:
-        raise ConfigError(
-            f"{path}: Python 3.10 cannot read TOML config files (tomllib arrives in 3.11). "
-            "Use ASSURANCE_MAX_* environment variables, or Python 3.11+."
-        )
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ConfigError(f"{path}: cannot read ({exc})") from exc
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"{path}: not UTF-8 text ({exc.reason})") from exc
     try:
-        data = tomllib.loads(text)
+        data = tomllib.loads(text) if tomllib is not None else toml_subset.loads(text)
+    except toml_subset.TomlSubsetError as exc:
+        # The note is for TOML this reader leaves to 3.11, not for a file that is simply broken.
+        raise ConfigError(f"{path}: {exc}. {_SUBSET_NOTE}" if exc.refused else f"{path}: {exc}") from exc
     except Exception as exc:  # tomllib.TOMLDecodeError
         raise ConfigError(f"{path}: {exc}") from exc
     if not isinstance(data, dict):

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -31,8 +30,6 @@ def _write_project(project: Path, body: str) -> None:
 def test_project_cannot_raise_above_user(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    if sys.version_info < (3, 11):
-        pytest.skip("TOML config needs 3.11+")
     project = tmp_path / "proj"
     project.mkdir()
     _write_user(monkeypatch, tmp_path / "home", "[budget]\ntool_calls = 50\n")
@@ -60,8 +57,6 @@ def test_project_cannot_raise_above_user(
 
 
 def test_project_can_tighten_under_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    if sys.version_info < (3, 11):
-        pytest.skip("TOML config needs 3.11+")
     project = tmp_path / "proj"
     project.mkdir()
     _write_user(monkeypatch, tmp_path / "home", "[budget]\ntool_calls = 400\n")
@@ -73,8 +68,6 @@ def test_project_can_tighten_under_user(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_env_then_project_tighten_or_ignore(tmp_path: Path) -> None:
-    if sys.version_info < (3, 11):
-        pytest.skip("TOML config needs 3.11+")
     project = tmp_path / "proj"
     project.mkdir()
     _write_project(project, "[budget]\ntool_calls = 200\n")
@@ -92,8 +85,6 @@ def test_env_then_project_tighten_or_ignore(tmp_path: Path) -> None:
 def test_json_limits_names_source_per_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    if sys.version_info < (3, 11):
-        pytest.skip("TOML config needs 3.11+")
     project = tmp_path / "proj"
     project.mkdir()
     _write_user(monkeypatch, tmp_path / "home", "[budget]\nseconds = 900\n")
@@ -122,8 +113,6 @@ def test_json_limits_names_source_per_key(
 def test_precedence_user_env_then_project_tighten(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    if sys.version_info < (3, 11):
-        pytest.skip("TOML config needs 3.11+")
     project = tmp_path / "proj"
     project.mkdir()
     # Project alone cannot raise seconds above the built-in 600.
@@ -143,12 +132,6 @@ def test_bad_values_are_refused_with_file_and_key(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     (project / ".assurance").mkdir(parents=True)
     cfg = project / ".assurance" / "config.toml"
-
-    if sys.version_info < (3, 11):
-        cfg.write_text("[budget]\ntool_calls = 10\n", encoding="utf-8")
-        with pytest.raises(ConfigError, match="tomllib|3\\.11"):
-            load_ceilings(project, {})
-        return
 
     cfg.write_text("[budget]\ntool_calls = -1\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="tool_calls") as exc:
