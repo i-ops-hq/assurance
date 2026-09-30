@@ -80,7 +80,7 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     try:
         transcript = Path(data["transcript_path"]).expanduser()
         session, whole = read_claude_code_tail(transcript, HOOK_WINDOW)
-        declared, declared_note, set_aside = _hook_declared(session, _limits_file_changed(transcript, session, whole))
+        declared, declared_note, set_aside, unread = _hook_declared(session, _limits_file_changed(transcript, session, whole))
         if not whole and needs_earlier_lines(session, declared, set_aside=set_aside):
             session, whole = read_claude_code(transcript), True
         notice = stop_notice(session, declared, set_aside=set_aside)
@@ -92,6 +92,10 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         return EXIT_OK
 
     if notice is None:
+        if unread and not _told_unreadable(session):
+            # Said once, to you and not to Claude, and not as a finding: a settings file it cannot
+            # read is not something the turn did, and it must not quiet what later turns say.
+            _hook_print({"systemMessage": _end_sentence(f"{SETTINGS_UNREAD}, so what they declare is not used: {unread}")})
         return EXIT_OK
     if "[audit]" in notice.finding:
         declared_note = ""  # the finding says it already
@@ -145,9 +149,23 @@ def _limits_file_changed(transcript: Path, session: Session, whole: bool) -> boo
     return transcript_changed_limits_file(transcript, session.cwd)
 
 
-def _hook_declared(session: Session, limits_changed: bool) -> tuple[Declared | None, str, bool]:
-    """What is declared under `[audit]` for the hook, a sentence when some of it could not be used,
-    and whether that is because this session changed the project's file.
+#: How the hook opens when it cannot read the settings. Not `assurance:` or `assurance ·`, which mark a
+#: finding: what came before a finding counts as said, and a settings problem says nothing of the turn.
+SETTINGS_UNREAD = "assurance could not read your settings"
+
+
+def _told_unreadable(session: Session) -> bool:
+    """Whether the hook already said, in this session, that the settings could not be read."""
+    return any(
+        text.startswith(SETTINGS_UNREAD) or "What is declared under [audit] was not used:" in text
+        for text in session.said
+    )
+
+
+def _hook_declared(session: Session, limits_changed: bool) -> tuple[Declared | None, str, bool, str]:
+    """What is declared under `[audit]` for the hook; a sentence when some of it could not be used;
+    whether that is because this session changed the project's file; and, when a settings file could
+    not be read at all, why.
 
     A config file that cannot be read must not break the session, so it becomes a sentence.
     """
@@ -156,8 +174,8 @@ def _hook_declared(session: Session, limits_changed: bool) -> tuple[Declared | N
             _project_dir(session), trust_project=not limits_changed
         )
     except ConfigError as exc:
-        return None, _end_sentence(f"What is declared under [audit] was not used: {exc}"), False
-    return declared, " ".join(notes), bool(notes)
+        return None, _end_sentence(f"What is declared under [audit] was not used: {exc}"), False, str(exc)
+    return declared, " ".join(notes), bool(notes), ""
 
 
 def _project_dir(session: Session) -> Path:

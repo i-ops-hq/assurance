@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -14,7 +13,6 @@ from assurance_budget.config import ConfigError, load_declared
 from assurance_budget.session_cli import main, run_hook
 from assurance_budget.sessions import Declared, after_last_edit, classify_bash, read_claude_code
 
-pytestmark = pytest.mark.skipif(sys.version_info < (3, 11), reason="config files need tomllib (3.11+)")
 
 
 @pytest.fixture(autouse=True)

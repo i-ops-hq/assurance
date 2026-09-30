@@ -505,6 +505,8 @@ class Session:
     last_prompt: Prompt | None = None
     """The last prompt the person typed, as opposed to the other lines that start a turn (a slash
     command, a background task's notice): what the outcome is checked against."""
+    said: tuple[str, ...] = ()
+    """What this tool's Stop hook showed earlier in the session, word for word, in order."""
 
 
 #: `attachment` records that give the model a file's contents, so Claude Code counts it as read.
@@ -647,6 +649,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     notices: list[int] = []
     last_text: tuple[int, str] = (-1, "")
     last_prompt: Prompt | None = None
+    stop_messages: list[str] = []
     setup = _SetupReader()
 
     def _mark(reason: str) -> None:
@@ -693,6 +696,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 attached_reads.append((len(order), attached["filename"]))
             elif kind == "attachment" and isinstance(attached, dict) and _own_stop_notice(attached):
                 notices.append(lines)
+            if kind == "attachment" and isinstance(attached, dict) and _own_stop_message(attached):
+                stop_messages.append(str(attached["content"]))
             if kind == "attachment" and isinstance(attached, dict):
                 setup.read(attached)
             continue
@@ -861,6 +866,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
         last_text=last_text,
         setup=setup.done(),
         last_prompt=last_prompt,
+        said=tuple(stop_messages),
     )
 
 
@@ -984,6 +990,17 @@ def _own_stop_notice(attached: Mapping[str, Any]) -> bool:
         and attached.get("hookEvent") == "Stop"
         and isinstance(content, str)
         and content.startswith(("assurance:", "assurance ·"))
+    )
+
+
+def _own_stop_message(attached: Mapping[str, Any]) -> bool:
+    """Whether an attachment is anything this tool's Stop hook showed, a finding or not."""
+    content = attached.get("content")
+    return (
+        attached.get("type") == "hook_system_message"
+        and attached.get("hookEvent") == "Stop"
+        and isinstance(content, str)
+        and content.startswith("assurance")
     )
 
 
