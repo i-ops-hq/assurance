@@ -1,3 +1,34 @@
+# 0.2.14
+
+- **A recorder for an agent you wrote, or code that calls a model.** `from assurance_budget.record
+  import Recorder` writes the run record `assurance audit` reads, a line as each thing happens, so a
+  run that crashes leaves its record: the task, tool calls (`with rec.tool(...)`), edits, commands
+  (`rec.run` runs one and records its exit code and the end of what it printed), decisions, the run's
+  own checks, and its last word.
+- **`watch(client)` records each Anthropic or OpenAI SDK call:** `messages.create`, `.parse` and
+  `.stream` (the Tool Runner included), `chat.completions.create` and `.parse`, and `responses.create`
+  and `.parse`, under `beta` too, sync or async, with the model, the tokens, the time and how it
+  ended. It never records a prompt, a reply or an error's message; a failed call is kept as its
+  error's class, HTTP status and the API's error type. It hands back a copy of the client that shares
+  its connections, so the client passed in is untouched and runs sharing one client never count each
+  other's calls. Neither SDK is a dependency; a CI job tests against both, at pinned versions.
+- **Limits that hold, and only once someone sets one.** A recorder stops a run at the limits its code
+  asks for or its operator set (the user file, `ASSURANCE_MAX_*`, and a project file that can only
+  lower them). Code can lower the operator's ceiling and never raise it, and is warned when it asks for
+  more. With nothing set it records and never stops: the built-in limits `assurance budget` reports
+  against are not applied, so adding it changes nothing about how a run behaves. A limit of N lets N
+  run and the next step raises `RunStopped` before it starts, as does the step after the same tool
+  call or command fails the same way three times running; the record says why, and
+  `--fail-on-outcome` sees it. A step that keeps succeeding with the same answer, such as a status
+  poll, is not stopped.
+- A run record's `command` line can carry `error`, for a command that never started or did not finish,
+  and it is read as failed rather than as an unknown exit. A `model` line can carry `stream`.
+- **A loop is named by what was repeated.** A tool other than a shell command was named by a digest of
+  its input (`Looped: 3 rounds of search_docs 248233d5be09`); a short input is now shown whole
+  (`search_docs {"query": "rounding"}`), and a long one by its start and a digest of all of it, so two
+  calls that differ anywhere are still told apart. On nine real Claude Code sessions, up to 78 MB, the
+  audit prints what 0.2.13 printed, byte for byte.
+
 # 0.2.13
 
 - **The audit for an agent you wrote, or code that calls a model.** `assurance audit run.jsonl` reads a

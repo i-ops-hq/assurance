@@ -1,3 +1,10 @@
+# 0.1.19
+
+- **Requires `assurance-budget` 0.2.14:** a recorder for your own agent's code. It writes the run
+  record `assurance audit` reads, records each Anthropic and OpenAI SDK call without its words, and
+  stops a run only at limits someone set. The README's hook command and the plugin are pinned to this
+  version.
+
 # 0.1.18
 
 - **Requires `assurance-budget` 0.2.13:** `assurance audit` reads a run record any agent's own code can
