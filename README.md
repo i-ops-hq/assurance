@@ -155,14 +155,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.18 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.19 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.18 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.19 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
@@ -277,10 +277,10 @@ audit` reads that file the way it reads a Claude Code session:
 | `type` | one line per | fields |
 |---|---|---|
 | `task` | thing the run was asked to do | `text`, `cwd`, `must_run`, `must_not_touch`, `expect` (files it should write) |
-| `model` | call to a model | `provider`, `model`, `input_tokens`, `output_tokens`, `ms`, `error` |
+| `model` | call to a model | `provider`, `model`, `input_tokens`, `output_tokens`, `ms`, `stop`, `error`, `stream` |
 | `tool` | tool call | `id`, `name`, `output`, `error` |
 | `edit` | file it changed | `id`, `path` |
-| `command` | shell command it ran | `id`, `command`, `exit_code`, `output` |
+| `command` | shell command it ran | `id`, `command`, `exit_code`, `output`, `error` (it never started, or did not finish) |
 | `decision` | gate's verdict on a step, before it ran | `step`, `by`, `verdict`, `confidence` |
 | `outcome` | check your code made afterwards | `step`, `name`, `passed`, `detail` |
 | `claim` | the run's last word | `text` |
@@ -303,6 +303,31 @@ record(type="outcome", step="c2", name="refund total matches the ledger", passed
 ```
 
 In JavaScript it is `fs.appendFileSync("run.jsonl", JSON.stringify({ run, ts: Date.now() / 1000, ...line }) + "\n")`.
+
+Or let the recorder write it. It comes with `pip install assurance` and needs neither SDK:
+
+```python
+from assurance_budget.record import Recorder
+
+with Recorder("run.jsonl", limits={"frontier_calls": 50, "seconds": 900}) as rec:
+    rec.task("Fix the refund rounding", must_run=["ruff check ."], expect=["reports/refunds.csv"])
+    client = rec.watch(anthropic.Anthropic())  # or openai.OpenAI(): a copy whose calls are recorded
+    with rec.tool("search_docs", input={"query": "rounding"}) as call:
+        call.output = search_docs("rounding")
+    rec.edit("billing/refunds.py")
+    rec.run(["pytest", "-q"])  # runs it, and records its exit code and the end of what it printed
+    rec.outcome("refund total matches the ledger", passed=total == ledger)
+    rec.claim("Done")
+```
+
+`watch` gives back a copy of the client that shares its connections, so the one you passed is
+untouched and two runs never count each other's calls. Every `create`, `parse` and stream through the
+copy, sync or async, is recorded: the model, the tokens, the time and how it ended, never a prompt, a
+reply or an error's message. The recorder changes nothing about how your agent runs until a limit is
+set, by your code or in the [operator's settings](#limits-the-agent-cant-raise), which your code can
+lower and never raise. A limit of 50 lets 50 run, and the next step raises `RunStopped` before it
+starts; so does the step after the same tool call or command fails the same way three times running.
+The record says why, so `--fail-on-outcome` sees it.
 
 Here is what it prints for [a sample run record](examples/run-record/refund-run.jsonl): an agent asked
 to fix refund rounding, gated by a fast decision model and a policy, which ended by saying it was done.
@@ -386,7 +411,8 @@ Your user file and the `ASSURANCE_MAX_*` environment variables set the limits. A
 
 - **Guess.** If it can't establish a number, it says so instead of making one up.
 - **Call a model or the network.** Every result is arithmetic you can check yourself.
-- **Claim more than it saw.** `audit` reads Claude Code transcripts today. Other agents are next:
+- **Claim more than it saw.** `audit` reads Claude Code transcripts, and the run records your own
+  agent writes. Other agents' own logs are next:
   [tell us which one you use](https://github.com/i-ops-hq/assurance/issues/new?template=feature.yml).
 
 ## Tell us where it's wrong

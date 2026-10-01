@@ -381,6 +381,17 @@ _REFUSAL_OPENINGS = (
 )
 
 
+def input_label(data: Mapping[str, Any]) -> str:
+    """A tool call's input as a loop names it: whole when it is short, so a person can read what was
+    repeated, and otherwise its start and a digest of all of it, so two calls that differ anywhere are
+    still told apart."""
+    shown = json.dumps(data, sort_keys=True, default=str, ensure_ascii=False)
+    if len(shown) <= 60:
+        return shown
+    digest = hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return f"{shown[:40]}… #{digest[:12]}"
+
+
 def _refused(record: Mapping[str, Any], is_error: bool, text: str) -> bool:
     """Whether a tool result says the call was refused before it ran.
 

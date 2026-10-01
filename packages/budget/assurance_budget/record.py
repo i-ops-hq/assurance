@@ -6,10 +6,10 @@ nothing unless it is told to, and this is what to tell it to keep: `assurance.ru
 | `type` | one line per | fields |
 |---|---|---|
 | `task` | thing the run was asked to do | `text`, `cwd`, `must_run`, `must_not_touch`, `expect` |
-| `model` | call to a model | `provider`, `model`, `input_tokens`, `output_tokens`, `ms`, `stop`, `error` |
+| `model` | call to a model | `provider`, `model`, `input_tokens`, `output_tokens`, `ms`, `stop`, `error`, `stream` |
 | `tool` | tool call | `id`, `name`, `input`, `output`, `error` |
 | `edit` | file the run changed | `id`, `path` |
-| `command` | shell command it ran | `id`, `command`, `exit_code`, `output` |
+| `command` | shell command it ran | `id`, `command`, `exit_code`, `output`, `error` |
 | `decision` | gate's verdict on a step, before it ran | `step`, `by`, `verdict`, `confidence` |
 | `outcome` | check the run's own code made afterwards | `step`, `name`, `passed`, `detail` |
 | `claim` | the run's own last word | `text` |
@@ -18,7 +18,8 @@ Every line names its run (`run`, or `run_id`, `session`, `trace_id` and the rest
 reads) and may carry `ts`. Only `type` and the run are required, with what a line cannot mean without:
 a tool's `name`, an edit's `path`, a command's `command`, a decision's `step` and `verdict`, an
 outcome's `name` and `passed`. Text is never required: a record without the task's words or the run's
-last message is still read, and the report says which checks that left undone.
+last message is still read, and the report says which checks that left undone. A command's `error`
+says it failed with no exit code to show for it: it never started, or did not finish.
 
 A log `assurance budget` reads, with `kind` of tool, frontier, retry or iteration and no `type`, is
 read as well: a tool or retry line as a tool call, a frontier line as a model call. A line that is none
@@ -280,13 +281,15 @@ def _one_run(
                 continue
             code = record.get("exit_code")
             known = isinstance(code, int) and not isinstance(code, bool)
-            unknown_exits += 0 if known else 1
+            failure = text_of(record.get("error"))
+            unknown_exits += 0 if known or failure else 1
             output = text_of(record.get("output"))
+            said = failure or output
             calls.append(ToolCall(
-                id=step, name="Bash", input={"command": command}, at=at, error=known and code != 0,
-                result_digest=_digest(f"{code}\n{output}"), has_result=True,
-                result_first_line=output.splitlines()[0][:200] if output else "", result_tail=output[-_TAIL:],
-                seq=seq, exit_known=known,
+                id=step, name="Bash", input={"command": command}, at=at, error=bool(failure) or (known and code != 0),
+                result_digest=_digest(f"{code}\n{failure}\n{output}"), has_result=True,
+                result_first_line=said.splitlines()[0][:200] if said else "", result_tail=(output or failure)[-_TAIL:],
+                seq=seq, exit_known=known or bool(failure),
             ))
         elif kind == "model":
             models.append(ModelCall(
@@ -406,3 +409,12 @@ def model_lines(summary: dict[str, Any] | None) -> list[str]:
     if summary["failed"]:
         line += f"; {summary['failed']} failed"
     return [line + "."]
+
+
+# The writer, beside the format it writes: `from assurance_budget.record import Recorder`.
+from assurance_budget.recorder import Recorder, RunStopped  # noqa: E402
+
+__all__ = [
+    "RECORD_SCHEMA", "RECORD_TYPES", "RUN_KEYS", "Check", "Decision", "ModelCall", "Recorder", "RunRecord",
+    "RunStopped", "Task", "is_run_record", "model_lines", "model_summary", "read_run_record",
+]

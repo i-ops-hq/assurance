@@ -45,10 +45,10 @@ the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.18 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.19 audit --hook --nudge" } ] } ] } }
 ```
 
-By hand, run `uvx assurance@0.1.18 --version` once first: `--offline` runs the copy uv already has, so
+By hand, run `uvx assurance@0.1.19 --version` once first: `--offline` runs the copy uv already has, so
 the hook never waits on PyPI.
 
 **Run-log budget** (JSONL with a per-run id):
@@ -88,6 +88,31 @@ for step in range(100):
 assert spend.tool_calls <= 20
 ```
 
+Or let the recorder count, and keep the record as it goes. It stops a run only at a limit someone
+set: the code's `limits=`, or the operator's settings below, which the code can lower and never raise.
+`watch(client)` does the same for an Anthropic or OpenAI client, on a copy it hands back.
+
+```python
+import json, tempfile
+from pathlib import Path
+
+from assurance_budget.record import Recorder, RunStopped
+
+path = Path(tempfile.mkdtemp()) / "run.jsonl"
+with Recorder(path, limits={"tool_calls": 3}) as rec:
+    rec.task("Count the open invoices")
+    try:
+        for page in range(10):
+            with rec.tool("fetch", input={"page": page}) as call:
+                call.output = f"page {page}: 25 open"
+    except RunStopped as stop:
+        print(stop.reason)  # Stopped after 3 tool calls — this run's limit is 3. ...
+    rec.claim("75 open invoices")
+
+lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+assert [line["type"] for line in lines].count("tool") == 3
+```
+
 ## What it checks
 
 - Tool calls, failures, and loops in a Claude Code session (`assurance audit`)
@@ -104,6 +129,8 @@ assert spend.tool_calls <= 20
 - The same for an agent you wrote, or code that calls a model, from a run record its code writes
   (`assurance.run/1`, in the root README): its task, model calls, tools, edits, commands, the checks it
   made, its last word, and each gate's decision held against what the step then did
+- `Recorder` writes that record from the agent's own code, records each Anthropic or OpenAI SDK call,
+  and stops the run at the limits set for it (`assurance_budget.record`, below)
 
 ### The outcome
 
@@ -156,6 +183,10 @@ carried and never used helped or got in the way is not something a count can say
 ## Limits
 
 - **Operator ceilings.** Built-in defaults in `assurance-core`; raise via `~/.config/assurance/config.toml` or `ASSURANCE_MAX_*`. Project file `<cwd>/.assurance/config.toml` can only *lower*. A caller flag can tighten, never raise past the operator.
+- **The recorder stops a run only at a limit someone set**, in its `limits=` or the operator's settings;
+  with neither, it records and never stops. It counts tool calls, model calls and seconds, and a limit
+  of 20 lets 20 run. Settings it cannot read are not guessed at: the built-in defaults apply, and it
+  warns.
 - **It reads what the log records.** Unlogged spend is invisible.
 - **No dollar figure.** Frontier calls are the cost proxy.
 - **Stall detection needs three identical rounds** with flat progress.
