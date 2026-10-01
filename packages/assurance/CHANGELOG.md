@@ -1,3 +1,10 @@
+# 0.1.20
+
+- **Requires `assurance-budget` 0.2.15:** the Stop hook reads each command from where it ran, so a
+  commit, push, edit or test in another repository is no longer counted as this project's, and a commit
+  on another branch is no longer said to be on main. The README's hook command and the plugin are
+  pinned to this version.
+
 # 0.1.19
 
 - **Requires `assurance-budget` 0.2.14:** a recorder for your own agent's code. It writes the run
