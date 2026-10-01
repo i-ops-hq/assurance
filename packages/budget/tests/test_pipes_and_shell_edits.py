@@ -51,6 +51,12 @@ def test_a_test_result_is_only_trusted_when_its_exit_status_is_the_tests(
         ("sed -i '' 's/Hello/Hi/' app.py", True),
         ("sed -i 's/a/b/' src/app.py", True),
         ("perl -pi -e 's/a/b/' app.py", True),
+        ("perl -i.bak -pe 's/a/b/' app.py", True),
+        # `perl -e 'exec @ARGV'` runs another program: its long options are not perl's `-i`, seen in a real
+        # session where Chrome's `--hide-scrollbars` made a `file://` URL read as an edited file
+        ("perl -e 'alarm 30; exec @ARGV' chrome --headless --hide-scrollbars \"file:///work/proj/a.html\"", False),
+        ("perl -Mwarnings -e 'print 1' app.py", False),  # the i in `warnings` is the module's name
+        ("cp page.html file:///work/proj/b.html", False),  # a URL is not a file
         ("echo 'x = 1' > app.py", True),
         ("printf x >> src/notes.md", True),
         ("echo x | tee src/app.py", True),

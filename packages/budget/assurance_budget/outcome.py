@@ -246,7 +246,7 @@ def _required_check(entry: str, rules: Declared, walk: _Walk) -> dict[str, Any]:
     if walk.last_edit is None:
         check = _check("must_run", "command", entry, question, "no code edited", "no code was edited, so nothing needed it")
     else:
-        runs = [run for run in walk.runs if _runs_required(run.command, entry, rules)]
+        runs = [run for run in walk.runs if not run.elsewhere and _runs_required(run.command, entry, rules)]
         check = _run_check("must_run", entry, question, runs, walk.last_edit[3], _edit(walk.last_edit))
     check["declared_in"] = source
     return check

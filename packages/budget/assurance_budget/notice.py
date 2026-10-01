@@ -28,8 +28,8 @@ from pathlib import PurePosixPath, PureWindowsPath
 from assurance_budget.asked import NamedCommand, includes, names_cover, names_in, pattern_covers
 from assurance_budget.sessions import (
     _CHANGE_TOOLS,
-    _GIT_GLOBAL_FLAGS,
-    _GIT_GLOBAL_WITH_VALUE,
+    Place,
+    _git_subcommand,
     _SHELL_TOOLS,
     _WINDOWS_PATH,
     Declared,
@@ -40,8 +40,6 @@ from assurance_budget.sessions import (
     _normalise_argv,
     _truncate_label,
     _classify_segment,
-    _drop_paren_tokens,
-    _path_inside_cwd,
     _unclassified_counts,
     bash_edit_targets,
     bash_label,
@@ -49,8 +47,10 @@ from assurance_budget.sessions import (
     classify_bash,
     display_path,
     exit_status_is_reported,
+    names_only_outside,
     outcome_of_check_run,
     outcome_of_test_run,
+    runs_elsewhere,
     shell_command,
     split_shell_segments,
     strip_heredoc_bodies,
@@ -123,6 +123,9 @@ class _Run:
     at: float | None = None
     tail: str = ""
     """The end of what it printed, where a runner says which tests passed."""
+    elsewhere: bool = False
+    """It ran outside the project (`runs_elsewhere`): it says nothing of the project's code, though it
+    still answers a prompt that named it."""
 
 
 @dataclass(frozen=True)
@@ -187,7 +190,8 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
     asked = _Asked(session, rules)
     pending = _Edits()  # code edited since the last passing test or check
     last_edit: tuple[str, float | None, int, int] | None = None  # label, time, index, line
-    runs: list[_Run] = []  # tests and checks after the last code edit
+    runs: list[_Run] = []  # tests and checks of the project after the last code edit
+    anywhere: list[_Run] = []  # the same wherever they ran: a test the prompt names counts where it ran
     protected: list[tuple[int, str]] = []  # (line, path): changed since the last prompt, protected, not asked for
     since_prompt = asked.prompt.seq if asked.prompt is not None else -1
     shipped: tuple[ToolCall, str, list[_Finding], list[tuple[int, str]], dict[str, int]] | None = None
@@ -201,6 +205,7 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
             pending.add(edited, call.at, i, call.seq)
             last_edit = (edited, call.at, i, call.seq)
             runs.clear()
+            anywhere.clear()
             continue
         command = shell_command(call) if call.name in _SHELL_TOOLS else None
         if command is None:
@@ -208,18 +213,21 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
         run = _verification(call, command, declared, session.cwd)
         if run is not None:  # a test that failed errored, and is still a test
             if last_edit is not None:
-                runs.append(run)
-            if run.outcome == "passed":
+                anywhere.append(run)
+                if not run.elsewhere:
+                    runs.append(run)
+            if run.outcome == "passed" and not run.elsewhere:
                 pending.paths.clear()
-            continue
-        what = None if call.error else ship_action(command, call.branch)
+            if not run.elsewhere:  # a run elsewhere is read on, as any other command: `…; git push`
+                continue
+        what = None if call.error else ship_action(command, call.branch, session.cwd, call.cwd)
         if not what or call.seq <= boundary:
             continue
         reasons: list[_Finding] = []
         between: dict[str, int] = {}
         if last_edit is not None:
             between = dict(_unclassified_counts(calls[last_edit[2] + 1 : i], declared))
-            reasons = _ship_reasons(pending, last_edit, runs, rules, asked, between)
+            reasons = _ship_reasons(pending, last_edit, runs, rules, asked, between, anywhere)
         fresh = [reason for reason in reasons if reason.evidence > told][:1]
         news = [(seq, path) for seq, path in protected if seq > told]
         if fresh or news:  # the last notice already covered anything else this would say
@@ -274,10 +282,12 @@ def _ship_reasons(
     rules: Declared,
     asked: _Asked,
     between: dict[str, int],
+    anywhere: list[_Run] | None = None,
 ) -> list[_Finding]:
     """Why a push, merge, publish or commit on main is at stake, most pressing first: a required
     command that failed, a failed test or check, code no passing one followed, a required command
-    that did not run, and a test or check the last prompt names that did not pass after the edit."""
+    that did not run, and a test or check the last prompt names that did not pass after the edit.
+    `runs` are the project's; a test the prompt names is looked for in `anywhere`, wherever it ran."""
     edit = _edit(last_edit)
     required = _required_runs(runs, rules)
     reasons: list[_Finding] = []
@@ -313,7 +323,7 @@ def _ship_reasons(
         later = prompt is not None and prompt.seq > last_edit[3]
         since = prompt.seq if later and prompt is not None else last_edit[3]
         where = f"the prompt{_paren(_clock(prompt.at))}" if later and prompt is not None else edit
-        run = next((r for r in reversed(runs) if r.seq > since and includes(r.command, named.argv)), None)
+        run = next((r for r in reversed(anywhere if anywhere is not None else runs) if r.seq > since and includes(r.command, named.argv)), None)
         if run is None:
             text, evidence = f"while {named.label}, named in the last prompt, did not run after {where}", since
         elif run.outcome == "failed":
@@ -521,9 +531,9 @@ def needs_earlier_lines(session: Session, declared: Declared | None = None, *, s
         if command is None or at_stake:
             continue
         run = _verification(call, command, declared, session.cwd)
-        if run is not None:
+        if run is not None and not run.elsewhere:
             at_stake = run.outcome == "failed"
-        elif not call.error and ship_action(command, call.branch):
+        elif not call.error and ship_action(command, call.branch, session.cwd, call.cwd):
             at_stake = uses_prompt = True
     text_seq, text = session.last_text
     at_stake = at_stake or (text_seq > boundary and claims_tests_pass(text))
@@ -536,21 +546,22 @@ def _code_edit(call: ToolCall, cwd: str) -> str | None:
     """The label of the project code a call edited, or None: prose, outside the project, or no edit."""
     if call.name in _CHANGE_TOOLS:
         path = _call_path(call)
-        if path is None or not _path_inside_cwd(path, cwd) or _is_not_code(path):
+        if path is None or not Place(cwd).holds(path) or _is_not_code(path):
             return None
         return display_path(path, cwd)
     if call.name in _SHELL_TOOLS:
         command = shell_command(call)
-        targets = bash_edit_targets(command, cwd) if command is not None else None
+        targets = bash_edit_targets(command, cwd, call.cwd) if command is not None else None
         if targets is None:
             return None
-        code = [target for target in targets if not target or not _is_not_code(target)]
+        project = Place(cwd)  # a file in a repository nested in the folder is its code, not this one's
+        code = [target for target in targets if not target or (project.holds(target) and not _is_not_code(target))]
         if not code:
             return None  # `cat > NOTES.md`: prose, however it was written
         named = [target for target in code if target]
         if named:
             return display_path(named[0], cwd)
-        words = tree_rewrites(command, cwd) if command is not None else ()
+        words = tree_rewrites(command, cwd, call.cwd) if command is not None else ()
         authored = [word for word in words if word in _AUTHORED_REWRITES]
         if words and not authored:
             return None  # `git pull`, `git checkout -- .`: not code this session wrote
@@ -565,15 +576,18 @@ def _is_not_code(path: str) -> bool:
 
 def _verification(call: ToolCall, command: str, declared: Declared | None, cwd: str = "") -> _Run | None:
     kind = classify_bash(command, declared)
-    if kind in ("test", "check") and cwd and _runs_elsewhere(command, cwd, declared):
-        return None  # `ruff check /tmp/scratch.py` says nothing about this project
+    if kind not in ("test", "check"):
+        return None
+    # `ruff check /tmp/scratch.py`, or `cd ../other && pytest`, says nothing about this project's code
+    elsewhere = bool(cwd) and runs_elsewhere(command, cwd, declared, call.cwd)
     exit_known = exit_status_is_reported(call)
     if kind == "test":
         outcome = outcome_of_test_run(command, call.error, call.result_tail, declared, exit_known)
-        return _Run(call.seq, "test run", _project_label(command, "test", declared, cwd), outcome, command, call.at, call.result_tail)
-    if kind == "check":
-        outcome = outcome_of_check_run(command, call.error, call.result_tail, declared, exit_known)
-        return _Run(call.seq, "check", _project_label(command, "check", declared, cwd), outcome, command, call.at, call.result_tail)
+        label = bash_label(command, "test", declared) if elsewhere else _project_label(command, "test", declared, cwd, call.cwd)
+        return _Run(call.seq, "test run", label, outcome, command, call.at, call.result_tail, elsewhere)
+    outcome = outcome_of_check_run(command, call.error, call.result_tail, declared, exit_known)
+    label = bash_label(command, "check", declared) if elsewhere else _project_label(command, "check", declared, cwd, call.cwd)
+    return _Run(call.seq, "check", label, outcome, command, call.at, call.result_tail, elsewhere)
     return None
 
 
@@ -584,16 +598,16 @@ def changed_paths(call: ToolCall, cwd: str) -> tuple[tuple[str, ...], tuple[str,
         return (), ()
     if call.name in _CHANGE_TOOLS:
         path = _call_path(call)
-        if path is None or not _path_inside_cwd(path, cwd):
+        if path is None or not Place(cwd).within(path):
             return (), ()
         return (display_path(path, cwd),), ()
     if call.name in _SHELL_TOOLS:
         command = shell_command(call)
-        targets = bash_edit_targets(command, cwd) if command is not None else None
+        targets = bash_edit_targets(command, cwd, call.cwd) if command is not None else None
         if not targets or command is None:
             return (), ()
         named = tuple(dict.fromkeys(display_path(target, cwd) for target in targets if target))
-        return named, tree_rewrites(command, cwd) if "" in targets else ()
+        return named, tree_rewrites(command, cwd, call.cwd) if "" in targets else ()
     return (), ()
 
 
@@ -602,73 +616,19 @@ def authored(words: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(word for word in words if word in _AUTHORED_REWRITES)
 
 
-def _project_label(command: str, kind: str, declared: Declared | None, cwd: str) -> str:
+def _project_label(command: str, kind: str, declared: Declared | None, cwd: str, start: str = "") -> str:
     """`bash_label`, from the first test or check part that works on the project: in `ruff check
     /tmp/copy.py; ruff check src/a.py` the project's check is the second."""
     try:
         segments = split_shell_segments(strip_heredoc_bodies(command))
     except ValueError:
         return bash_label(command, "test" if kind == "test" else "check", declared)
-    left = False
-    for tokens in segments:
-        if not tokens:
+    place = Place(cwd, "", start)
+    for tokens, argv in place.walk(segments):
+        if _classify_segment(tokens, declared) != kind or place.inside() is False or (cwd and names_only_outside(tokens, place)):
             continue
-        if cwd and _cd_leaves_project(tokens, cwd):
-            left = True
-        if _classify_segment(tokens, declared) != kind or left or (cwd and _names_only_outside(tokens, cwd)):
-            continue
-        argv = _normalise_argv(_drop_redirections(tokens))
-        if argv:
-            return _truncate_label(shlex.join(argv))
+        return _truncate_label(shlex.join(argv))
     return bash_label(command, "test" if kind == "test" else "check", declared)
-
-
-def _runs_elsewhere(command: str, cwd: str, declared: Declared | None = None) -> bool:
-    """Whether the tests or checks in a command work outside the project: each after a `cd` that
-    leaves it, or on files that all lie outside it, named by absolute path. A relative path, or none,
-    is the project's. Only the test and check parts are read: `cp src/a.py /tmp/a.py && ruff check
-    /tmp/a.py` checks the copy, whatever the copy was made from."""
-    try:
-        segments = split_shell_segments(strip_heredoc_bodies(command))
-    except ValueError:
-        return False
-    left = False
-    verdicts: list[bool] = []
-    for tokens in segments:
-        if not tokens:
-            continue
-        if _cd_leaves_project(tokens, cwd):
-            left = True
-        if _classify_segment(tokens, declared) not in ("test", "check"):
-            continue
-        verdicts.append(left or _names_only_outside(tokens, cwd))
-    return bool(verdicts) and all(verdicts)
-
-
-def _names_only_outside(tokens: list[str], cwd: str) -> bool:
-    paths: list[str] = []
-    for token in _drop_redirections(tokens)[1:]:
-        if token.startswith("-"):
-            continue
-        if token.startswith(("/", "~")) or (len(token) > 2 and token[1] == ":"):
-            paths.append(token)
-        elif "/" in token or "." in token:
-            return False  # a relative path: the project's
-    return bool(paths) and not any(_path_inside_cwd(path, cwd) for path in paths)
-
-
-def _cd_leaves_project(tokens: list[str], cwd: str) -> bool:
-    """A `cd` to somewhere outside the project. Into a subfolder (`cd apps/api`) is still the project,
-    and a destination that cannot be read (`cd $ROOT`, `cd ~/x`, `cd -`) is taken to be: a test run
-    set aside wrongly would say the project's code went untested."""
-    argv = list(tokens)
-    _drop_paren_tokens(argv)
-    if len(argv) < 2 or argv[0] != "cd":
-        return False
-    dest = argv[1]
-    if "$" in dest or dest.startswith("~") or dest == "-":
-        return False
-    return not _path_inside_cwd(dest, cwd)
 
 
 def _edit(last: tuple[str, float | None, int, int]) -> str:
@@ -706,25 +666,36 @@ def _clock(at: float | None) -> str:
 _DRY_RUN = re.compile(r"^--dry-run(=.*)?$")
 
 
-def ship_action(command: str, branch: str = "") -> str | None:
+def ship_action(command: str, branch: str = "", cwd: str = "", start: str = "") -> str | None:
     """What a shell command did that leaves this machine or lands on main, in the past tense, or None.
 
     Read from the command as typed: `git push`, `gh pr merge`, a package publish, a deploy, a
-    database migration, and `git commit` or `git merge` while the transcript records the branch as
-    main or master. A dry run is not one.
+    database migration, and `git commit` or `git merge` on main or master. A dry run is not one.
+
+    `cwd` is the session's folder, whose repository is this project's, and `branch` is that
+    repository's branch: Claude Code records the project's branch on every message, wherever the
+    shell is. `start` is where the shell was when the command began (the transcript's `cwd` for that
+    message), which differs from `cwd` once a shell has moved and stayed. The command is followed as
+    it moves (`Place`): what it does in another repository, after `cd`, `pushd` or `git -C`, is not
+    this project's, and after `git checkout` or `git switch` the branch is the one it switched to.
+    Where a move cannot be followed, as with `cd "$DIR"`, the branch is not known, so nothing is said
+    to land on main there; a push from there is still a push.
     """
     try:
         segments = split_shell_segments(strip_heredoc_bodies(command))
     except ValueError:
         return None
+    place = Place(cwd, branch, start)
     found: list[str] = []
-    for tokens in segments:
-        argv = _normalise_argv(_drop_redirections(tokens))
+    for _tokens, argv in place.walk(segments):
         while argv and argv[0].startswith("-"):  # what `sudo -E` leaves in front
             argv = argv[1:]
-        if not argv or any(_DRY_RUN.match(arg) for arg in argv[1:]):
+        if not argv or place.switched(argv) or any(_DRY_RUN.match(arg) for arg in argv[1:]):
             continue
-        what = _ship_segment(argv, branch)
+        where = place.where(argv)
+        if where == "elsewhere":  # another repository's commit, push or release, not this project's
+            continue
+        what = _ship_segment(argv, place.branch_at(argv) if where == "here" else "")
         if what and what not in found:
             found.append(what)
     return " and ".join(found) if found else None
@@ -764,20 +735,6 @@ def _ship_segment(argv: list[str], branch: str) -> str | None:
     if _migrates(prog, rest):
         return "ran a database migration"
     return None
-
-
-def _git_subcommand(rest: list[str]) -> tuple[str, list[str]]:
-    i = 0
-    while i < len(rest):
-        arg = rest[i]
-        if arg in _GIT_GLOBAL_WITH_VALUE:
-            i += 2
-            continue
-        if arg in _GIT_GLOBAL_FLAGS or (arg.startswith("--") and "=" in arg):
-            i += 1
-            continue
-        return arg, rest[i + 1 :]
-    return "", []
 
 
 def _deploys(prog: str, rest: list[str]) -> bool:
