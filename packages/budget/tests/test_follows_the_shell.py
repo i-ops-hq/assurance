@@ -129,7 +129,7 @@ def test_a_test_run_elsewhere_neither_clears_nor_fails_this_projects_code(
 ) -> None:
     project, other = repos
     for output, failed in ((PASSED, False), (FAILED, True)):
-        steps = [("prompt", "ship"), _edit(project / "app.py", project), _bash(where.format(other=other), project, failed=failed, output=output), _bash("git push", project)]
+        steps = [("prompt", "ship"), _edit(project / "app.py", project), _bash(where.format(other=other.as_posix()), project, failed=failed, output=output), _bash("git push", project)]
         path = _session(project, steps)
         said = _notice(path, capsys)
         assert said.startswith("assurance · check before proceeding: pushed at ")
@@ -176,9 +176,9 @@ def test_the_limits_file_is_this_sessions_only_from_this_project(repos: tuple[Pa
 def test_a_rewrite_of_the_working_tree_is_this_projects_only_in_its_repository(repos: tuple[Path, Path]) -> None:
     project, other = repos
     assert tree_rewrites("git stash pop", str(project)) == ("git stash",)
-    assert tree_rewrites(f"git -C {other} stash pop", str(project)) == ()
+    assert tree_rewrites(f"git -C {other.as_posix()} stash pop", str(project)) == ()
     assert tree_rewrites("git stash pop", str(project), str(other)) == ()
-    assert tree_rewrites(f"cd {other} && git stash pop && cd {project} && git stash pop", str(project)) == ("git stash",)
+    assert tree_rewrites(f"cd {other.as_posix()} && git stash pop && cd {project.as_posix()} && git stash pop", str(project)) == ("git stash",)
     assert tree_rewrites("cd vendor && git cherry-pick abc1234", str(project)) == ()  # the nested repository's
 
 
@@ -188,7 +188,7 @@ def test_a_folder_that_is_no_repository_is_the_project_by_itself(tmp_path: Path,
     (outside / ".git").mkdir(parents=True)
     steps = [("prompt", "ship"), _edit(folder / "api" / "app.py", folder), _bash("cd api && git push", folder)]
     assert _notice(_session(folder, steps), capsys).startswith("assurance · check before proceeding: pushed at ")
-    away = [("prompt", "ship"), _edit(folder / "api" / "app.py", folder), _bash(f"cd {outside} && git push", folder)]
+    away = [("prompt", "ship"), _edit(folder / "api" / "app.py", folder), _bash(f"cd {outside.as_posix()} && git push", folder)]
     assert _notice(_session(folder, away), capsys) == ""
 
 
@@ -201,7 +201,7 @@ def test_a_subshells_cd_ends_with_it(repos: tuple[Path, Path]) -> None:
     assert found is not None and [Path(path) for path in found] == [project / "apps" / "web" / "src" / "x.ts", project / "app.py"]
     # seen in a real session: from a shell in apps/api, go to the project's top, test in a subshell,
     # then write a file named from the top: it is that file, not apps/api/apps/api/core.py
-    command = f"cd {project} && (cd apps/api && pytest -q); cp /tmp/new.py apps/api/core.py"
+    command = f"cd {project.as_posix()} && (cd apps/api && pytest -q); cp /tmp/new.py apps/api/core.py"
     found = bash_edit_targets(command, str(project), str(project / "apps" / "api"))
     assert found is not None and [Path(path) for path in found] == [project / "apps" / "api" / "core.py"]
     found = bash_edit_targets("SRC=notes.md; cp $SRC docs", str(project))  # a name says the copy is a file
@@ -211,7 +211,7 @@ def test_a_subshells_cd_ends_with_it(repos: tuple[Path, Path]) -> None:
 
 def test_a_test_run_in_a_subshell_elsewhere_is_not_this_projects(repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
     project, other = repos
-    command = f"(cd {other} && pytest -q)"
+    command = f"(cd {other.as_posix()} && pytest -q)"
     steps = [("prompt", "ship"), _edit(project / "app.py", project), _bash(command, project, output=PASSED), _bash("git push", project)]
     assert "no passing test or check after the last edit to app.py" in _notice(_session(project, steps), capsys)
     steps[2] = _bash(f"{command}; pytest -q", project, output=PASSED)  # and the one after it, back in the project, is
@@ -220,7 +220,7 @@ def test_a_test_run_in_a_subshell_elsewhere_is_not_this_projects(repos: tuple[Pa
 
 def test_a_push_after_a_test_run_elsewhere_in_one_command_is_still_read(repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
     project, other = repos
-    command = f"cd {other} && pytest -q; cd {project} && git push"
+    command = f"cd {other.as_posix()} && pytest -q; cd {project.as_posix()} && git push"
     steps = [("prompt", "ship"), _edit(project / "app.py", project), _bash(command, project, output=PASSED)]
     assert _notice(_session(project, steps), capsys).startswith("assurance · check before proceeding: pushed at ")
 
@@ -229,7 +229,7 @@ def test_a_test_the_prompt_names_counts_wherever_it_ran(repos: tuple[Path, Path]
     project, other = repos  # the project's own edit is tested; the named test runs in the other repository
 
     def said(output: str) -> str:
-        named = _bash(f"cd {other} && pytest -q tests/test_api.py | tail -3", project, output=output)
+        named = _bash(f"cd {other.as_posix()} && pytest -q tests/test_api.py | tail -3", project, output=output)
         steps = [("prompt", "run `pytest -q tests/test_api.py` and ship"), _edit(project / "app.py", project),
                  _bash("pytest -q", project, output=PASSED), named, _bash("git push", project)]
         return _notice(_session(project, steps), capsys)
@@ -245,7 +245,7 @@ def test_a_command_the_project_must_run_counts_only_in_the_project(repos: tuple[
 
     project, other = repos
     rules = Declared(must_run=("make lint",), origins=(("make lint", ".assurance/config.toml"),))
-    for where, answer in ((f"cd {other} && make lint", "not run"), ("make lint", "passed")):
+    for where, answer in ((f"cd {other.as_posix()} && make lint", "not run"), ("make lint", "passed")):
         steps = [("prompt", "tidy up"), _edit(project / "app.py", project), _bash(where, project, output="lint: all good")]
         checks = outcome(read_claude_code(_session(project, steps)), rules)["checks"]
         (lint,) = [check for check in checks if check["from"] == "must_run"]

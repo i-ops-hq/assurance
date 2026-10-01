@@ -3119,6 +3119,8 @@ class Place:
             return None
         if target.startswith("~") and not (target == "~" or target.startswith(("~/", "~\\"))):
             return None  # another user's home
+        if target.startswith("~"):  # this machine's home, by its own rules: USERPROFILE on Windows
+            target = os.path.expanduser(target)
         if base is None and not (_is_absolute_path_token(target) or target.startswith("~")):
             return None
         return _norm_path(target, base or self.cwd)

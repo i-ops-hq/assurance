@@ -408,7 +408,8 @@ def test_a_command_is_followed_where_it_goes(tmp_path: Path, command: str, branc
         (repository / ".git").mkdir(parents=True)
     (project / "pkg").mkdir()
     (project / "app.py").write_text("x = 1\n", encoding="utf-8")
-    assert ship_action(command.format(root=tmp_path, other=other), branch, str(project)) == expected
+    # a path in a command as a shell takes it: forward slashes, which Git Bash on Windows reads too
+    assert ship_action(command.format(root=tmp_path.as_posix(), other=other.as_posix()), branch, str(project)) == expected
 
 
 @pytest.mark.parametrize("command, branch, start, expected", [
@@ -425,7 +426,8 @@ def test_a_command_starts_where_its_shell_was(tmp_path: Path, command: str, bran
         (repository / ".git").mkdir(parents=True)
     (project / "pkg").mkdir()
     names = {"project": project, "other": other}
-    assert ship_action(command.format(**names), branch, str(project), start.format(**names)) == expected
+    typed = {name: path.as_posix() for name, path in names.items()}  # in a command, as a shell takes it
+    assert ship_action(command.format(**typed), branch, str(project), start.format(**names)) == expected
 
 
 def test_the_branch_recorded_is_the_projects_wherever_the_shell_is(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -434,7 +436,7 @@ def test_the_branch_recorded_is_the_projects_wherever_the_shell_is(tmp_path: Pat
     (tmp_path / ".git").mkdir()
     other = tmp_path.parent / f"{tmp_path.name}-other"
     (other / ".git").mkdir(parents=True)
-    there, back = _bash("git commit -qm there", branch="main"), _bash(f"cd {tmp_path} && git commit -qm here", branch="main")
+    there, back = _bash("git commit -qm there", branch="main"), _bash(f"cd {tmp_path.as_posix()} && git commit -qm here", branch="main")
     path = _transcript(tmp_path, [("prompt", "ship"), _edit(tmp_path), there, back])
     lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     for line in lines:  # the shell had moved into the other repository and stayed
@@ -473,7 +475,7 @@ def test_a_commit_in_another_clone_is_not_this_projects(tmp_path: Path, capsys: 
     (tmp_path / ".git").mkdir()
     clone = tmp_path.parent / f"{tmp_path.name}-clone"
     (clone / ".git").mkdir(parents=True)
-    release = f"cd {clone} && git checkout -q -b release origin/main && git commit -q -m release && git push -u origin release"
+    release = f"cd {clone.as_posix()} && git checkout -q -b release origin/main && git commit -q -m release && git push -u origin release"
     path = _transcript(tmp_path, [("prompt", "release it"), _edit(tmp_path), FAIL, _bash(release, branch="main")])
     said = _said(path, capsys)  # what is true here is still said: a test failed after an edit
     assert said.startswith("assurance · review suggested: the last test run after the last edit to app.py (")
