@@ -155,14 +155,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.17 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.18 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.17 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.18 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
@@ -181,7 +181,7 @@ One install, one `assurance` command.
 
 | Command | What it answers |
 |---|---|
-| `assurance audit` | What did the coding-agent session in this folder do, and what did it skip? |
+| `assurance audit` | What did the coding-agent session in this folder, or your own agent's run, do, and what did it skip? |
 | `assurance hook` | Run that audit after every Claude Code turn, or stop running it: `install`, `remove`, `status`. |
 | `assurance diff` | Did the work cover everything it should have? For example, retrieved docs vs. required docs. |
 | `assurance pin` | Did an MCP server quietly change a tool's description after you approved it? |
@@ -267,6 +267,76 @@ did not run after the last edit. It reads only what a prompt marks plainly: a pa
 `test_…` name, a test or check command in backticks or a shell block. Every time, it says what it
 could not check: an image, a file outside the project, a prompt that names nothing, and whether the
 work does what you asked, which is yours to judge. `--json` carries it as `outcome`.
+
+## Your own agent, or code that calls a model
+
+Claude Code keeps a transcript. An agent you wrote, or a script that calls a model's API, keeps nothing
+unless you tell it to. Have it add one line of JSON to a file for each thing it does, and `assurance
+audit` reads that file the way it reads a Claude Code session:
+
+| `type` | one line per | fields |
+|---|---|---|
+| `task` | thing the run was asked to do | `text`, `cwd`, `must_run`, `must_not_touch`, `expect` (files it should write) |
+| `model` | call to a model | `provider`, `model`, `input_tokens`, `output_tokens`, `ms`, `error` |
+| `tool` | tool call | `id`, `name`, `output`, `error` |
+| `edit` | file it changed | `id`, `path` |
+| `command` | shell command it ran | `id`, `command`, `exit_code`, `output` |
+| `decision` | gate's verdict on a step, before it ran | `step`, `by`, `verdict`, `confidence` |
+| `outcome` | check your code made afterwards | `step`, `name`, `passed`, `detail` |
+| `claim` | the run's last word | `text` |
+
+Every line says which `run` it belongs to, and may carry `ts`. Nothing else is required, text least of
+all: without the task's words or the run's last message, the report says which checks that left
+undone. No library is needed. In Python:
+
+```python
+import json, time
+
+def record(**line):
+    with open("run.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps({"run": "refund-42", "ts": time.time(), **line}) + "\n")
+
+record(type="task", text="Fix the refund rounding", must_run=["ruff check ."], expect=["reports/refunds.csv"])
+record(type="decision", step="c2", by="jev", verdict="allow", confidence=0.97)
+record(type="command", id="c2", command="pytest -q", exit_code=0)
+record(type="outcome", step="c2", name="refund total matches the ledger", passed=False)
+```
+
+In JavaScript it is `fs.appendFileSync("run.jsonl", JSON.stringify({ run, ts: Date.now() / 1000, ...line }) + "\n")`.
+
+Here is what it prints for [a sample run record](examples/run-record/refund-run.jsonl): an agent asked
+to fix refund rounding, gated by a fast decision model and a policy, which ended by saying it was done.
+
+```
+$ assurance audit examples/run-record/refund-run.jsonl
+Agent run refund-42 — 14 min in /home/you/refunds-app
+6 tool calls, 1 failed — command 2, edit 2, delete_rows 1, search_docs 1
+
+  The run's last word: "Done: the rounding is fixed and the tests pass." Against it: its own check "refund total matches the ledger" on c2 failed; reports/refunds.csv, an expected output, was not written; ruff check ., which must pass after an edit, did not run after the last one; t9 ran after policy blocked it.
+  After the last edit (10:07): 1 test run (pytest -q tests/test_refunds.py), 0 checks
+  Against the task (10:00, "Fix the refund rounding in billing/refunds.py and make sure…"):
+    billing/refunds.py: changed at 10:07.
+    pytest -q tests/test_refunds.py: passed at 10:09, after the last edit to billing/refunds.py (10:07).
+    Only what the task names is checked here; whether the work does what it asks is not.
+  Expected output reports/refunds.csv (the task): no edit or command in the record wrote it.
+  Must run ruff check . (the task): did not run after the last edit to billing/refunds.py (10:07).
+  Must not touch migrations/ (the task): nothing there was changed.
+  The run's own checks: 1 failed (refund total matches the ledger, on c2: off by 0.01 on 3 of 212 refunds).
+  Decisions by jev: 2 allowed, of which 1 failed (c2: refund total matches the ledger: off by 0.01 on 3 of 212 refunds) and 1 ran with nothing checking it (e1: the edit to billing/refunds.py).
+  Decisions by policy: 1 blocked, which ran anyway (t9: delete_rows ran at 10:12, after the block).
+  Model calls: 3 (claude-sonnet-5 3), 18,200 tokens in and 1,270 out.
+  Every shell command was classified.
+  Also in the record: 1 task, 3 model calls, 3 decisions, 1 outcome check, 1 claim.
+  Not read: 0 lines.
+```
+
+A gate's verdict is a prediction about a step, made before it runs, whether the gate is a policy, a
+person, or a fast decision model such as Jev or laya. Assurance holds each against what the step then
+did: an allowed step whose check failed, and a blocked step that ran anyway, are named. So any gate
+that writes a `decision` line can be measured, by code. `--fail-on-outcome` exits 1 when something the
+record declares did not hold, so a CI job, or the agent's own code, can stop on it; `--run <id>` picks
+one run from a file that holds several. `assurance budget run.jsonl` reads the same file for spend,
+ceilings and loops. The file holds only what your code writes, and nothing is sent anywhere.
 
 ## Your project's own tests, checks and rules
 

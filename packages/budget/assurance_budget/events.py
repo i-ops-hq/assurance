@@ -22,6 +22,13 @@ UNCLASSIFIED = "unclassified"
 #: A line that carries no run identifier, in a log where other lines do.
 UNATTRIBUTED = "unattributed"
 
+#: A line of a run record (`assurance.run/1`) that charges nothing: the task, a gate's decision, an
+#: outcome check, the run's last word. Neither a charge nor unread.
+NOTED = "noted"
+_NOTED_TYPES = frozenset({"task", "decision", "outcome", "claim"})
+#: The run record's lines that are charges, and what each is charged as.
+_CHARGED_TYPES = {"tool": "tool", "command": "tool", "edit": "tool", "model": "frontier"}
+
 _RUN_KEYS = (
     "run", "run_id", "runId", "session", "session_id", "sessionId", "trace_id", "traceId",
     "conversation_id", "conversationId", "thread_id", "threadId",
@@ -88,6 +95,12 @@ def _event(record: Any, line_no: int) -> Event:
     at = _seconds(_first(record, _TIME_KEYS))
     if run is None:
         return Event(run="", action=action, kind=UNATTRIBUTED, at=at)
+    record_type = record.get("type")
+    if "kind" not in record and isinstance(record_type, str):
+        if record_type in _NOTED_TYPES:
+            return Event(run=str(run), kind=NOTED, at=at)
+        if record_type in _CHARGED_TYPES:
+            return _recorded_event(str(run), record_type, record, at)
     if "kind" in record:
         kind = str(record["kind"])
         if kind not in KINDS:
@@ -107,6 +120,28 @@ def _event(record: Any, line_no: int) -> Event:
         error=str(_first(record, _ERROR_KEYS) or ""),
         result=str(_first(record, _RESULT_KEYS) or ""),
         kind=kind,
+        at=at,
+    )
+
+
+def _recorded_event(run: str, record_type: str, record: dict[str, Any], at: float | None) -> Event:
+    """A charge in a run record: a tool call, a command, an edit, or a call to a model."""
+    if record_type == "command":
+        code = record.get("exit_code")
+        failed = isinstance(code, int) and not isinstance(code, bool) and code != 0
+        action, error = f"command {record.get('command', '')}", f"exit {code}" if failed else ""
+    elif record_type == "edit":
+        action, error = f"edit {record.get('path', '')}", str(record.get("error") or "")
+    elif record_type == "model":
+        action, error = f"model {record.get('model') or record.get('name') or ''}".strip(), str(record.get("error") or "")
+    else:
+        action, error = str(record.get("name") or ""), str(record.get("error") or "")
+    return Event(
+        run=run,
+        action=action,
+        error=error,
+        result=str(_first(record, _RESULT_KEYS) or ""),
+        kind=_CHARGED_TYPES[record_type],
         at=at,
     )
 

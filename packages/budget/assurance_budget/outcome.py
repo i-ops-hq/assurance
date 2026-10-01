@@ -27,6 +27,7 @@ from assurance_budget.notice import (
     authored,
     changed_paths,
 )
+from assurance_budget.record import Check
 from assurance_budget.sessions import (
     _SHELL_TOOLS,
     _WINDOWS_PATH,
@@ -48,6 +49,8 @@ ANSWERS = {
     "command": ("passed", "failed", "unknown", "not run", "no code edited"),
     "test": ("passed", "failed", "unknown", "not run"),
     "paths": ("untouched", "changed", "unknown"),
+    "output": ("written", "not written", "unknown"),
+    "check": ("passed", "failed", "unknown"),
 }
 
 _ONLY_NAMED = "Only what the last prompt names is checked here; whether the work does what it asks is not."
@@ -101,40 +104,58 @@ class _Walk:
         )
 
 
-def outcome(session: Session, declared: Declared | None = None) -> dict[str, Any]:
-    """The checks as a dict: the `outcome` key of `assurance audit --json`."""
+def outcome(
+    session: Session,
+    declared: Declared | None = None,
+    *,
+    expect: tuple[str, ...] = (),
+    recorded: tuple[Check, ...] = (),
+    no_prompt: str = _NO_PROMPT,
+    asked: str = "the last prompt",
+) -> dict[str, Any]:
+    """The checks as a dict: the `outcome` key of `assurance audit --json`.
+
+    A run record adds two of its own: the files its task says it should write (`expect`), and the
+    checks its code made afterwards (`recorded`). `no_prompt` is what to say when there are no words
+    to check the outcome against, and `asked` what those words are called: a run record's are its task.
+    """
     rules = declared if declared is not None else Declared()
-    checks: list[dict[str, Any]] = []
+    checks: list[dict[str, Any]] = [_recorded_check(check) for check in recorded]
     not_checked: list[str] = []
     prompt = session.last_prompt
     names = names_in(prompt.text, session.cwd, declared) if prompt is not None else Names()
-    if not (names or names.maybe or rules.must_run or rules.must_not_touch):
+    if not (names or names.maybe or rules.must_run or rules.must_not_touch or expect):
         walk = None  # nothing to look for, so the session is not walked again
     else:
         walk = _Walk(session, declared, prompt.seq if prompt is not None else -1)
         if prompt is not None and names.maybe:
             names = names_in(prompt.text, session.cwd, declared, walk.touched())
+    if walk is not None:
+        since = min(session.prompts) if session.prompts else -1
+        checks.extend(_output_check(path, since, walk) for path in expect)
     if prompt is None:
-        not_checked.append(_NO_PROMPT)
+        not_checked.append(no_prompt)
     else:
         if walk is not None:
             checks.extend(_file_check(name, prompt, walk) for name in names.files)
             checks.extend(_command_check(named.label, named.argv, named.asked, prompt, walk) for named in names.commands)
             checks.extend(_test_check(name, prompt, walk) for name in names.tests)
-        not_checked.extend(_prompt_limits(prompt, names))
+        called = asked[0].upper() + asked[1:]
+        not_checked.extend(note.replace("the last prompt", asked).replace("The last prompt", called) for note in _prompt_limits(prompt, names))
     if walk is None:
-        return _shaped(prompt, checks, not_checked)
+        return _shaped(prompt, checks, not_checked, asked)
     for entry in rules.must_run:
         checks.append(_required_check(entry, rules, walk))
     windows = bool(_WINDOWS_PATH.match(session.cwd))
     for pattern in rules.must_not_touch:
         checks.append(_protected_check(pattern, rules, walk, prompt, session, declared, windows))
-    return _shaped(prompt, checks, not_checked)
+    return _shaped(prompt, checks, not_checked, asked)
 
 
-def _shaped(prompt: Prompt | None, checks: list[dict[str, Any]], not_checked: list[str]) -> dict[str, Any]:
+def _shaped(prompt: Prompt | None, checks: list[dict[str, Any]], not_checked: list[str], asked: str) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
+        "asked": asked,
         "prompt": None if prompt is None else {"at": prompt.at, "excerpt": _excerpt(prompt.text), "images": prompt.images},
         "checks": checks,
         "not_checked": not_checked,
@@ -150,7 +171,7 @@ def outcome_lines(out: dict[str, Any]) -> list[str]:
     mine = [check for check in checks if check["from"] == "prompt"]
     if prompt is not None and mine:
         when = _clock(prompt.get("at"))
-        lines.append(f'Against the last prompt ({when + ", " if when else ""}"{prompt.get("excerpt", "")}"):')
+        lines.append(f'Against {out.get("asked", "the last prompt")} ({when + ", " if when else ""}"{prompt.get("excerpt", "")}"):')
         for kind in ("file", "command", "test"):
             these = [check for check in mine if check["kind"] == kind]
             if len(these) > _SHOWN:
@@ -160,14 +181,33 @@ def outcome_lines(out: dict[str, Any]) -> list[str]:
         lines.extend("  " + note for note in notes)
     elif notes:
         when = _clock(prompt.get("at")) if prompt is not None else ""
-        first = notes[0].replace("The last prompt ", f"The last prompt ({when}) ", 1) if when else notes[0]
+        called = str(out.get("asked", "the last prompt"))
+        called = called[0].upper() + called[1:]
+        first = notes[0].replace(f"{called} ", f"{called} ({when}) ", 1) if when else notes[0]
         lines.append(" ".join([first, *notes[1:]]))
     for check in checks:
         if check["from"] == "must_run":
             lines.append(f"Must run {check['subject']} ({check['declared_in']}): {_said(check)}.")
         elif check["from"] == "must_not_touch":
             lines.append(f"Must not touch {check['subject']} ({check['declared_in']}): {_said(check)}.")
+        elif check["from"] == "task":
+            lines.append(f"Expected output {check['subject']} (the task): {_said(check)}.")
+    own = [check for check in checks if check["from"] == "run"]
+    if own:
+        failed = [check for check in own if check["answer"] == "failed"]
+        unknown = [check for check in own if check["answer"] == "unknown"]
+        passed = len(own) - len(failed) - len(unknown)
+        said = [f"{passed} passed"] if passed else []
+        if failed:
+            said.append(f"{len(failed)} failed ({'; '.join(_own(check) for check in failed[:3])}{' and more' if len(failed) > 3 else ''})")
+        if unknown:
+            said.append(f"{len(unknown)} recorded no result ({', '.join(check['subject'] for check in unknown[:3])})")
+        lines.append(f"The run's own checks: {_joined(said)}.")
     return lines
+
+
+def _own(check: dict[str, Any]) -> str:
+    return f"{check['subject']}: {check['evidence']}" if check["evidence"] else check["subject"]
 
 
 # --- the checks -----------------------------------------------------------------------------------
@@ -204,7 +244,7 @@ def _required_check(entry: str, rules: Declared, walk: _Walk) -> dict[str, Any]:
     source = rules.origin(entry)
     question = f"Did {entry} pass after the last code edit?"
     if walk.last_edit is None:
-        check = _check("must_run", "command", entry, question, "no code edited", "no code was edited in this session, so nothing needed it")
+        check = _check("must_run", "command", entry, question, "no code edited", "no code was edited, so nothing needed it")
     else:
         runs = [run for run in walk.runs if _runs_required(run.command, entry, rules)]
         check = _run_check("must_run", entry, question, runs, walk.last_edit[3], _edit(walk.last_edit))
@@ -265,6 +305,39 @@ def _protected_check(
         check = _check("must_not_touch", "paths", pattern, question, "untouched", "nothing there was changed")
     check["declared_in"] = rules.origin(pattern)
     return check
+
+
+def _output_check(path: str, since: int, walk: _Walk) -> dict[str, Any]:
+    """A file the task says the run should write: was it?"""
+    wanted = path.replace("\\", "/")
+    while wanted.startswith("./"):  # a prefix, not characters: `./.env` is `.env`
+        wanted = wanted[2:]
+    question = f"Did the run write {wanted}?"
+    written = [(seq, at, changed) for seq, at, paths, _ in walk.changes if seq > since for changed in paths if names_cover(wanted, changed)]
+    check: dict[str, Any]
+    if written:
+        check = _check("task", "output", wanted, question, "written", f"written{_at(written[-1][1])}{_which(list(dict.fromkeys(p for _, _, p in written)), wanted)}")
+    else:
+        rewrites = [(seq, at, words) for seq, at, _, words in walk.changes if seq > since and authored(words)]
+        if rewrites:
+            _, at, words = rewrites[-1]
+            because = f"{' and '.join(authored(words))}{_at(at)} changed files without naming them, so whether it wrote {wanted} cannot be told"
+            check = _check("task", "output", wanted, question, "unknown", "", because)
+        else:
+            check = _check("task", "output", wanted, question, "not written", "no edit or command in the record wrote it")
+    check["declared_in"] = "the task"
+    return check
+
+
+def _recorded_check(check: Check) -> dict[str, Any]:
+    """A check the run's own code made, as it recorded it."""
+    subject = f"{check.name}, on {check.step}" if check.step else check.name
+    question = f"What did the run's own check {check.name!r} find?"
+    if check.passed is None:
+        made = _check("run", "check", subject, question, "unknown", "", "the run recorded the check and no result")
+    else:
+        made = _check("run", "check", subject, question, "passed" if check.passed else "failed", check.detail)
+    return {**made, "name": check.name, "step": check.step}
 
 
 def _prompt_limits(prompt: Prompt, names: Names) -> list[str]:

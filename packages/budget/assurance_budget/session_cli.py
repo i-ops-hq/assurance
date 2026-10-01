@@ -23,9 +23,11 @@ from assurance_budget.config import (
     project_overreach_notes,
 )
 from assurance_budget.events import LogError
+from assurance_budget.decisions import decision_lines, decisions
 from assurance_budget.inventory import inventory, inventory_lines
 from assurance_budget.notice import Notice, needs_earlier_lines, stop_notice
 from assurance_budget.outcome import outcome, outcome_lines
+from assurance_budget.record import RECORD_SCHEMA, RunRecord, is_run_record, model_lines, model_summary, read_run_record
 from assurance_budget.sessions import (
     Declared,
     Session,
@@ -52,6 +54,8 @@ EXIT_UNREADABLE = 2
 
 #: Transcript sources whose harness refuses an edit to a file the model has not read.
 _READ_BEFORE_EDIT_ENFORCED = frozenset({"claude-code"})
+#: How a run record's edits and commands are named in the report, rather than the tool each is read as.
+_RECORD_NAMES = {"Bash": "command", "Write": "edit"}
 
 #: The session `--demo` audits: the same file as examples/audit/sample-session.jsonl in the repo.
 SAMPLE_SESSION = Path(__file__).resolve().parent / "data" / "sample-session.jsonl"
@@ -205,14 +209,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="assurance audit",
         description=(
-            "Read a Claude Code session transcript and say what it did — and, at the same "
-            "weight, what could not be classified."
+            "Read a Claude Code session transcript, or a run record any agent's own code can write "
+            "(assurance.run/1), and say what it did — and, at the same weight, what could not be "
+            "classified or checked."
         ),
     )
     parser.add_argument(
         "transcript",
         nargs="?",
-        help="Path to a Claude Code .jsonl transcript. Omit to use the latest session for cwd",
+        help=(
+            "Path to a Claude Code .jsonl transcript, or to a run record (assurance.run/1). Omit to use "
+            "the latest Claude Code session for cwd"
+        ),
     )
     parser.add_argument(
         "--session",
@@ -235,6 +243,21 @@ def build_parser() -> argparse.ArgumentParser:
             f"Exit {EXIT_GATE} when there were edits and no test or check it recognises ran after "
             "the last one"
         ),
+    )
+    parser.add_argument(
+        "--fail-on-outcome",
+        action="store_true",
+        help=(
+            f"Exit {EXIT_GATE} when an outcome did not hold: a must_run command failed or did not run "
+            "after the last edit, a must_not_touch path changed, an expected output was not written, a "
+            "test or command the prompt named failed, a check the run recorded failed, or a step a gate "
+            "allowed failed or one it blocked ran anyway"
+        ),
+    )
+    parser.add_argument(
+        "--run",
+        metavar="ID",
+        help="With a run record (assurance.run/1) that holds several runs: the one to audit. The last by default",
     )
     parser.add_argument(
         "--demo",
@@ -315,8 +338,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return EXIT_UNREADABLE
 
+    record: RunRecord | None = None
     try:
-        session = read_claude_code(path)
+        if args.transcript and is_run_record(path):
+            record = read_run_record(path, run=args.run, cwd=str(Path.cwd()))
+            session = record.session
+        else:
+            if args.run is not None:
+                parser.error("--run picks a run in a run record (assurance.run/1); this is not one")
+            session = read_claude_code(path)
     except LogError as exc:
         print(f"assurance audit: {exc}", file=sys.stderr)
         return EXIT_UNREADABLE
@@ -332,6 +362,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"assurance audit: {exc}", file=sys.stderr)
         return EXIT_UNREADABLE
+    if record is not None and record.task is not None:
+        declared = _with_task(declared, record.task.must_run, record.task.must_not_touch)
 
     loops = detect_loops(session.tool_calls)
     unread_edits = edited_without_read(session)
@@ -350,6 +382,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         declared=declared,
         declared_from=declared_from,
         declared_notes=declared_notes,
+        record=record,
     )
     if args.as_json:
         print(json.dumps(report, indent=2))
@@ -365,7 +398,68 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_GATE
     if args.fail_on_loop and loops:
         return EXIT_GATE
+    if args.fail_on_outcome and outcome_failures(report):
+        return EXIT_GATE
     return EXIT_OK
+
+
+def _with_task(declared: Declared, must_run: tuple[str, ...], must_not_touch: tuple[str, ...]) -> Declared:
+    """The settings' declarations with the task's own rules added, each said to come from the task."""
+    runs = tuple(entry for entry in must_run if entry not in declared.must_run)
+    paths = tuple(entry for entry in must_not_touch if entry not in declared.must_not_touch)
+    return Declared(
+        declared.tests,
+        declared.checks,
+        declared.must_run + runs,
+        declared.must_not_touch + paths,
+        declared.origins + tuple((entry, "the task") for entry in runs + paths),
+    )
+
+
+def outcome_failures(report: dict[str, Any]) -> list[str]:
+    """What did not hold, from the report's outcome and decisions, each said as a clause: the
+    `--fail-on-outcome` gate, and what a run's last word is held against.
+
+    Unknown is not a failure, and not a pass: the report says it, and the gate leaves it to the reader.
+    """
+    failed: list[str] = []
+    for check in (report.get("outcome") or {}).get("checks") or []:
+        answer, origin, subject = check["answer"], check["from"], check["subject"]
+        if origin == "must_run" and answer in ("failed", "not run"):
+            failed.append(f"{subject}, which must pass after an edit, {'failed' if answer == 'failed' else 'did not run after the last one'}")
+        elif origin == "must_not_touch" and answer == "changed":
+            failed.append(f"{subject}, which must not be touched, was changed")
+        elif origin == "task" and answer == "not written":
+            failed.append(f"{subject}, an expected output, was not written")
+        elif origin == "run" and answer == "failed":
+            on = f" on {check['step']}" if check.get("step") else ""
+            failed.append(f"its own check \"{check.get('name', subject)}\"{on} failed")
+        elif origin == "prompt" and answer == "failed":
+            failed.append(f"{subject} failed")
+    checked = {
+        check.get("step") for check in (report.get("outcome") or {}).get("checks") or []
+        if check["from"] == "run" and check["answer"] == "failed"
+    }
+    for item in (report.get("decisions") or {}).get("items") or []:
+        if item["result"] == "failed" and item["step"] not in checked:  # a failed check on it is said already
+            failed.append(f"{item['step']} failed after {item['by']} allowed it")
+        elif item["result"] == "ran anyway":
+            failed.append(f"{item['step']} ran after {item['by']} blocked it")
+    return failed
+
+
+def _claim_line(report: dict[str, Any]) -> str | None:
+    """A run's last word, next to what in the record does not bear it out."""
+    claim = (report.get("run") or {}).get("claim")
+    if not claim:
+        return None
+    words = claim["excerpt"]
+    said = f"The run's last word: \"{words}\"" + ("" if words.endswith((".", "!", "?", "…")) else ".")
+    against = list(claim["against"])
+    if not against:
+        return f"{said} Nothing in the record goes against it, which is not the same as bearing it out."
+    shown = "; ".join(against[:5]) + (f"; and {len(against) - 5} more" if len(against) > 5 else "")
+    return f"{said} Against it: {shown}."
 
 
 def detect_loops(calls: tuple[ToolCall, ...] | list[ToolCall]) -> list[Stalled]:
@@ -399,6 +493,7 @@ def build_report(
     declared: Declared | None = None,
     declared_from: Sequence[str] = (),
     declared_notes: Sequence[str] = (),
+    record: RunRecord | None = None,
 ) -> dict[str, Any]:
     """The report as a dict: what `--json` prints, and what `format_report` reads from.
 
@@ -407,7 +502,8 @@ def build_report(
     without the part it could not count. `edited_without_read` is always here, even for sources
     where the text report leaves it out.
     """
-    by_tool = dict(Counter(call.name for call in session.tool_calls))
+    names = _RECORD_NAMES if record is not None else {}
+    by_tool = dict(Counter(names.get(call.name, call.name) for call in session.tool_calls))
     # A call Claude Code refused never ran, so it did not fail: it is counted apart and named.
     failed = sum(1 for call in session.tool_calls if call.error and not call.refused)
     refused = [_refused_label(call, session.cwd) for call in session.tool_calls if call.refused]
@@ -471,14 +567,59 @@ def build_report(
             else None
         ),
         "declared_notes": list(declared_notes),
-        "outcome": outcome(session, declared),
-        "inventory": inventory(session),
+        "outcome": _outcome(session, declared, record),
+        "inventory": None if record is not None else inventory(session),
     }
+    if record is not None:
+        task = record.task
+        payload["run"] = {
+            "schema": RECORD_SCHEMA,
+            "id": session.session_id,
+            "runs_in_file": list(record.runs),
+            "latest": record.latest,
+            "task": None if task is None else {
+                "words_recorded": bool(task.text.strip()),
+                "must_run": list(task.must_run),
+                "must_not_touch": list(task.must_not_touch),
+                "expect": list(task.expect),
+            },
+        }
+        payload["model_calls"] = model_summary(record)
+        payload["decisions"] = decisions(record)
+        payload["not_recorded"] = list(record.not_recorded)
+        seq, words = session.last_text
+        payload["run"]["claim"] = None if seq < 0 else {
+            "excerpt": _excerpt(words),
+            "against": outcome_failures(payload),
+        }
+        if caps is not None and caps.source != "built-in defaults" and len(record.models) > caps.frontier_calls:
+            payload["over_model_limit"] = {
+                "model_calls": len(record.models),
+                "limit": caps.frontier_calls,
+                "source": dict(caps.origins).get("frontier_calls", caps.source),
+            }
     if limits:
         payload["limits"] = limits
     if project_notes:
         payload["project_limit_notes"] = project_notes
     return payload
+
+
+def _excerpt(text: str, limit: int = 80) -> str:
+    said = " ".join(text.split())
+    return said if len(said) <= limit else said[: limit - 1] + "…"
+
+
+def _outcome(session: Session, declared: Declared | None, record: RunRecord | None) -> dict[str, Any]:
+    if record is None:
+        return outcome(session, declared)
+    words = (
+        "The record has no task line to check the outcome against."
+        if record.task is None
+        else "The task's words were not recorded, so the files, tests and commands they name cannot be checked."
+    )
+    expect = record.task.expect if record.task is not None else ()
+    return outcome(session, declared, expect=expect, recorded=record.checks, no_prompt=words, asked="the task")
 
 
 def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]) -> str:
@@ -500,16 +641,24 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     if empty:
         return "No tool calls in this session."
 
+    run = report.get("run")
     sid = session.session_id[:8] if session.session_id else "?"
     duration = _duration_phrase(report.get("duration_seconds"))
     where = session.cwd or str(session.path)
-    header = f"Claude Code session {sid}"
+    header = f"Agent run {session.session_id}" if run else f"Claude Code session {sid}"
     if duration:
         header += f" — {duration}"
     if where:
         header += f" in {where}"
 
     lines = [header]
+    others = [name for name in (run or {}).get("runs_in_file", []) if name != session.session_id]
+    if others:
+        which = "the last to appear" if (run or {}).get("latest") == session.session_id else "the one named"
+        lines.append(
+            f"{_count_phrase(len(others) + 1, 'run', 'runs')} in this record; this is {which}. "
+            f"`--run <id>` audits another: {', '.join(others[:3])}{' and more' if len(others) > 3 else ''}."
+        )
     n = report["tool_calls"]
     failed = report["failed"]
     refused = list(report.get("refused_calls") or [])
@@ -521,6 +670,9 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         lines.append(f"{call_bit}{fail_bit} — {breakdown}" if breakdown else f"{call_bit}{fail_bit}")
 
     body: list[str] = []
+    claim = _claim_line(report)
+    if claim:
+        body.append(claim)
     if loops:
         for loop in loops:
             body.append(_loop_line(loop))
@@ -538,6 +690,8 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     if after is not None:
         body.append(_after_last_edit_line(after))
     body.extend(outcome_lines(report.get("outcome") or {}))
+    body.extend(decision_lines(report.get("decisions")))
+    body.extend(model_lines(report.get("model_calls")))
 
     if refused:
         they = "it" if len(refused) == 1 else "they"
@@ -547,7 +701,8 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     which = _unclassified_breakdown(report.get("unclassified_by_command") or {})
     which = f" ({which})" if which else ""
     if unclassified == 0:
-        body.append("Every shell command was classified.")
+        if not run or any(call.name == "Bash" for call in session.tool_calls):
+            body.append("Every shell command was classified.")
     elif unclassified == 1:
         body.append(
             f"Not classified: 1 shell command{which}, so whether it read, wrote or tested anything "
@@ -564,6 +719,12 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         body.append(
             f"Over the configured limit: {over['tool_calls']} tool calls against "
             f"{over['limit']} (from {over['source']})"
+        )
+    over_models = report.get("over_model_limit")
+    if over_models:
+        body.append(
+            f"Over the configured limit: {over_models['model_calls']} model calls against "
+            f"{over_models['limit']} (from {over_models['source']})"
         )
 
     for note in report.get("project_limit_notes") or []:
@@ -582,13 +743,23 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
 
     body.extend(inventory_lines(report.get("inventory") or {}))
 
-    bookkeeping = sum(session.records.values())
-    body.append(
-        "Also in the transcript: "
-        f"{_count_phrase(session.assistant_turns, 'assistant turn', 'assistant turns')}, "
-        f"{_count_phrase(session.user_turns, 'user turn', 'user turns')}, "
-        f"{_count_phrase(bookkeeping, 'bookkeeping record', 'bookkeeping records')}."
-    )
+    if run:
+        missing = list(report.get("not_recorded") or [])
+        if missing:
+            body.append(f"Not in the record: {'; '.join(missing)}.")
+        kept = {kind: n for kind, n in session.records.items() if kind in ("task", "model", "decision", "outcome", "claim")}
+        if kept:
+            nouns = {"task": ("task", "tasks"), "model": ("model call", "model calls"), "decision": ("decision", "decisions"),
+                     "outcome": ("outcome check", "outcome checks"), "claim": ("claim", "claims")}
+            body.append("Also in the record: " + ", ".join(_count_phrase(n, *nouns[kind]) for kind, n in kept.items()) + ".")
+    else:
+        bookkeeping = sum(session.records.values())
+        body.append(
+            "Also in the transcript: "
+            f"{_count_phrase(session.assistant_turns, 'assistant turn', 'assistant turns')}, "
+            f"{_count_phrase(session.user_turns, 'user turn', 'user turns')}, "
+            f"{_count_phrase(bookkeeping, 'bookkeeping record', 'bookkeeping records')}."
+        )
     body.append(_not_read_line(session.not_read, session.not_read_reasons))
 
     if session.unmatched_results == 1:
@@ -721,6 +892,8 @@ def _short_input(call: ToolCall) -> str:
         command = data.get("command")
         if isinstance(command, str) and command:
             return command
+    if not data:
+        return ""  # a tool that took nothing: its name is the whole of what it did
     path = data.get("file_path")
     if isinstance(path, str) and path:
         if call.name in _CHANGE_TOOL_NAMES:

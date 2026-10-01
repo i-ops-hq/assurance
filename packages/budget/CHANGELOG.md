@@ -1,3 +1,30 @@
+# 0.2.13
+
+- **The audit for an agent you wrote, or code that calls a model.** `assurance audit run.jsonl` reads a
+  run record, `assurance.run/1`: one JSON line per thing a run did. That covers its task (with
+  `must_run`, `must_not_touch` and the files it should write), model calls, tool calls, edits,
+  commands with their exit codes, gate decisions, the checks its own code made, and its last word. It
+  reports it the way it reports a Claude Code session: what ran after the last edit, the outcome
+  against the task, the rules, loops and tokens. The run's last word is held against everything in
+  the record that goes against it. No library is needed to write one, and no text is required: a
+  record without the task's words or the last message is read, and the report says which checks that
+  left undone.
+- **Decisions against outcomes.** A `decision` line records a gate's verdict on a step before it runs:
+  a policy, a person, or a fast decision model such as Jev or laya. The report holds each against what
+  the step then did (`held`, `failed`, `not checked`, `did not run`, `ran anyway`, `ran before it`), by
+  code, so any gate can be measured against what happened. `--json` carries it as `decisions`, shape
+  `assurance.decisions/1`.
+- **`--fail-on-outcome`** exits 1 when something declared did not hold: a `must_run` command that
+  failed or did not run after the last edit, a `must_not_touch` path that changed, an expected output
+  not written, a test or command the prompt named that failed, a check the run recorded that failed,
+  or a step a gate allowed that failed or blocked that ran anyway. Unknown is neither a pass nor a
+  failure. It works on Claude Code sessions too. `--run <id>` picks one run from a file of several.
+- **`assurance budget` reads a run record too**, charging its tool calls, edits and commands as tool
+  calls and its model calls as frontier calls; its task, decisions, outcomes and claim charge nothing.
+  A log written for `assurance budget` gets the full audit as well.
+- The Claude Code audit is unchanged: on four real sessions, up to 56 MB, it prints what 0.2.12
+  printed, byte for byte.
+
 # 0.2.12
 
 - **Settings are read on Python 3.10.** `.assurance/config.toml` and `~/.config/assurance/config.toml`
