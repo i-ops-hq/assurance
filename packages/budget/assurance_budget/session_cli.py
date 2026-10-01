@@ -39,6 +39,7 @@ from assurance_budget.sessions import (
     edited_without_read,
     find_latest_session,
     find_session,
+    input_label,
     read_claude_code,
     read_claude_code_tail,
     transcript_changed_limits_file,
@@ -904,8 +905,7 @@ def _short_input(call: ToolCall) -> str:
             digest = hashlib.sha256(json.dumps(change, sort_keys=True, default=str).encode("utf-8")).hexdigest()
             return f"{path} #{digest[:12]}"
         return path
-    dumped = json.dumps(data, sort_keys=True, default=str)
-    return hashlib.sha256(dumped.encode("utf-8")).hexdigest()[:12]
+    return input_label(data)
 
 
 def _not_read_line(not_read: int, reasons: dict[str, int] | Any) -> str:
