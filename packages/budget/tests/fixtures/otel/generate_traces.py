@@ -9,8 +9,9 @@ conventions (GenAI's `execute_tool`, OpenInference's TOOL).
     python generate_traces.py <genai|genai-content|openinference> <out dir>
 
 writes `<name>-console.json` (the SDK's `ConsoleSpanExporter`, as it prints by default),
-`<name>-otlp.jsonl` (`assurance_budget.otel.FileExporter`) and `<name>-protobuf.jsonl` (what the
-OTLP/HTTP exporter sent, decoded, in protobuf's own JSON). `example` writes the README's
+`<name>-otlp.jsonl` (`assurance_budget.otel.FileExporter`), `<name>-protobuf.jsonl` (what the
+OTLP/HTTP exporter sent, decoded, in protobuf's own JSON) and `<name>-protobuf.b64` (the bodies it
+sent, as sent, one per line in base64). `example` writes the README's
 `examples/traces/refund-agent.jsonl`: `genai-content`, from an agent whose resource names its service
 and the folder it works in, by `FileExporter` alone. Made with Python 3.12, openai 3.22.1,
 opentelemetry-sdk 1.45.0, opentelemetry-exporter-otlp-proto-http 1.45.0,
@@ -22,6 +23,7 @@ OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY, so its spans carry
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -50,16 +52,19 @@ from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProces
 from assurance_budget.otel import FileExporter  # noqa: E402
 
 out.mkdir(parents=True, exist_ok=True)
-for written in ("refund-agent.jsonl",) if example else (f"{name}{suffix}" for suffix in ("-console.json", "-otlp.jsonl", "-protobuf.jsonl")):
+for written in ("refund-agent.jsonl",) if example else (f"{name}{suffix}" for suffix in ("-console.json", "-otlp.jsonl", "-protobuf.jsonl", "-protobuf.b64")):
     (out / written).unlink(missing_ok=True)
 
 received: list[dict[str, object]] = []
+bodies: list[bytes] = []
 
 
 class Collector(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         request = ExportTraceServiceRequest()
-        request.ParseFromString(self.rfile.read(int(self.headers["Content-Length"])))
+        body = self.rfile.read(int(self.headers["Content-Length"]))
+        bodies.append(body)
+        request.ParseFromString(body)
         received.append(MessageToDict(request))
         self.send_response(200)
         self.end_headers()
@@ -139,4 +144,5 @@ server.shutdown()
 if not example:
     (out / f"{name}-console.json").write_text(console.getvalue(), encoding="utf-8")
     (out / f"{name}-protobuf.jsonl").write_text("".join(json.dumps(request) + "\n" for request in received), encoding="utf-8")
+    (out / f"{name}-protobuf.b64").write_text("".join(base64.b64encode(body).decode() + "\n" for body in bodies), encoding="ascii")
 print(name, "spans:", console.getvalue().count('"context"'), "| requests:", len(received))

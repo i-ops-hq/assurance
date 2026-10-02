@@ -26,6 +26,7 @@ FORWARDED: dict[str, tuple[str, str]] = {
     "authority": ("assurance_authority.cli", "pip install assurance-authority"),
     "audit": ("assurance_budget.session_cli", "pip install assurance-budget"),
     "hook": ("assurance_budget.hook_setup", "pip install assurance-budget"),
+    "serve": ("assurance_budget.serve", "pip install assurance-budget"),
 }
 
 _START_HERE = """\
@@ -34,6 +35,7 @@ assurance — your AI agent says it's done. This tells you what it didn't check.
   assurance audit                         what the Claude Code session in this folder did, and skipped
   assurance audit --demo                  the same report on a bundled sample session
   assurance hook install                  run the audit after every Claude Code turn (remove undoes it)
+  assurance serve                         a local endpoint any agent sends its traces or runs to
   assurance diff --expected A --found B   was everything that should have been read, read?
   assurance pin --save | --check          did an MCP server change a tool after you approved it?
   assurance deps package.json             what an install will execute, read without running it
@@ -115,6 +117,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "hook", add_help=False,
         help="Run the audit after every Claude Code turn: install, remove, status",
+    )
+
+    sub.add_parser(
+        "serve", add_help=False,
+        help="A local endpoint any agent sends its traces or run records to, and any workflow asks for an audit",
     )
 
     init_parser = sub.add_parser("init", help="Write .assurance.json baseline")

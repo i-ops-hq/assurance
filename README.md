@@ -186,6 +186,7 @@ One install, one `assurance` command.
 |---|---|
 | `assurance audit` | What did the coding-agent session in this folder, or your own agent's run or trace, do, and what did it skip? |
 | `assurance hook` | Run that audit after every Claude Code turn, or stop running it: `install`, `remove`, `status`. |
+| `assurance serve` | A local endpoint any agent sends its traces or runs to, and any workflow asks for a run's audit. |
 | `assurance diff` | Did the work cover everything it should have? For example, retrieved docs vs. required docs. |
 | `assurance pin` | Did an MCP server quietly change a tool's description after you approved it? |
 | `assurance deps` | What will `pip install` or `npm install` run on your machine? Read without running it. |
@@ -432,6 +433,43 @@ Its task is the last thing the user said before its first model call, and its la
 not hold, or a step whose last run failed. A model's reply counts as saying so only when it says the
 tests pass; one that says it could not finish is shown beside what failed, not set against it. A trace
 holds only what its spans carry, and the audit sends nothing anywhere.
+
+## A local endpoint for any agent or workflow
+
+`assurance serve` listens on this machine for what agents send, and answers any workflow that asks
+about a run. An agent that already exports OTLP, in any language, protobuf or JSON, only needs the
+endpoint:
+
+```bash
+assurance serve &
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 python my_agent.py
+```
+
+Anything that can make an HTTP request can send run record lines instead:
+
+```bash
+curl -s --data-binary @run.jsonl http://127.0.0.1:4318/v1/runs
+```
+
+A workflow, a CI job, or the agent's own wrapper asks for a run's audit, which is `assurance audit
+--json` of it, with a verdict it can stop on:
+
+```bash
+curl -s "http://127.0.0.1:4318/v1/runs/refund-42?fail_on=claim,outcome" | jq -e .verdict.passed
+```
+
+| | |
+|---|---|
+| `POST /v1/traces` | OpenTelemetry traces, as any OTLP/HTTP exporter sends them: protobuf or JSON, gzipped or not |
+| `POST /v1/runs` | run record lines: JSON lines, one object, or an array of them |
+| `GET /v1/runs` | the runs it holds |
+| `GET /v1/runs/<id>` | the run's audit; `verdict.failed` names the gates it fails, `?fail_on=` the ones `verdict.passed` answers for, and `?format=text` gives the report as text |
+
+What it is sent is kept as it came, in two files under `~/.local/state/assurance/runs` (`--store` picks
+another folder), and each audit reads them with the readers `assurance audit` uses, so a run audited
+here is audited the same from the files. It listens on 127.0.0.1, port 4318 unless `--port` says
+otherwise, and asks for no credentials: keep it on this machine, or put it behind something that
+authenticates.
 
 ## Your project's own tests, checks and rules
 

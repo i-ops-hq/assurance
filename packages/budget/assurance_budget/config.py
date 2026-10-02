@@ -211,6 +211,18 @@ def _user_config_path() -> Path:
     return Path.home() / ".config" / "assurance" / "config.toml"
 
 
+def state_dir(env: Mapping[str, str], name: str) -> Path:
+    """Where assurance keeps what it writes for itself, outside any repository: `name` under
+    `$XDG_STATE_HOME/assurance` (`~/.local/state/assurance`), or `%LOCALAPPDATA%\\assurance` on Windows."""
+    if sys.platform == "win32":
+        base = env.get("LOCALAPPDATA", "").strip()
+        root = Path(base) if base else Path.home() / "AppData" / "Local"
+        return root / "assurance" / name
+    state = env.get("XDG_STATE_HOME", "").strip()
+    root = Path(state).expanduser() if state else Path.home() / ".local" / "state"
+    return root / "assurance" / name
+
+
 def _read_toml(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")

@@ -300,8 +300,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run `assurance audit` and return its exit code.
 
-    0 when the session was read. 1 when `--fail-on-loop` or `--fail-on-unverified` was given and
-    its condition holds. 2 when there was nothing to read: no session recorded for this folder, no
+    0 when the session was read. 1 when a `--fail-on-*` gate was given and the report fails it
+    (`failed_gates`). 2 when there was nothing to read: no session recorded for this folder, no
     transcript for the `--session` id, a transcript that cannot be read, or a limits config that
     cannot be loaded. A usage error exits 2
     from argparse. `--hook` hands off to `run_hook`, which always returns 0.
@@ -372,36 +372,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"assurance audit: cannot read {path}: {exc}", file=sys.stderr)
         return EXIT_UNREADABLE
 
-    limits_changed = changed_limits_file(session)
     try:
-        declared, declared_from, declared_notes = load_declared(
-            _project_dir(session), trust_project=not limits_changed
-        )
+        loops, report = audit(session, record, ceilings)
     except ConfigError as exc:
         print(f"assurance audit: {exc}", file=sys.stderr)
         return EXIT_UNREADABLE
-    if record is not None and record.task is not None:
-        declared = _with_task(declared, record.task.must_run, record.task.must_not_touch)
-
-    loops = detect_loops(session.tool_calls)
-    unread_edits = edited_without_read(session)
-    after = after_last_edit(session, declared)
-    unclassified = unclassified_bash_count(session, declared)
-    bash_kinds = bash_kinds_count(session, declared)
-    report = build_report(
-        session,
-        loops,
-        unread_edits,
-        after,
-        unclassified,
-        ceilings,
-        limits_changed=limits_changed,
-        bash_kinds=bash_kinds,
-        declared=declared,
-        declared_from=declared_from,
-        declared_notes=declared_notes,
-        record=record,
-    )
     if args.as_json:
         print(json.dumps(report, indent=2))
     else:
@@ -412,16 +387,55 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "where you have used Claude Code to audit your own.)"
             )
 
-    if args.fail_on_unverified and after is not None and after["tests"] == 0 and after["checks"] == 0:
-        return EXIT_GATE
-    if args.fail_on_loop and loops:
-        return EXIT_GATE
-    if args.fail_on_outcome and outcome_failures(report):
-        return EXIT_GATE
+    asked = {gate for gate in GATES if getattr(args, f"fail_on_{gate}")}
+    return EXIT_GATE if asked & set(failed_gates(report)) else EXIT_OK
+
+
+def audit(session: Session, record: RunRecord | None, ceilings: Ceilings | None) -> tuple[list[Stalled], dict[str, Any]]:
+    """The report on a session or a run, as `--json` prints it, and the loops in it: what `assurance
+    audit` and `assurance serve` both answer with. Raises `ConfigError` when the project's settings
+    cannot be read."""
+    limits_changed = changed_limits_file(session)
+    declared, declared_from, declared_notes = load_declared(_project_dir(session), trust_project=not limits_changed)
+    if record is not None and record.task is not None:
+        declared = _with_task(declared, record.task.must_run, record.task.must_not_touch)
+    loops = detect_loops(session.tool_calls)
+    report = build_report(
+        session,
+        loops,
+        edited_without_read(session),
+        after_last_edit(session, declared),
+        unclassified_bash_count(session, declared),
+        ceilings,
+        limits_changed=limits_changed,
+        bash_kinds=bash_kinds_count(session, declared),
+        declared=declared,
+        declared_from=declared_from,
+        declared_notes=declared_notes,
+        record=record,
+    )
+    return loops, report
+
+
+#: The gates a report can fail, each asked for by `--fail-on-<gate>`.
+GATES = ("unverified", "loop", "outcome", "claim")
+
+
+def failed_gates(report: dict[str, Any]) -> list[str]:
+    """The gates a report fails, of `GATES`: edits with no test or check after the last one, a loop,
+    an outcome that did not hold, and a run's claim the record goes against."""
+    failed: list[str] = []
+    after = report.get("after_last_edit")
+    if after is not None and after["tests"] == 0 and after["checks"] == 0:
+        failed.append("unverified")
+    if report.get("loops"):
+        failed.append("loop")
+    if outcome_failures(report):
+        failed.append("outcome")
     claim = (report.get("run") or {}).get("claim")
-    if args.fail_on_claim and claim and claim["asserts"] and claim["against"]:
-        return EXIT_GATE
-    return EXIT_OK
+    if claim and claim["asserts"] and claim["against"]:
+        failed.append("claim")
+    return failed
 
 
 def _with_task(declared: Declared, must_run: tuple[str, ...], must_not_touch: tuple[str, ...]) -> Declared:

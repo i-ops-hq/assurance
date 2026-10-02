@@ -145,16 +145,17 @@ def read_trace(path: Path, run: str | None = None, cwd: str = "") -> RunRecord:
         raise LogError(f"cannot read {target}: {exc}") from exc
     except UnicodeDecodeError as exc:
         raise LogError(f"{target} is not UTF-8 text ({exc.reason})") from exc
+    return trace_from_text(text, target, run, cwd)
+
+
+def trace_from_text(text: str, target: Path, run: str | None = None, cwd: str = "") -> RunRecord:
+    """`read_trace` of a file's text, read already: `target` is the file it came from."""
     not_read: Counter[str] = Counter()
     spans = read_spans(text, not_read)
     if not spans:
         raise LogError(f"{target} holds no spans to read")
     named = _conversations(spans)
-    order: list[str] = []
-    for span in spans:
-        name = named.get(span.trace, span.trace)
-        if name not in order:
-            order.append(name)
+    order = list(trace_runs(spans))
     latest = named.get(spans[-1].trace, spans[-1].trace)
     chosen = latest if run is None else next((name for name in order if name.lower() == run.lower()), None)
     if chosen is None:
@@ -163,6 +164,16 @@ def read_trace(path: Path, run: str | None = None, cwd: str = "") -> RunRecord:
         )
     mine = [span for span in spans if named.get(span.trace, span.trace) == chosen]
     return _one_run(target, chosen, tuple(order), latest, mine, not_read, cwd)
+
+
+def trace_runs(spans: Sequence[_Span]) -> dict[str, int]:
+    """The runs in a trace file's spans, each with its number of spans, in the order each first appears."""
+    named = _conversations(spans)
+    found: dict[str, int] = {}
+    for span in spans:
+        name = named.get(span.trace, span.trace)
+        found[name] = found.get(name, 0) + 1
+    return found
 
 
 def read_spans(text: str, not_read: Counter[str] | None = None) -> list[_Span]:
@@ -1033,5 +1044,5 @@ def _otlp_value(value: Any) -> dict[str, Any]:
 
 __all__ = [
     "EDIT_TOOLS", "FileExporter", "READ_TOOLS", "SHELL_TOOLS", "TRACE_SOURCE", "is_trace", "otlp_request",
-    "read_spans", "read_trace",
+    "read_spans", "read_trace", "trace_from_text", "trace_runs",
 ]

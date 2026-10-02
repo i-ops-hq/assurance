@@ -1,14 +1,14 @@
 {
     "name": "ChatCompletion",
     "context": {
-        "trace_id": "0x9b52bf5a46b9fe5c28e1c2923e330ac3",
-        "span_id": "0xdb5b6454d1e82f92",
+        "trace_id": "0x47a2e4118a59037ff56b883660988ab7",
+        "span_id": "0xbac400cc6b46981b",
         "trace_state": "[]"
     },
     "kind": "SpanKind.INTERNAL",
-    "parent_id": "0x4740ed9faf43982c",
-    "start_time": "2026-10-02T03:57:57.132518Z",
-    "end_time": "2026-10-02T03:57:57.145186Z",
+    "parent_id": "0x27ac019ac2cbc7bb",
+    "start_time": "2026-10-02T04:26:44.234097Z",
+    "end_time": "2026-10-02T04:26:44.247798Z",
     "status": {
         "status_code": "OK"
     },
@@ -42,7 +42,7 @@
             "telemetry.sdk.language": "python",
             "telemetry.sdk.name": "opentelemetry",
             "telemetry.sdk.version": "1.45.0",
-            "service.instance.id": "23acdaec-2c68-4f79-b8a2-6fc0935faaec",
+            "service.instance.id": "3924c83d-5b94-4f39-bf0d-6566b3fe6532",
             "service.name": "unknown_service:python"
         },
         "schema_url": ""
@@ -51,14 +51,14 @@
 {
     "name": "execute_tool write_file",
     "context": {
-        "trace_id": "0x9b52bf5a46b9fe5c28e1c2923e330ac3",
-        "span_id": "0xfa80694524524463",
+        "trace_id": "0x47a2e4118a59037ff56b883660988ab7",
+        "span_id": "0x573d04edba21096e",
         "trace_state": "[]"
     },
     "kind": "SpanKind.INTERNAL",
-    "parent_id": "0x4740ed9faf43982c",
-    "start_time": "2026-10-02T03:57:57.146967Z",
-    "end_time": "2026-10-02T03:57:57.146978Z",
+    "parent_id": "0x27ac019ac2cbc7bb",
+    "start_time": "2026-10-02T04:26:44.249465Z",
+    "end_time": "2026-10-02T04:26:44.249475Z",
     "status": {
         "status_code": "UNSET"
     },
@@ -76,7 +76,7 @@
             "telemetry.sdk.language": "python",
             "telemetry.sdk.name": "opentelemetry",
             "telemetry.sdk.version": "1.45.0",
-            "service.instance.id": "23acdaec-2c68-4f79-b8a2-6fc0935faaec",
+            "service.instance.id": "3924c83d-5b94-4f39-bf0d-6566b3fe6532",
             "service.name": "unknown_service:python"
         },
         "schema_url": ""
@@ -85,14 +85,14 @@
 {
     "name": "ChatCompletion",
     "context": {
-        "trace_id": "0x9b52bf5a46b9fe5c28e1c2923e330ac3",
-        "span_id": "0x1b1c78d876a1c1c8",
+        "trace_id": "0x47a2e4118a59037ff56b883660988ab7",
+        "span_id": "0x01d289128be9c146",
         "trace_state": "[]"
     },
     "kind": "SpanKind.INTERNAL",
-    "parent_id": "0x4740ed9faf43982c",
-    "start_time": "2026-10-02T03:57:57.148164Z",
-    "end_time": "2026-10-02T03:57:57.148595Z",
+    "parent_id": "0x27ac019ac2cbc7bb",
+    "start_time": "2026-10-02T04:26:44.250711Z",
+    "end_time": "2026-10-02T04:26:44.251140Z",
     "status": {
         "status_code": "OK"
     },
@@ -133,7 +133,7 @@
             "telemetry.sdk.language": "python",
             "telemetry.sdk.name": "opentelemetry",
             "telemetry.sdk.version": "1.45.0",
-            "service.instance.id": "23acdaec-2c68-4f79-b8a2-6fc0935faaec",
+            "service.instance.id": "3924c83d-5b94-4f39-bf0d-6566b3fe6532",
             "service.name": "unknown_service:python"
         },
         "schema_url": ""
@@ -142,14 +142,14 @@
 {
     "name": "execute_tool bash",
     "context": {
-        "trace_id": "0x9b52bf5a46b9fe5c28e1c2923e330ac3",
-        "span_id": "0x2beb830e08cacc72",
+        "trace_id": "0x47a2e4118a59037ff56b883660988ab7",
+        "span_id": "0xe7a84857fc33d3b0",
         "trace_state": "[]"
     },
     "kind": "SpanKind.INTERNAL",
-    "parent_id": "0x4740ed9faf43982c",
-    "start_time": "2026-10-02T03:57:57.149342Z",
-    "end_time": "2026-10-02T03:57:57.149355Z",
+    "parent_id": "0x27ac019ac2cbc7bb",
+    "start_time": "2026-10-02T04:26:44.251899Z",
+    "end_time": "2026-10-02T04:26:44.251910Z",
     "status": {
         "status_code": "UNSET"
     },
@@ -167,7 +167,7 @@
             "telemetry.sdk.language": "python",
             "telemetry.sdk.name": "opentelemetry",
             "telemetry.sdk.version": "1.45.0",
-            "service.instance.id": "23acdaec-2c68-4f79-b8a2-6fc0935faaec",
+            "service.instance.id": "3924c83d-5b94-4f39-bf0d-6566b3fe6532",
             "service.name": "unknown_service:python"
         },
         "schema_url": ""
@@ -176,14 +176,14 @@
 {
     "name": "ChatCompletion",
     "context": {
-        "trace_id": "0x9b52bf5a46b9fe5c28e1c2923e330ac3",
-        "span_id": "0x8d1686e3fbcfbc2d",
+        "trace_id": "0x47a2e4118a59037ff56b883660988ab7",
+        "span_id": "0x52057785295e2878",
         "trace_state": "[]"
     },
     "kind": "SpanKind.INTERNAL",
-    "parent_id": "0x4740ed9faf43982c",
-    "start_time": "2026-10-02T03:57:57.150440Z",
-    "end_time": "2026-10-02T03:57:57.150843Z",
+    "parent_id": "0x27ac019ac2cbc7bb",
+    "start_time": "2026-10-02T04:26:44.252854Z",
+    "end_time": "2026-10-02T04:26:44.253226Z",
     "status": {
         "status_code": "OK"
     },
@@ -229,7 +229,7 @@
             "telemetry.sdk.language": "python",
             "telemetry.sdk.name": "opentelemetry",
             "telemetry.sdk.version": "1.45.0",
-            "service.instance.id": "23acdaec-2c68-4f79-b8a2-6fc0935faaec",
+            "service.instance.id": "3924c83d-5b94-4f39-bf0d-6566b3fe6532",
             "service.name": "unknown_service:python"
         },
         "schema_url": ""
@@ -238,14 +238,14 @@
 {
     "name": "invoke_agent refund-agent",
     "context": {
-        "trace_id": "0x9b52bf5a46b9fe5c28e1c2923e330ac3",
-        "span_id": "0x4740ed9faf43982c",
+        "trace_id": "0x47a2e4118a59037ff56b883660988ab7",
+        "span_id": "0x27ac019ac2cbc7bb",
         "trace_state": "[]"
     },
     "kind": "SpanKind.INTERNAL",
     "parent_id": null,
-    "start_time": "2026-10-02T03:57:57.121882Z",
-    "end_time": "2026-10-02T03:57:57.151725Z",
+    "start_time": "2026-10-02T04:26:44.222430Z",
+    "end_time": "2026-10-02T04:26:44.254082Z",
     "status": {
         "status_code": "UNSET"
     },
@@ -260,7 +260,7 @@
             "telemetry.sdk.language": "python",
             "telemetry.sdk.name": "opentelemetry",
             "telemetry.sdk.version": "1.45.0",
-            "service.instance.id": "23acdaec-2c68-4f79-b8a2-6fc0935faaec",
+            "service.instance.id": "3924c83d-5b94-4f39-bf0d-6566b3fe6532",
             "service.name": "unknown_service:python"
         },
         "schema_url": ""
