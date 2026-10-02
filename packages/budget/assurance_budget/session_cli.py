@@ -1,4 +1,4 @@
-"""`assurance audit` — what a Claude Code session did, and what could not be classified."""
+"""`assurance audit` — what a Claude Code session, or any agent's run, did, and what could not be classified."""
 
 from __future__ import annotations
 
@@ -25,9 +25,10 @@ from assurance_budget.config import (
 from assurance_budget.events import LogError
 from assurance_budget.decisions import decision_lines, decisions
 from assurance_budget.inventory import inventory, inventory_lines
-from assurance_budget.notice import Notice, needs_earlier_lines, stop_notice
+from assurance_budget.notice import Notice, claims_tests_pass, needs_earlier_lines, stop_notice
+from assurance_budget.otel import TRACE_SOURCE, is_trace, read_trace
 from assurance_budget.outcome import outcome, outcome_lines
-from assurance_budget.record import RECORD_SCHEMA, RunRecord, is_run_record, model_lines, model_summary, read_run_record
+from assurance_budget.record import RunRecord, is_run_record, model_lines, model_summary, read_run_record
 from assurance_budget.sessions import (
     Declared,
     Session,
@@ -56,7 +57,7 @@ EXIT_UNREADABLE = 2
 #: Transcript sources whose harness refuses an edit to a file the model has not read.
 _READ_BEFORE_EDIT_ENFORCED = frozenset({"claude-code"})
 #: How a run record's edits and commands are named in the report, rather than the tool each is read as.
-_RECORD_NAMES = {"Bash": "command", "Write": "edit"}
+_RECORD_NAMES = {"Bash": "command", "Write": "edit", "Read": "read"}
 
 #: The session `--demo` audits: the same file as examples/audit/sample-session.jsonl in the repo.
 SAMPLE_SESSION = Path(__file__).resolve().parent / "data" / "sample-session.jsonl"
@@ -210,17 +211,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="assurance audit",
         description=(
-            "Read a Claude Code session transcript, or a run record any agent's own code can write "
-            "(assurance.run/1), and say what it did — and, at the same weight, what could not be "
-            "classified or checked."
+            "Read a Claude Code session transcript, a run record any agent's own code can write "
+            "(assurance.run/1), or an OpenTelemetry trace of any agent, and say what it did — and, at "
+            "the same weight, what could not be classified or checked."
         ),
     )
     parser.add_argument(
         "transcript",
         nargs="?",
         help=(
-            "Path to a Claude Code .jsonl transcript, or to a run record (assurance.run/1). Omit to use "
-            "the latest Claude Code session for cwd"
+            "Path to a Claude Code .jsonl transcript, a run record (assurance.run/1), or an OpenTelemetry "
+            "trace (OTLP JSON, or what the Python SDK's console exporter prints). Omit to use the latest "
+            "Claude Code session for cwd"
         ),
     )
     parser.add_argument(
@@ -256,9 +258,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--fail-on-claim",
+        action="store_true",
+        help=(
+            f"Exit {EXIT_GATE} when a run says it is done and the record goes against it: a check that did "
+            "not hold, or a step whose last run failed. A run record's claim, or a trace's assurance.claim "
+            "event, is what it says; a model's last reply counts when it says the tests pass"
+        ),
+    )
+    parser.add_argument(
         "--run",
         metavar="ID",
-        help="With a run record (assurance.run/1) that holds several runs: the one to audit. The last by default",
+        help=(
+            "With a run record (assurance.run/1) or a trace that holds several runs: the one to audit, by "
+            "its id (a trace's run is its trace id, or the conversation its spans name). The last by default"
+        ),
     )
     parser.add_argument(
         "--demo",
@@ -341,12 +355,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     record: RunRecord | None = None
     try:
-        if args.transcript and is_run_record(path):
+        if args.transcript and is_trace(path):
+            record = read_trace(path, run=args.run, cwd=str(Path.cwd()))
+            session = record.session
+        elif args.transcript and is_run_record(path):
             record = read_run_record(path, run=args.run, cwd=str(Path.cwd()))
             session = record.session
         else:
             if args.run is not None:
-                parser.error("--run picks a run in a run record (assurance.run/1); this is not one")
+                parser.error("--run picks a run in a run record (assurance.run/1) or a trace; this is neither")
             session = read_claude_code(path)
     except LogError as exc:
         print(f"assurance audit: {exc}", file=sys.stderr)
@@ -401,6 +418,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_GATE
     if args.fail_on_outcome and outcome_failures(report):
         return EXIT_GATE
+    claim = (report.get("run") or {}).get("claim")
+    if args.fail_on_claim and claim and claim["asserts"] and claim["against"]:
+        return EXIT_GATE
     return EXIT_OK
 
 
@@ -449,8 +469,45 @@ def outcome_failures(report: dict[str, Any]) -> list[str]:
     return failed
 
 
+def failed_last(session: Session, report: dict[str, Any]) -> list[str]:
+    """Each step whose last run failed, when nothing in `outcome_failures` names it already: the rest
+    of what a run's last word is held against. `its last run of run_tests {"path": "tests/"} failed`.
+
+    A step is what it ran: a command, a tool with its input, an edit or a read of one file. Run again
+    and passing, it no longer counts; a step a gate allowed, or one its own check failed, is said
+    there, and a command is left to a failed must_run or prompt check that names it.
+    """
+    checks = (report.get("outcome") or {}).get("checks") or []
+    said = {check.get("step") for check in checks if check["from"] == "run" and check["answer"] == "failed"}
+    said |= {item["step"] for item in (report.get("decisions") or {}).get("items") or [] if item["result"] == "failed"}
+    subjects = [check["subject"] for check in checks if check["from"] in ("must_run", "prompt") and check["answer"] == "failed"]
+    last: dict[str, ToolCall] = {}
+    for call in session.tool_calls:
+        if call.refused:
+            continue
+        key = f"{call.name}\0{_short_input(call)}"
+        last.pop(key, None)  # keyed by the step, in the order of each one's last run
+        last[key] = call
+    found: list[str] = []
+    for call in last.values():
+        if not call.error or call.id in said:
+            continue
+        path = call.input.get("file_path")
+        if call.name in ("Bash", "PowerShell"):
+            command = str(call.input.get("command") or "")
+            if not any(subject in command for subject in subjects):
+                found.append(f"its last run of `{_excerpt(command, 60)}` failed")
+        elif call.name in ("Write", "Read") and isinstance(path, str):
+            found.append(f"its {'edit' if call.name == 'Write' else 'read'} of {display_path(path, session.cwd)} failed")
+        else:
+            shown = input_label(call.input) if call.input else ""
+            found.append(f"its last run of {call.name}{' ' + shown if shown else ''} failed")
+    return found
+
+
 def _claim_line(report: dict[str, Any]) -> str | None:
-    """A run's last word, next to what in the record does not bear it out."""
+    """A run's last word, next to what in the record does not bear it out. A model's reply that does
+    not say the work is done is shown beside what failed, not set against it: it may say so itself."""
     claim = (report.get("run") or {}).get("claim")
     if not claim:
         return None
@@ -460,7 +517,7 @@ def _claim_line(report: dict[str, Any]) -> str | None:
     if not against:
         return f"{said} Nothing in the record goes against it, which is not the same as bearing it out."
     shown = "; ".join(against[:5]) + (f"; and {len(against) - 5} more" if len(against) > 5 else "")
-    return f"{said} Against it: {shown}."
+    return f"{said} {'Against it' if claim.get('asserts', True) else 'At its end'}: {shown}."
 
 
 def detect_loops(calls: tuple[ToolCall, ...] | list[ToolCall]) -> list[Stalled]:
@@ -574,8 +631,9 @@ def build_report(
     if record is not None:
         task = record.task
         payload["run"] = {
-            "schema": RECORD_SCHEMA,
+            "schema": record.schema,
             "id": session.session_id,
+            "read_as": list(record.notes),
             "runs_in_file": list(record.runs),
             "latest": record.latest,
             "task": None if task is None else {
@@ -591,7 +649,11 @@ def build_report(
         seq, words = session.last_text
         payload["run"]["claim"] = None if seq < 0 else {
             "excerpt": _excerpt(words),
-            "against": outcome_failures(payload),
+            "from": record.claim_from,
+            # A reply can be an admission ("the tests still fail"), which what failed agrees with rather
+            # than goes against: it asserts the work is done only when it says the tests pass.
+            "asserts": record.claim_from == "claim" or claims_tests_pass(words),
+            "against": outcome_failures(payload) + failed_last(session, payload),
         }
         if caps is not None and caps.source != "built-in defaults" and len(record.models) > caps.frontier_calls:
             payload["over_model_limit"] = {
@@ -614,13 +676,21 @@ def _excerpt(text: str, limit: int = 80) -> str:
 def _outcome(session: Session, declared: Declared | None, record: RunRecord | None) -> dict[str, Any]:
     if record is None:
         return outcome(session, declared)
+    trace = record.schema == TRACE_SOURCE
     words = (
-        "The record has no task line to check the outcome against."
+        ("The trace says nothing of the task to check the outcome against." if trace else "The record has no task line to check the outcome against.")
         if record.task is None
         else "The task's words were not recorded, so the files, tests and commands they name cannot be checked."
     )
     expect = record.task.expect if record.task is not None else ()
-    return outcome(session, declared, expect=expect, recorded=record.checks, no_prompt=words, asked="the task")
+    unseen = (
+        "a trace shows only the reads of tools it knows by name, so whether the run opened it cannot be told"
+        if trace
+        else "a run record keeps no reads, so whether the run opened it cannot be told"
+    )
+    return outcome(
+        session, declared, expect=expect, recorded=record.checks, no_prompt=words, asked="the task", reads_unseen=unseen,
+    )
 
 
 def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]) -> str:
@@ -660,6 +730,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
             f"{_count_phrase(len(others) + 1, 'run', 'runs')} in this record; this is {which}. "
             f"`--run <id>` audits another: {', '.join(others[:3])}{' and more' if len(others) > 3 else ''}."
         )
+    lines.extend((run or {}).get("read_as") or [])
     n = report["tool_calls"]
     failed = report["failed"]
     refused = list(report.get("refused_calls") or [])
