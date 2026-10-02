@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from assurance_budget.config import state_dir
+
 EXIT_OK = 0
 EXIT_GATE = 1
 EXIT_UNREADABLE = 2
@@ -276,13 +278,7 @@ def _indent_of(text: str | None) -> int | str:
 
 
 def _backup_dir(env: Mapping[str, str]) -> Path:
-    if sys.platform == "win32":
-        base = env.get("LOCALAPPDATA", "").strip()
-        root = Path(base) if base else Path.home() / "AppData" / "Local"
-        return root / "assurance" / "backups"
-    state = env.get("XDG_STATE_HOME", "").strip()
-    root = Path(state).expanduser() if state else Path.home() / ".local" / "state"
-    return root / "assurance" / "backups"
+    return state_dir(env, "backups")
 
 
 def _write(path: Path, text: str, *, scope: str, env: Mapping[str, str]) -> Path | None:

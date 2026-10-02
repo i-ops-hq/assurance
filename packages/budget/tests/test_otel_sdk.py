@@ -11,14 +11,18 @@ from __future__ import annotations
 import io
 import json
 import os
+import threading
 from pathlib import Path
 
 import pytest
 
 from assurance_budget import config
 from assurance_budget.otel import FileExporter, read_trace
+from assurance_budget.serve import Server, Store
 
 if os.environ.get("ASSURANCE_REQUIRE_SDKS"):
+    from opentelemetry.exporter.otlp.proto.http import Compression
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor, SpanExportResult
     from opentelemetry.trace import Status, StatusCode
@@ -26,10 +30,13 @@ else:
     sdk_trace = pytest.importorskip("opentelemetry.sdk.trace")
     sdk_export = pytest.importorskip("opentelemetry.sdk.trace.export")
     api_trace = pytest.importorskip("opentelemetry.trace")
+    otlp_http = pytest.importorskip("opentelemetry.exporter.otlp.proto.http")
+    otlp_traces = pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
     TracerProvider, Status, StatusCode = sdk_trace.TracerProvider, api_trace.Status, api_trace.StatusCode
     ConsoleSpanExporter, SimpleSpanProcessor, SpanExportResult = (
         sdk_export.ConsoleSpanExporter, sdk_export.SimpleSpanProcessor, sdk_export.SpanExportResult,
     )
+    Compression, OTLPSpanExporter = otlp_http.Compression, otlp_traces.OTLPSpanExporter
 
 
 @pytest.fixture(autouse=True)
@@ -88,3 +95,27 @@ def test_spans_the_sdk_makes_read_back_the_same_from_either_exporter(tmp_path: P
         assert session.last_text[1] == "Fixed, and the tests pass." and record.claim_from == "claim"
     assert runs[0].session.session_id == runs[1].session.session_id
     assert exporter.export(()) is SpanExportResult.FAILURE  # the provider shut it down
+
+
+def test_the_official_otlp_exporter_reaches_assurance_serve(tmp_path: Path) -> None:
+    """What `OTLPSpanExporter` sends, protobuf and gzipped, read by the endpoint as the same run."""
+    server = Server(("127.0.0.1", 0), Store(tmp_path / "store"), quiet=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/v1/traces"
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint=url, compression=Compression.Gzip)))
+        _run(provider)
+        provider.shutdown()
+        runs = server.store.runs()
+        assert [(run["from"], run["spans"]) for run in runs] == [("trace", 4)]
+        record = server.store.read(runs[0]["id"])
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert record is not None and record.session.not_read == 0
+    assert [(m.model, m.input_tokens) for m in record.models] == [("gpt-5", 1200)]
+    assert [(c.name, c.error) for c in record.session.tool_calls] == [("Write", False), ("Bash", True)]
+    assert record.task is not None and record.task.must_run == ("pytest -q",)
+    assert record.session.last_text[1] == "Fixed, and the tests pass."

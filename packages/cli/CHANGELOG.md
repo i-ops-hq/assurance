@@ -1,3 +1,8 @@
+# 0.6.4
+
+- **`assurance serve`** reaches `assurance-budget`'s local endpoint, where any agent sends its traces or
+  run records and any workflow asks for a run's audit. Listed in `--help` and on the start screen.
+
 # 0.6.3
 
 - **The start screen** says what the tool is for and lists the commands, without the line "No model,

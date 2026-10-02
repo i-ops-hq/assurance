@@ -163,7 +163,11 @@ def read_run_record(path: Path, run: str | None = None, cwd: str = "") -> RunRec
         raise LogError(f"cannot read {target}: {exc}") from exc
     except UnicodeDecodeError as exc:
         raise LogError(f"{target} is not UTF-8 text ({exc.reason})") from exc
+    return record_from_text(text, target, run, cwd)
 
+
+def record_from_text(text: str, target: Path, run: str | None = None, cwd: str = "") -> RunRecord:
+    """`read_run_record` of a file's text, read already: `target` is the file it came from."""
     lines: list[tuple[int, dict[str, Any]]] = []
     not_read: Counter[str] = Counter()
     order: list[str] = []
@@ -423,5 +427,5 @@ from assurance_budget.recorder import Recorder, RunStopped  # noqa: E402
 
 __all__ = [
     "RECORD_SCHEMA", "RECORD_TYPES", "RUN_KEYS", "Check", "Decision", "ModelCall", "Recorder", "RunRecord",
-    "RunStopped", "Task", "is_run_record", "model_lines", "model_summary", "read_run_record",
+    "RunStopped", "Task", "is_run_record", "model_lines", "model_summary", "read_run_record", "record_from_text",
 ]
