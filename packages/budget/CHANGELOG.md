@@ -1,3 +1,32 @@
+# 0.2.16
+
+- **`assurance audit` reads an OpenTelemetry trace of any agent.** An agent someone wrote, a wrapper
+  around a model's API, a workflow: most already send traces, and the audit now reads them as it reads
+  a run record and makes the same checks. It reads OTLP JSON (what the Collector's `file` exporter
+  writes, and an OTLP/HTTP exporter posts as JSON, ids in hex or base64) and what the Python SDK's
+  `ConsoleSpanExporter` prints, by OpenTelemetry's GenAI conventions, OpenInference's and OpenLLMetry's:
+  model calls with their tokens, tool calls with their arguments, results and failures, a shell tool's
+  command as a command and a file tool's path as an edit or a read, so the checks after the last edit
+  work for an agent that has them. A model call inside another is one call, the innermost; a tool span
+  inside one for the same tool is one call; a span written twice is read once. Events named
+  `assurance.task`, `assurance.decision`, `assurance.outcome` and `assurance.claim` say what a run
+  record's lines say; without them, the task and the last word are read from message content when the
+  instrumentation recorded it, and the report says when it did not. Each trace is a run, or each
+  conversation its spans name (`gen_ai.conversation.id`, `session.id`); `--run` picks one. Read on real
+  traces from OpenTelemetry's and OpenInference's OpenAI instrumentations, in all three formats.
+- **`FileExporter`** (`assurance_budget.otel`) is a span exporter that writes OTLP JSON lines for the
+  audit to read, from the tracer provider an agent already has. It reads spans by their shape, so no
+  OpenTelemetry package is a dependency; a CI job tests it against the SDK, where a skip fails.
+- **`--fail-on-claim`** exits 1 when a run says it is done and the record goes against it. A run's last
+  word is now held against each step whose last run failed, as well as the checks that did not hold. A
+  model's reply that does not say the tests pass is shown beside what failed (`At its end:`), not set
+  against it, since it may be saying so itself.
+- **A file the task names and no read shows is unknown, not "not opened"**, for a run record, which
+  keeps no reads, and a trace, which shows only the reads of the tools it knows by name.
+- Every JSON-lines reader splits a file into records on newlines only. `str.splitlines` also splits on
+  characters JSON allows raw inside a string (U+2028, U+2029, U+0085 and four more), which cut a record
+  into pieces that could not be read; a Claude Code transcript lost a tool result to it.
+
 # 0.2.15
 
 - **The hook reads each command from where it ran.** Claude Code records, on every message, the folder
