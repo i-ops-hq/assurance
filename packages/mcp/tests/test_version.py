@@ -12,6 +12,7 @@ being told about.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -31,3 +32,12 @@ def test_version_agrees_with_pyproject() -> None:
 
 def test_version_is_not_a_placeholder() -> None:
     assert assurance_mcp.__version__ != "0.0.0+unknown"
+
+
+def test_the_registry_manifest_names_this_version() -> None:
+    """`server.json` is what the MCP registry lists, and the publish job refuses to list a version it
+    does not name. 0.5.4 reached PyPI with a `server.json` still saying 0.5.3, so its listing failed
+    after the release rather than in review: this fails the pull request instead."""
+    manifest = json.loads((Path(__file__).resolve().parent.parent / "server.json").read_text(encoding="utf-8"))
+    package = manifest["packages"][0]
+    assert (manifest["version"], package["identifier"], package["version"]) == (_declared(), "assurance-mcp", _declared())
