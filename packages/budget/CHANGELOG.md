@@ -1,3 +1,20 @@
+# 0.2.17
+
+- **`assurance serve`: a local endpoint for any agent and any workflow.** An agent in any language sends
+  its OpenTelemetry traces there as any OTLP/HTTP exporter sends them, protobuf or JSON, gzipped or not,
+  or posts run record lines; a workflow, a CI job, or the agent's own wrapper asks for a run's audit,
+  the JSON `assurance audit --json` prints, with a `verdict`: the gates the run fails and, for those
+  `?fail_on=` names, whether it passes. What it is sent is kept as it came, in two files in its store,
+  and audited by the readers `assurance audit` uses. It listens on 127.0.0.1, asks for no credentials,
+  and says so when told to listen anywhere else.
+- **Protobuf without a protobuf package.** `assurance_budget.otlp_protobuf` reads an OTLP trace export as
+  Python's, Go's and Java's exporters send it; on the official Python exporter's own requests it gives
+  the same spans as protobuf's library. A CI job sends the official exporter's protobuf to the endpoint.
+- `assurance audit` and the endpoint share one audit (`session_cli.audit`) and one set of gates
+  (`failed_gates`), so an exit code and a verdict cannot disagree.
+- A run record or a trace can be read from text already in memory (`record_from_text`,
+  `trace_from_text`), and the runs in a trace listed (`trace_runs`).
+
 # 0.2.16
 
 - **`assurance audit` reads an OpenTelemetry trace of any agent.** An agent someone wrote, a wrapper

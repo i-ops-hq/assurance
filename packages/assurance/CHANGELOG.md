@@ -1,3 +1,10 @@
+# 0.1.22
+
+- **Requires `assurance-cli` 0.6.4 and `assurance-budget` 0.2.17:** `assurance serve`, a local endpoint any
+  agent sends its traces (OTLP/HTTP, protobuf or JSON) or run records to, and any workflow asks for a
+  run's audit and a verdict it can stop on. The README's hook command and the plugin are pinned to this
+  version.
+
 # 0.1.21
 
 - **Requires `assurance-budget` 0.2.16:** `assurance audit` reads an OpenTelemetry trace of any agent,
