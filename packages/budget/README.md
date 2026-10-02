@@ -45,10 +45,10 @@ the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.19 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.20 audit --hook --nudge" } ] } ] } }
 ```
 
-By hand, run `uvx assurance@0.1.19 --version` once first: `--offline` runs the copy uv already has, so
+By hand, run `uvx assurance@0.1.20 --version` once first: `--offline` runs the copy uv already has, so
 the hook never waits on PyPI.
 
 **Run-log budget** (JSONL with a per-run id):
@@ -116,7 +116,9 @@ assert [line["type"] for line in lines].count("tool") == 3
 ## What it checks
 
 - Tool calls, failures, and loops in a Claude Code session (`assurance audit`)
-- Whether a test or check ran after the last in-project edit, and whether the last one passed
+- Whether a test or check ran after the last in-project edit, and whether the last one passed, each
+  read from where the command ran: work in another repository, or one nested in the folder, is not the
+  project's
 - Shell commands it could not classify, named by kind (`python -c ×3, curl`); `Not read:` lines name why
 - Edits with no visible read, in `--json` (Claude Code itself refuses those, so the text stays quiet)
 - Which runs in a JSONL log hit a ceiling or stalled with nothing new read

@@ -10,6 +10,7 @@ suggested". A finding is said once.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -371,6 +372,116 @@ def test_a_claim_over_an_earlier_failure_names_it(tmp_path: Path, capsys: pytest
 ])
 def test_what_leaves_the_machine_or_lands_on_main(command: str, branch: str, expected: str | None) -> None:
     assert ship_action(command, branch) == expected
+
+
+# Claude Code records the project's branch on every message, wherever the shell is, and a command can
+# leave the project: Assurance said "committed on main" of a commit made on a new branch in another
+# clone, after `cd` into it, on 2026-09-30. So the command is followed as it moves, within itself.
+@pytest.mark.parametrize("command, branch, expected", [
+    ("git commit -m x", "main", "committed on main"),
+    ("cd {other} && git commit -m x", "main", None),
+    ("cd {other} && git push && gh pr merge 3", "main", None),
+    ("cd {other} && npm publish", "", None),
+    ("cd pkg && git commit -m x", "main", "committed on main"),  # the same repository, further in
+    ("cd vendor && git commit -m x", "main", None),  # a repository of its own inside this one
+    ("git -C {other} commit -m x", "main", None),
+    ("git -C pkg commit -m x", "main", "committed on main"),
+    ("git checkout -b feature && git commit -m x", "main", None),
+    ("git switch -c feature && git commit -m x", "main", None),
+    ("git checkout main && git commit -m x", "feature", "committed on main"),
+    ("git switch main && git merge feature", "feature", "merged into main"),
+    ("git checkout app.py && git commit -m x", "main", "committed on main"),  # a file put back
+    ("git checkout -- app.py && git commit -m x", "main", "committed on main"),
+    ("git checkout - && git commit -m x", "main", None),  # back to a branch it does not name
+    ("git -C {other} checkout -b feature && git commit -m x", "main", "committed on main"),
+    ('cd "$REPO" && git commit -m x', "main", None),  # cannot be followed: no branch to name
+    ('cd "$REPO" && git push', "main", "pushed"),  # but a push is a push
+    ("S={root}/gone; cd $S/clone && git checkout -q -b fix origin/main && git commit -q -F m -- a", "main", None),
+    ("export R={root}/proj; cd ${{R}} && git commit -m x", "main", "committed on main"),
+    ("pushd {other} && popd && git commit -m x", "main", "committed on main"),
+    ("(cd {other} && git push) && git commit -m x", "main", "committed on main"),  # a subshell's cd ends with it
+    ("(git checkout -b feature) && git commit -m x", "main", None),  # but its branch is the repository's
+])
+def test_a_command_is_followed_where_it_goes(tmp_path: Path, command: str, branch: str, expected: str | None) -> None:
+    project, other = tmp_path / "proj", tmp_path / "other"
+    for repository in (project, other, project / "vendor"):
+        (repository / ".git").mkdir(parents=True)
+    (project / "pkg").mkdir()
+    (project / "app.py").write_text("x = 1\n", encoding="utf-8")
+    # a path in a command as a shell takes it: forward slashes, which Git Bash on Windows reads too
+    assert ship_action(command.format(root=tmp_path.as_posix(), other=other.as_posix()), branch, str(project)) == expected
+
+
+@pytest.mark.parametrize("command, branch, start, expected", [
+    ("git commit -m x", "main", "{other}", None),  # the shell had moved into another repository
+    ("git push", "main", "{other}", None),
+    ("cd {project} && git commit -m x", "main", "{other}", "committed on main"),  # the branch is the project's
+    ("cd {project} && git commit -m x", "feature", "{other}", None),
+    ("cd {project} && git checkout main && git commit -m x", "feature", "{other}", "committed on main"),
+    ("git commit -m x", "main", "{project}/pkg", "committed on main"),  # further into this one
+])
+def test_a_command_starts_where_its_shell_was(tmp_path: Path, command: str, branch: str, start: str, expected: str | None) -> None:
+    project, other = tmp_path / "proj", tmp_path / "other"
+    for repository in (project, other):
+        (repository / ".git").mkdir(parents=True)
+    (project / "pkg").mkdir()
+    names = {"project": project, "other": other}
+    typed = {name: path.as_posix() for name, path in names.items()}  # in a command, as a shell takes it
+    assert ship_action(command.format(**typed), branch, str(project), start.format(**names)) == expected
+
+
+def test_the_branch_recorded_is_the_projects_wherever_the_shell_is(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Seen in real transcripts: with the shell in another repository, a branch made there leaves the
+    # recorded branch at the project's, and a branch made in the project changes it.
+    (tmp_path / ".git").mkdir()
+    other = tmp_path.parent / f"{tmp_path.name}-other"
+    (other / ".git").mkdir(parents=True)
+    there, back = _bash("git commit -qm there", branch="main"), _bash(f"cd {tmp_path.as_posix()} && git commit -qm here", branch="main")
+    path = _transcript(tmp_path, [("prompt", "ship"), _edit(tmp_path), there, back])
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for line in lines:  # the shell had moved into the other repository and stayed
+        if line["type"] == "assistant" and "commit" in str(line["message"]["content"][0].get("input", {}).get("command", "")):
+            line["cwd"] = str(other)
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
+    said = _said(path, capsys)
+    back_at = datetime(2026, 9, 29, 10, 3, tzinfo=timezone.utc).astimezone().strftime("%H:%M")  # the second commit
+    assert f"check before proceeding: committed on main at {back_at} " in said and said.count("committed") == 1
+
+
+def test_home_is_followed_like_any_other_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home, project = tmp_path / "home", tmp_path / "proj"
+    for repository in (home / "mirror", project):
+        (repository / ".git").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # what Windows reads instead
+    assert ship_action('M="$HOME/mirror"; git -C "$M" add -A && git -C "$M" push', "main", str(project)) is None
+    assert ship_action("cd ~/mirror && git commit -qm x", "main", str(project)) is None
+
+
+def test_where_the_shell_was_is_read_from_the_transcript(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (tmp_path / ".git").mkdir()
+    other = tmp_path.parent / f"{tmp_path.name}-other"
+    (other / ".git").mkdir(parents=True)
+    path = _transcript(tmp_path, [("prompt", "ship"), _edit(tmp_path), _bash("git commit -qm x && git push", branch="main")])
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for line in lines:  # the shell had moved and stayed: Claude Code records where it is
+        if line["type"] == "assistant" and line["message"]["content"][0].get("input", {}).get("command"):
+            line["cwd"] = str(other)
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
+    assert _hook(path, capsys) is None
+
+
+def test_a_commit_in_another_clone_is_not_this_projects(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (tmp_path / ".git").mkdir()
+    clone = tmp_path.parent / f"{tmp_path.name}-clone"
+    (clone / ".git").mkdir(parents=True)
+    release = f"cd {clone.as_posix()} && git checkout -q -b release origin/main && git commit -q -m release && git push -u origin release"
+    path = _transcript(tmp_path, [("prompt", "release it"), _edit(tmp_path), FAIL, _bash(release, branch="main")])
+    said = _said(path, capsys)  # what is true here is still said: a test failed after an edit
+    assert said.startswith("assurance · review suggested: the last test run after the last edit to app.py (")
+    assert "committed" not in said and "pushed" not in said
+    here = _transcript(tmp_path, [("prompt", "release it"), _edit(tmp_path), FAIL, _bash("git commit -q -m release", branch="main")])
+    assert "check before proceeding: committed on main at " in _said(here, capsys)
 
 
 @pytest.mark.parametrize("text", [

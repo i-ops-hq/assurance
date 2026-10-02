@@ -19,7 +19,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Iterator, Literal, Mapping, Sequence
 
 from assurance_budget.events import LogError
 from assurance_budget.powershell import Shell, powershell_as_posix
@@ -361,6 +361,10 @@ class ToolCall:
     """Claude Code refused to run it, so it did nothing: no edit, no read, no test. See `_refused`."""
     branch: str = ""
     """The git branch the transcript records for the message that made the call (`gitBranch`)."""
+    cwd: str = ""
+    """The folder the transcript records for that message (`cwd`): where a shell call started, which
+    differs from the session's once the shell has moved and stayed. `branch` is still the session
+    folder's: Claude Code records the project's branch on every message, wherever the shell is."""
     seq: int = -1
     """The line of the transcript that made the call, counted from the first line read."""
     exit_known: bool | None = None
@@ -741,12 +745,13 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                     if not tool_id:
                         _mark("tool_use without id")
                         continue
-                    branch = record.get("gitBranch")
+                    branch, folder = record.get("gitBranch"), record.get("cwd")
                     pending[tool_id] = {
                         "name": name,
                         "input": tool_input,
                         "at": at,
                         "branch": branch if isinstance(branch, str) else "",
+                        "cwd": folder if isinstance(folder, str) else "",
                         "seq": lines,
                     }
                     order.append(tool_id)
@@ -841,6 +846,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                     result_tail=text[-_RESULT_TAIL_CHARS:],
                     refused=refused,
                     branch=str(meta.get("branch") or ""),
+                    cwd=str(meta.get("cwd") or ""),
                     seq=int(meta.get("seq", -1)),
                 )
             )
@@ -855,6 +861,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                     result_digest="",
                     has_result=False,
                     branch=str(meta.get("branch") or ""),
+                    cwd=str(meta.get("cwd") or ""),
                     seq=int(meta.get("seq", -1)),
                 )
             )
@@ -1043,43 +1050,25 @@ def changes_limits_file(call: ToolCall, cwd: str) -> bool:
             return False
         # A write target is compared as written, never expanded, so a command that writes the
         # limits file names it; the shell parser is only needed for the ones that do.
-        return "config.toml" in command and _bash_writes_session_limits(command, cwd)
+        return "config.toml" in command and _bash_writes_session_limits(command, cwd, call.cwd)
     return False
 
 
-def _bash_writes_session_limits(command: str, cwd: str) -> bool:
-    """Whether any segment writes this project's limits file (after heredoc strip + split)."""
+def _bash_writes_session_limits(command: str, cwd: str, start: str = "") -> bool:
+    """Whether any segment writes this project's limits file, each target read from where the command
+    is when it writes it (`Place`), after heredoc strip + split."""
     stripped = strip_heredoc_bodies(command)
     try:
         segments = split_shell_segments(stripped)
     except ValueError:
         return False
-    left_cwd = False
-    for tokens in segments:
-        if not tokens:
-            continue
-        if _segment_cds_away(tokens, cwd):
-            left_cwd = True
+    place = Place(cwd, "", start)
+    for tokens, _argv in place.walk(segments):
         for target in _write_targets(tokens):
-            if left_cwd and not _is_absolute_path_token(target):
-                continue
-            if _is_session_limits_file(target, cwd):
+            where = place.resolve(target)
+            if where is not None and _is_session_limits_file(where, cwd):
                 return True
     return False
-
-
-def _segment_cds_away(tokens: list[str], cwd: str) -> bool:
-    """True when this segment's `cd` destination is not the session cwd (literal compare)."""
-    argv = list(tokens)
-    _drop_paren_tokens(argv)
-    if not argv or argv[0] != "cd" or len(argv) < 2:
-        return False
-    dest = argv[1]
-    if "$" in dest or dest.startswith("~"):
-        return True
-    if dest in (".", ""):
-        return False
-    return not _same_path(_norm_path(dest, cwd), _norm_path(cwd, cwd), cwd)
 
 
 def _is_absolute_path_token(path: str) -> bool:
@@ -1219,6 +1208,7 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
     last_at: float | None = None
     last_by = ""
     outside = 0
+    project = Place(session.cwd)
     for call in session.tool_calls:
         if call.error or call.name not in _CHANGE_TOOLS:
             continue
@@ -1236,14 +1226,15 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
             # as Edit does, and Claude Code is allowed to edit that way. Only changes inside the
             # project count.
             command = shell_command(call)
-            if command is not None and bash_edits_project(command, session.cwd):
+            targets = bash_edit_targets(command, session.cwd, call.cwd) if command is not None else None
+            if targets is not None and any(not target or project.holds(target) for target in targets):
                 last_i, last_at, last_by = i, call.at, call.name
                 break
             continue
         if call.name not in _CHANGE_TOOLS:
             continue
         path = _call_path(call)
-        if path is None or not _path_inside_cwd(path, session.cwd):
+        if path is None or not project.holds(path):
             continue
         last_i, last_at, last_by = i, call.at, call.name
         break
@@ -1267,6 +1258,8 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
         exit_known = exit_status_is_reported(call)
         typed = str(call.input.get("command"))
         kind = classify_bash(command, declared)
+        if kind in ("test", "check") and runs_elsewhere(command, session.cwd, declared, call.cwd):
+            continue  # `cd ../other && pytest` says nothing about this project's code
         if kind == "test":
             tests += 1
             outcome = outcome_of_test_run(command, call.error, call.result_tail, declared, exit_known)
@@ -1642,18 +1635,19 @@ _EDIT_HINTS = (">", "tee", "sed", "perl", "cp", "mv", "install", "curl", "wget",
 _GIT_TREE_WRITES = frozenset({"apply", "restore", "pull", "merge", "rebase", "cherry-pick", "am", "revert"})
 
 
-def bash_edits_project(command: str, cwd: str) -> bool:
-    """Whether a shell command changed a file inside the project `cwd`.
+def bash_edits_project(command: str, cwd: str, start: str = "") -> bool:
+    """Whether a shell command changed a file inside the session's folder `cwd`.
 
     Counts a write target (`> f`, `>> f`, `tee f`, `sed -i … f`, `perl -i … f`, the destination of
-    `cp` / `mv` / `install`) that resolves inside `cwd`, and git or patch commands that rewrite the
-    working tree. After a `cd` elsewhere, relative targets are not taken to be the project's.
+    `cp` / `mv` / `install`) inside it, and git or patch commands that rewrite the working tree there,
+    each read from where the command is (`Place`, from `start`).
     """
-    return bash_edit_targets(command, cwd) is not None
+    return bash_edit_targets(command, cwd, start) is not None
 
 
-def bash_edit_targets(command: str, cwd: str) -> tuple[str, ...] | None:
-    """The files inside the project `cwd` a shell command changed, as typed; None when it changed none.
+def bash_edit_targets(command: str, cwd: str, start: str = "") -> tuple[str, ...] | None:
+    """The files inside the session's folder `cwd` a shell command changed, each as the path it names
+    from where the command was; None when it changed none.
 
     The rules are `bash_edits_project`'s. A command that rewrites the working tree without naming the
     files (`patch`, `git checkout -- .`, `git stash pop`, …) gives `""` for them: changed, but which is
@@ -1661,6 +1655,12 @@ def bash_edit_targets(command: str, cwd: str) -> tuple[str, ...] | None:
     there (`docs/a.md` for `mv a.md docs`). A token no one means as a file name is not one: what
     quoting can leave where a redirection's target would be (`tr '>' '>\\n'`), and the `=0.4` of an
     unquoted `pip install pkg>=0.4`, which the shell does write, and nobody wanted.
+
+    The command is followed from where its shell was (`start`, the transcript's folder for that
+    message) with `Place`: a target is resolved from where the command is when it writes it, and
+    counts when that is inside the folder, whichever repository it is in (`Place.holds` says whether it
+    is the project's code). After a move the words cannot follow, only an absolute target counts, and
+    a target written as a variable is not followed at all.
     """
     # Every edit below needs one of these in the command as typed (nothing is expanded), so a command
     # with none of them is not an edit, and the shell parser, the slow part, is skipped for it.
@@ -1671,45 +1671,133 @@ def bash_edit_targets(command: str, cwd: str) -> tuple[str, ...] | None:
     except ValueError:
         return None
     found: list[str] = []
-    left_cwd = False
-    for tokens in segments:
-        if not tokens:
-            continue
-        if _segment_cds_away(tokens, cwd):
-            left_cwd = True
-        argv = _strip_git_globals(_normalise_argv(_drop_redirections(tokens)) or [])
-        if not left_cwd and argv and _rewrites_tree(argv):
+    copies: dict[str, tuple[str, int]] = {}
+    place = Place(cwd, "", start)
+    for tokens, full in place.walk(segments):
+        argv = _strip_git_globals(full)
+        if argv and _rewrites_tree(argv) and _rewrites_project(place, full, cwd):
             found.append("")
-        targets = _into_folder(argv, list(_write_targets(tokens)))
-        if argv and argv[0] == "perl" and any(a.startswith("-") and "i" in a[1:] for a in argv[1:-1]):
-            targets.append(argv[-1])
+        named = [place.expand(word) for word in argv]  # `cp $SRC docs`: whether docs is a folder is in $SRC
+        restored = _put_back(named, place, copies, found)
+        # A target that is a variable (`> $OUT`, `cp a $DEST`) is not taken for a file, as it never was:
+        # a name follows where a command is, not what it writes.
+        targets = _into_folder(named, [target for target in _write_targets(tokens) if "$" not in target])
+        if _perl_in_place(named) and "$" not in argv[-1]:
+            targets.append(named[-1])
         for target in targets:
-            if left_cwd and not _is_absolute_path_token(target):
+            if target in _DISCARD_TARGETS or not target or target[0] in "<>&=" or "\n" in target or _URL.match(target):
                 continue
-            if target in _DISCARD_TARGETS or "$" in target or not target or target[0] in "<>&=" or "\n" in target:
-                continue
-            if _path_inside_cwd(target, cwd):
-                found.append(target)
+            where = place.resolve(target)
+            if where is not None and where != restored and place.within(where):
+                found.append(where)
     return tuple(found) if found else None
 
 
-def tree_rewrites(command: str, cwd: str) -> tuple[str, ...]:
+def _put_back(argv: list[str], place: Place, copies: dict[str, tuple[str, int]], found: list[str]) -> str | None:
+    """`cp a.py /tmp/a.bak … cp /tmp/a.bak a.py`, in one command: a file copied aside and put back is as
+    it was when it was copied, so the edits made to it since are taken off `found`, and putting it back
+    is not one. Returns the file put back, or None. The way a test is checked against its fix: undo
+    the fix, run the test, restore it."""
+    if not argv or argv[0] not in ("cp", "mv"):
+        return None
+    words = [word for word in argv[1:] if not word.startswith("-")]
+    if len(words) != 2:
+        return None
+    source, dest = place.resolve(words[0]), place.resolve(words[1])
+    if source is None or dest is None:
+        return None
+    aside = copies.get(source)
+    if aside is not None and aside[0] == dest:
+        found[aside[1]:] = [path for path in found[aside[1]:] if path != dest]
+        return dest
+    copies[dest] = (source, len(found))
+    return None
+
+
+#: A target that is a URL (`file:///tmp/a.html`, `https://…`), not a file: two letters or more before
+#: the colon, so a Windows drive (`C:\\x`) is still a path.
+_URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]+:")
+
+
+def _perl_in_place(argv: list[str]) -> bool:
+    """`perl -i`, `-pi`, `-i.bak`: read from perl's own options, flag by flag, up to its script or the
+    code of `-e`; a flag that takes a value (`-I/usr/lib`, `-Mwarnings`) ends its cluster. So `perl -e
+    'exec @ARGV' chrome --hide-scrollbars` is not an edit in place."""
+    if not argv or argv[0] != "perl":
+        return False
+    for arg in argv[1:]:
+        if not arg.startswith("-") or arg.startswith("--") or arg == "-":
+            return False  # the script, or the end of perl's own options
+        for flag in arg[1:]:
+            if flag == "i":
+                return True
+            if flag in "eEIMmFlx0CdDV":  # takes the rest of the word, or the next one, as its value
+                break
+    return False
+
+
+def tree_rewrites(command: str, cwd: str, start: str = "") -> tuple[str, ...]:
     """The commands in `command` that rewrote the project's working tree without naming the files:
-    `git pull`, `git checkout`, `patch`."""
+    `git pull`, `git checkout`, `patch`; each where the command was when it ran (`Place`)."""
     try:
         segments = split_shell_segments(strip_heredoc_bodies(command))
     except ValueError:
         return ()
     found: list[str] = []
-    for tokens in segments:
-        if tokens and _segment_cds_away(tokens, cwd):
-            break
-        argv = _strip_git_globals(_normalise_argv(_drop_redirections(tokens)) or [])
-        if argv and _rewrites_tree(argv):
+    place = Place(cwd, "", start)
+    for _tokens, full in place.walk(segments):
+        argv = _strip_git_globals(full)
+        if argv and _rewrites_tree(argv) and _rewrites_project(place, full, cwd):
             words = " ".join(argv[:2]) if argv[0] == "git" else argv[0]
             if words not in found:
                 found.append(words)
     return tuple(found)
+
+
+def _rewrites_project(place: Place, argv: list[str], cwd: str) -> bool:
+    """Whether a tree rewrite (`git pull`, `patch`) acts on the project's own working tree: where the
+    command is, or where `git -C` points, in the project's repository. A rewrite in a repository
+    nested in the folder rewrites that one. Without the session's folder it is taken to, as it always
+    was."""
+    if not cwd:
+        return True
+    directory = place.git_dir(argv[1:]) if argv[:1] == ["git"] else place.dir
+    return directory is not None and place.holds(directory)
+
+
+def runs_elsewhere(command: str, cwd: str, declared: Declared | None = None, start: str = "") -> bool:
+    """Whether the tests or checks in a command work outside the project: each run where the command is
+    not the project's (after a `cd` out of it, or from a shell that was already elsewhere), or on files
+    that all lie outside it, named by absolute path. Where the words cannot say where a test ran
+    (`cd $ROOT`), it is taken to be the project's: a test run set aside wrongly would say the
+    project's code went untested. Only the test and check parts are read: `cp src/a.py /tmp/a.py &&
+    ruff check /tmp/a.py` checks the copy, whatever the copy was made from."""
+    try:
+        segments = split_shell_segments(strip_heredoc_bodies(command))
+    except ValueError:
+        return False
+    place = Place(cwd, "", start)
+    verdicts: list[bool] = []
+    for tokens, _argv in place.walk(segments):
+        if _classify_segment(tokens, declared) not in ("test", "check"):
+            continue
+        verdicts.append(place.inside() is False or names_only_outside(tokens, place))
+    return bool(verdicts) and all(verdicts)
+
+
+def names_only_outside(tokens: list[str], place: Place) -> bool:
+    """Whether a test or check names files, and every one is outside the project, by absolute path. A
+    relative path, or none, is the project's. The program itself is not one of them, wherever it is:
+    `TZ=UTC /tmp/v/bin/python -m pytest -q` runs the project's tests."""
+    paths: list[str] = []
+    for token in (_normalise_argv(_drop_redirections(tokens)) or [])[1:]:
+        if token.startswith("-"):
+            continue
+        if token.startswith(("/", "~")) or (len(token) > 2 and token[1] == ":"):
+            paths.append(token)
+        elif "/" in token or "." in token:
+            return False  # a relative path: the project's
+    return bool(paths) and not any(place.holds(path) for path in paths)
 
 
 def _into_folder(argv: list[str], targets: list[str]) -> list[str]:
@@ -2864,3 +2952,255 @@ def _seconds(value: Any) -> float | None:
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# --- where a command is ------------------------------------------------------------------------------
+
+
+class Place:
+    """Where a shell command is as it runs, segment by segment: in this project, in another repository,
+    or somewhere its words do not say; and, in a repository, on which branch.
+
+    Claude Code records, on every message, the folder the shell is in (`cwd`) and the project's git
+    branch (`gitBranch`): the project's, wherever the shell is, so a branch made in another repository
+    leaves it unchanged (seen in ten real transcripts, 2026-10-01). A command starts where its shell
+    was (`start`) and moves with `cd`, `pushd` and `popd`; `git -C` moves one git command. A name set
+    earlier in the command (`S=/x; cd $S`) and `$HOME` are followed; anything else made of a variable
+    is not, and is said not to be known.
+
+    The project is the session's folder, in its own repository: a repository of its own nested in the
+    folder (a clone, `vendor/`) is not the project. When the folder is in no repository, or the
+    transcript's paths are not on this machine, the folder alone is. Without the session's folder
+    there is nothing to compare with: every place is the project's and the branch is the transcript's,
+    as commands were read before any of this was followed.
+    """
+
+    def __init__(self, cwd: str, branch: str = "", start: str = "") -> None:
+        self.cwd = cwd
+        self.home = _repository(_norm_path(cwd, cwd)) if cwd else None
+        self.dir: str | None = _norm_path(start or cwd, cwd) if (start or cwd) else None
+        self.branch = branch
+        self._root = _norm_path(cwd, cwd) if cwd else ""
+        self._branches: dict[str | None, str] = {self.home: branch}
+        """The branch each repository is known to be on, by its top folder."""
+        self._stack: list[str | None] = []
+        self._names: dict[str, str] = {}
+
+    def walk(self, segments: list[list[str]]) -> Iterator[tuple[list[str], list[str]]]:
+        """Each segment of a command that is neither a move nor an assignment, as its tokens and its
+        argv (`_normalise_argv`), with the place as it is when the segment runs. Names are remembered,
+        `cd`, `pushd` and `popd` followed, and a subshell's moves undone when it closes:
+        `(cd apps/api && pytest); cp a b` copies where the command was. A branch switched inside one
+        stays switched, since that is the repository's and not the shell's."""
+        saved: list[tuple[str | None, list[str | None], dict[str, str]]] = []
+        for tokens in segments:
+            if not tokens:
+                continue
+            opens = len(tokens[0]) - len(tokens[0].lstrip("("))
+            for _ in range(opens):
+                saved.append((self.dir, list(self._stack), dict(self._names)))
+            closes = opens - sum(token.count("(") - token.count(")") for token in tokens)
+            if not self.assigned(tokens):
+                argv = _normalise_argv(_drop_redirections(tokens)) or []
+                if argv and not self.moved(argv):
+                    yield tokens, argv
+            for _ in range(min(max(closes, 0), len(saved))):
+                self.dir, self._stack, self._names = saved.pop()
+
+    def assigned(self, tokens: list[str]) -> bool:
+        """Remember `S=/a/path` (or `export S=…`) said earlier in the command, so `cd $S/x` can be
+        followed; a value that is itself made of something unknown is not remembered."""
+        words = tokens[1:] if tokens[:1] == ["export"] else tokens
+        pairs = [_ASSIGNMENT.match(word) for word in words]
+        if not words or not all(pairs):
+            return False
+        for match in pairs:
+            assert match is not None
+            name, value = match.group(1), self.expand(match.group(2))
+            if any(mark in value for mark in ("$", "`")):
+                self._names.pop(name, None)
+            else:
+                self._names[name] = value
+        return True
+
+    def moved(self, argv: list[str]) -> bool:
+        """Follow `cd`, `pushd` and `popd`; True when the segment was one of them."""
+        prog, rest = argv[0], argv[1:]
+        if prog in ("cd", "pushd", "chdir"):
+            if prog == "pushd":
+                self._stack.append(self.dir)
+            targets = [arg for arg in rest if arg == "-" or not arg.startswith("-")]
+            self.dir = self.resolve(targets[0] if targets else "~")
+            return True
+        if prog == "popd":
+            self.dir = self._stack.pop() if self._stack else None
+            return True
+        return False
+
+    def switched(self, argv: list[str]) -> bool:
+        """Follow `git checkout` and `git switch` onto a branch; True when the segment was one of them."""
+        if argv[0] != "git":
+            return False
+        sub, args = _git_subcommand(argv[1:])
+        if sub not in ("checkout", "switch"):
+            return False
+        directory = self.git_dir(argv[1:])
+        name = _switched_to(sub, args, directory)
+        if name is not None and not self.cwd:
+            self.branch = name
+        elif name is not None and directory is not None:
+            self._branches[_repository(directory)] = name
+        return True
+
+    def where(self, argv: list[str]) -> str:
+        """`here`, `elsewhere` or `unknown`: whether a segment acts in this project's repository, or
+        in the session's folder when that is in none."""
+        if not self.cwd:
+            return "here"
+        directory = self.git_dir(argv[1:]) if argv[0] == "git" else self.dir
+        if directory is None:
+            return "unknown"
+        if self.home is None:
+            return "here" if _within(directory, self._root, self.cwd) else "elsewhere"
+        return "here" if _repository(directory) == self.home else "elsewhere"
+
+    def branch_at(self, argv: list[str]) -> str:
+        """The branch a segment acts on, where it can be named: the transcript's, or one switched to."""
+        if not self.cwd:
+            return self.branch
+        directory = self.git_dir(argv[1:]) if argv[0] == "git" else self.dir
+        return self._branches.get(_repository(directory), "") if directory is not None else ""
+
+    def within(self, path: str) -> bool:
+        """Whether a file or folder is inside the session's folder: what a rule about paths, or a prompt
+        naming a file, is about, whichever repository the file is in."""
+        return bool(self.cwd and path) and _within(_norm_path(path, self.cwd), self._root, self.cwd)
+
+    def holds(self, path: str) -> bool:
+        """Whether a file or folder is the project's code: inside the session's folder, and in the
+        folder's own repository rather than one nested in it, which its tests and commits are not."""
+        if not self.within(path):
+            return False
+        return self.home is None or _repository(_norm_path(path, self.cwd)) == self.home
+
+    def inside(self) -> bool | None:
+        """Whether the command is in the project now; None when its words do not say where it is."""
+        if not self.cwd or self.dir is None:
+            return None
+        return self.holds(self.dir)
+
+    def git_dir(self, rest: list[str]) -> str | None:
+        """The folder a git command acts in, from its options and where the command is (`-C`)."""
+        directory = self.dir
+        i = 0
+        while i < len(rest):
+            arg = rest[i]
+            if arg in ("--git-dir", "--work-tree") or arg.startswith(("--git-dir=", "--work-tree=")):
+                return None  # another repository's insides, named some other way
+            if arg == "-C" and i + 1 < len(rest):
+                directory = self.resolve(rest[i + 1], directory)
+                i += 2
+                continue
+            if arg in _GIT_GLOBAL_WITH_VALUE:
+                i += 2
+                continue
+            if arg in _GIT_GLOBAL_FLAGS or (arg.startswith("--") and "=" in arg):
+                i += 1
+                continue
+            break
+        return directory
+
+    def resolve(self, target: str, start: str | None = None) -> str | None:
+        """Where a path in the command points, from where the command is, normalised as the recording
+        machine would; None when the words do not say."""
+        base = self.dir if start is None else start
+        target = self.expand(target)
+        if target == "-" or any(mark in target for mark in ("$", "`", "*", "?")):
+            return None
+        if target.startswith("~") and not (target == "~" or target.startswith(("~/", "~\\"))):
+            return None  # another user's home
+        if target.startswith("~"):  # this machine's home, by its own rules: USERPROFILE on Windows
+            target = os.path.expanduser(target)
+        if base is None and not (_is_absolute_path_token(target) or target.startswith("~")):
+            return None
+        return _norm_path(target, base or self.cwd)
+
+    def expand(self, text: str) -> str:
+        """`$NAME` and `${NAME}` for a name set earlier in the command, and `$HOME`; others are left."""
+        def value(use: re.Match[str]) -> str:
+            name = use.group(1) or use.group(2)
+            if name in self._names:
+                return self._names[name]
+            return os.path.expanduser("~") if name == "HOME" else use.group(0)
+        return _NAME_USE.sub(value, text)
+
+
+_ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
+_NAME_USE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+@functools.lru_cache(maxsize=1024)
+def _repository(directory: str) -> str | None:
+    """The top of the git repository a folder is in, or None. A folder that is gone is looked up from
+    what is left of its path, so a deleted clone is still not the session's repository."""
+    path = os.path.abspath(directory)
+    while not os.path.isdir(path):
+        parent = os.path.dirname(path)
+        if parent == path:
+            return None
+        path = parent
+    while True:
+        if os.path.exists(os.path.join(path, ".git")):
+            return os.path.normcase(path)
+        parent = os.path.dirname(path)
+        if parent == path:
+            return None
+        path = parent
+
+
+def _switched_to(sub: str, args: list[str], directory: str | None) -> str | None:
+    """The branch `git checkout` or `git switch` leaves the repository on: its name, "" when it is not
+    one that can be named (`-`, `--detach`), or None when it switched nothing (`git checkout -- a.py`).
+
+    `git checkout name` restores a file when a file has that name, so the folder is looked in."""
+    creates = ("-b", "-B", "--orphan") if sub == "checkout" else ("-c", "-C", "--create", "--force-create", "--orphan")
+    names: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in creates:
+            return args[i + 1] if i + 1 < len(args) else ""
+        if arg == "--":
+            return None if sub == "checkout" else ""
+        if arg in ("-p", "--patch"):
+            return None
+        if arg == "--detach":
+            return ""
+        if not arg.startswith("-") or arg == "-":
+            names.append(arg)
+        i += 1
+    if not names:
+        return None
+    if sub == "switch" or len(names) == 1:
+        name = names[0]
+        if name == "-":
+            return ""
+        if sub == "checkout" and name not in ("main", "master") and directory and os.path.exists(os.path.join(directory, name)):
+            return None  # a file of that name, put back
+        return name
+    return None  # `git checkout <tree> <paths>`: files, from somewhere else
+
+
+def _git_subcommand(rest: list[str]) -> tuple[str, list[str]]:
+    """The subcommand of `git …` and what follows it, past the options that come before it."""
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg in _GIT_GLOBAL_WITH_VALUE:
+            i += 2
+            continue
+        if arg in _GIT_GLOBAL_FLAGS or (arg.startswith("--") and "=" in arg):
+            i += 1
+            continue
+        return arg, rest[i + 1 :]
+    return "", []

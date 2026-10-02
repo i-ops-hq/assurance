@@ -1,3 +1,26 @@
+# 0.2.15
+
+- **The hook reads each command from where it ran.** Claude Code records, on every message, the folder
+  the shell is in and the project's branch, which is the project's wherever the shell is. The hook read
+  every command as if it ran in the session's folder on that branch, so it said "committed on main" of
+  a commit on a new branch in another clone, counted a test run in a scratch clone as the project's
+  check, and credited files written from another repository to this project. A command is now followed
+  from where its shell was, through `cd`, `pushd` and `popd`, `git -C`, subshells, and names set
+  earlier in it: a commit, push, merge, release, edit or test in another repository, or in one nested
+  in the project's folder, is not this project's, and a commit is on main only on main, with `git
+  checkout` and `git switch` followed. Where a move cannot be followed, a test is still taken for the
+  project's and nothing is said to land on main; a push is still a push. A rule about paths
+  (`must_not_touch`) still covers a nested repository's files, a test the prompt names counts wherever
+  it ran, and `must_run` counts only runs in the project.
+- **A file put back is not an edit.** `cp app.py /tmp/a.bak … cp /tmp/a.bak app.py` in one command, the
+  way a test is checked against its fix, leaves the file as it was.
+- `assurance audit` counts only the project's tests after the last edit, by the same rule.
+- Two misreadings fixed: `TZ=UTC /path/to/python -m pytest` was set aside as working on files outside
+  the project, and `perl -e '…' chrome --hide-scrollbars "file://…"` was read as perl editing a URL.
+- Replayed turn by turn over ten real sessions (865 turn ends), the hook speaks at 65 where 0.2.14 spoke
+  at 91: 36 notices about another repository's work are gone, 14 name the right path, and 6 new ones are
+  true, this project's edits that only another repository's tests followed.
+
 # 0.2.14
 
 - **A recorder for an agent you wrote, or code that calls a model.** `from assurance_budget.record

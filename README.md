@@ -90,7 +90,10 @@ Otherwise it stays quiet: editing is what Claude does, and edits to prose and as
 `LICENSE`, …) need no test. It says each finding once, and with `--nudge` it asks Claude to act on it
 too. A test piped into `tail` or followed by `; echo` doesn't count as passed: its exit status is the
 other command's, so the result is read from the runner's summary line or reported as unknown.
-`assurance audit` still reports everything, whether the hook spoke or not.
+Each command is read from where it ran, from the folder the shell was in and through `cd`, `pushd`
+and `git -C`: an edit, a test, a commit or a push in another repository, or in one nested in your
+project's folder, is not counted as your project's, and a commit after `git checkout -b` is not on
+main. `assurance audit` still reports everything, whether the hook spoke or not.
 
 ```bash
 uvx assurance@latest hook install   # shows the change to ~/.claude/settings.json, asks, then writes it
@@ -155,14 +158,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.19 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.20 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.19 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.20 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
