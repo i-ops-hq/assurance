@@ -133,6 +133,11 @@ assert [line["type"] for line in lines].count("tool") == 3
   made, its last word, and each gate's decision held against what the step then did
 - `Recorder` writes that record from the agent's own code, records each Anthropic or OpenAI SDK call,
   and stops the run at the limits set for it (`assurance_budget.record`, below)
+- The same for any agent that sends OpenTelemetry traces, from OTLP JSON or what the Python SDK's
+  console exporter prints, read by the GenAI, OpenInference and OpenLLMetry conventions; `FileExporter`
+  writes one from the tracer an agent already has (`assurance_budget.otel`, in the root README)
+- A run's last word held against what failed: `--fail-on-claim` exits 1 when a run says it is done and
+  a check did not hold, or a step's last run failed
 
 ### The outcome
 
@@ -179,7 +184,7 @@ carried and never used helped or got in the way is not something a count can say
 | exit | means |
 |---|---|
 | `0` | audited |
-| `1` | `--fail-on-exhausted` / `--fail-on-loop` / `--fail-on-unverified` found a problem |
+| `1` | `--fail-on-exhausted` / `--fail-on-loop` / `--fail-on-unverified` / `--fail-on-outcome` / `--fail-on-claim` found a problem |
 | `2` | the transcript or log could not be read |
 
 ## Limits

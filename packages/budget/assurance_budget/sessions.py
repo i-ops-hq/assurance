@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Literal, Mapping, Sequence
 
-from assurance_budget.events import LogError
+from assurance_budget.events import LogError, jsonl_lines
 from assurance_budget.powershell import Shell, powershell_as_posix
 
 #: Top-level `type` values that are bookkeeping, not turns or tool calls. Explicit — no catch-all.
@@ -539,7 +539,7 @@ def read_claude_code(path: Path) -> Session:
     """
     target = Path(path)
     try:
-        raw_lines = target.read_text(encoding="utf-8").splitlines()
+        raw_lines = jsonl_lines(target.read_text(encoding="utf-8"))
     except OSError as exc:
         raise LogError(f"cannot read {target}: {exc}") from exc
     except UnicodeDecodeError as exc:
@@ -574,7 +574,7 @@ def read_claude_code_tail(path: Path, window: int) -> tuple[Session, bool]:
         text = data[newline + 1 :].decode("utf-8") if newline >= 0 else ""
     except UnicodeDecodeError as exc:
         raise LogError(f"{target} is not UTF-8 text, so not a Claude Code transcript ({exc.reason})") from exc
-    return _parse_lines(text.splitlines(), target, cwd=cwd), False
+    return _parse_lines(jsonl_lines(text), target, cwd=cwd), False
 
 
 def transcript_changed_limits_file(path: Path, cwd: str) -> bool:

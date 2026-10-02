@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from assurance_budget.events import KINDS, LogError, _first, _seconds
+from assurance_budget.events import KINDS, LogError, _first, _seconds, jsonl_lines
 from assurance_budget.sessions import Prompt, Session, ToolCall
 
 RECORD_SCHEMA = "assurance.run/1"
@@ -118,6 +118,13 @@ class RunRecord:
     """Tool calls, edits and commands by their `id`, for decisions and outcomes to name."""
     not_recorded: tuple[str, ...]
     """What the record leaves out that a check needed: said, so its absence is not read as a pass."""
+    schema: str = RECORD_SCHEMA
+    """What the run was read from: a run record, or an OpenTelemetry trace (`assurance_budget.otel`)."""
+    notes: tuple[str, ...] = ()
+    """How the run was read, when it was read from something other than a run record."""
+    claim_from: str = "claim"
+    """Where the run's last word comes from: `claim`, a line or event its code wrote as its claim, or
+    `reply`, the last text a model returned, which may be a claim and may as well be an admission."""
 
 
 def is_run_record(path: Path, sample: int = 200) -> bool:
@@ -161,7 +168,7 @@ def read_run_record(path: Path, run: str | None = None, cwd: str = "") -> RunRec
     not_read: Counter[str] = Counter()
     order: list[str] = []
     last_run = ""
-    for seq, raw in enumerate(text.splitlines(), start=1):
+    for seq, raw in enumerate(jsonl_lines(text), start=1):
         if not raw.strip():
             continue
         try:

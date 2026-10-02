@@ -184,7 +184,7 @@ One install, one `assurance` command.
 
 | Command | What it answers |
 |---|---|
-| `assurance audit` | What did the coding-agent session in this folder, or your own agent's run, do, and what did it skip? |
+| `assurance audit` | What did the coding-agent session in this folder, or your own agent's run or trace, do, and what did it skip? |
 | `assurance hook` | Run that audit after every Claude Code turn, or stop running it: `install`, `remove`, `status`. |
 | `assurance diff` | Did the work cover everything it should have? For example, retrieved docs vs. required docs. |
 | `assurance pin` | Did an MCP server quietly change a tool's description after you approved it? |
@@ -365,6 +365,73 @@ that writes a `decision` line can be measured, by code. `--fail-on-outcome` exit
 record declares did not hold, so a CI job, or the agent's own code, can stop on it; `--run <id>` picks
 one run from a file that holds several. `assurance budget run.jsonl` reads the same file for spend,
 ceilings and loops. The file holds only what your code writes, and nothing is sent anywhere.
+
+## An agent that already sends traces
+
+Most agents in production are someone's own code, and most of them already send OpenTelemetry traces:
+to Langfuse, Phoenix, Datadog, Honeycomb, or a collector of their own. `assurance audit` reads a trace
+file as it reads a run record, and makes the same checks of it. In Python, add one exporter to the
+tracer provider the agent already has:
+
+```python
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from assurance_budget.otel import FileExporter
+
+provider.add_span_processor(BatchSpanProcessor(FileExporter("trace.jsonl")))
+```
+
+From any other language, write OTLP JSON: the OpenTelemetry Collector's `file` exporter does, and so
+does an OTLP/HTTP exporter set to send JSON. The audit also reads what the Python SDK's
+`ConsoleSpanExporter` prints.
+
+Spans are read by the conventions that name them, OpenTelemetry's GenAI conventions (`gen_ai.*`),
+OpenInference's and OpenLLMetry's. A model call gives its model, tokens, time and how it ended; a tool
+call its arguments, its result and whether it failed. A shell tool (`bash`, `shell`,
+`run_shell_command` and the like) with a `command` is read as a command, and a file tool (`write_file`,
+`edit_file`, `apply_patch` and the like) as an edit or a read, so the checks after the last edit work
+for an agent that has them, and the report says how many it read that way. Agents, chains and workflows
+are structure: counted, never taken for steps.
+
+When the instrumentation records message content (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`,
+on by default in OpenInference), the task is the last thing the user said before the run's first model
+call, and the run's last word is the last text a model returned. To say more, or without content, add
+events to any span, with the fields of the run record's lines of the same name:
+
+```python
+span.add_event("assurance.task", {"text": "Fix the refund rounding", "must_run": ["pytest -q"]})
+span.add_event("assurance.claim", {"text": "Done"})
+```
+
+`assurance.decision` and `assurance.outcome` work the same way. Each trace is a run; traces whose spans
+name one `gen_ai.conversation.id` or `session.id` are one run, and `--run <id>` picks one. Paths are
+read from the folder the resource's `process.working_directory` names, when it names one.
+
+Here is the audit of [a real trace](examples/traces/refund-agent.jsonl): an agent on the OpenAI SDK,
+traced by OpenTelemetry's own instrumentation, that wrote a file, ran `pytest -q` through its shell
+tool, which failed, and then said the tests pass.
+
+```
+$ assurance audit examples/traces/refund-agent.jsonl
+Agent run 01a32e839ec4c762250fb977c5060592 — 0s in /home/you/refunds-app
+Read from an OpenTelemetry trace: 6 spans, of which 3 model calls, 2 tool calls and 1 span of structure (invoke_agent refund-agent). By their tools' names, 1 tool call is read as a command and 1 as an edit.
+Its task is the last thing the user said before its first model call, and its last word the last text a model returned.
+2 tool calls, 1 failed — command 1, edit 1
+
+  The run's last word: "Fixed the rounding in billing/refunds.py. The tests pass." Against it: its last run of `pytest -q` failed.
+  After the last edit (04:12): 1 test run (pytest -q failed), 0 checks
+  Against the task (04:12, "Fix the refund rounding in billing/refunds.py and run the t…"):
+    billing/refunds.py: changed at 04:12.
+    Only what the task names is checked here; whether the work does what it asks is not.
+  Model calls: 3 (gpt-5 3), 720 tokens in and 90 out.
+  Every shell command was classified.
+  Also in the record: 3 model calls.
+  Not read: 0 lines.
+```
+
+`--fail-on-claim` exits 1 when a run says it is done and the record goes against it: a check that did
+not hold, or a step whose last run failed. A model's reply counts as saying so only when it says the
+tests pass; one that says it could not finish is shown beside what failed, not set against it. A trace
+holds only what its spans carry, and the audit sends nothing anywhere.
 
 ## Your project's own tests, checks and rules
 

@@ -82,3 +82,25 @@ def test_the_readme_run_record_block_is_what_the_tool_prints(
     )
     assert block, "the README no longer shows the sample run record"
     assert block.group(1).strip().splitlines() == printed
+
+
+TRACE = ROOT / "examples" / "traces" / "refund-agent.jsonl"
+
+
+@pytest.mark.skipif(not TRACE.is_file(), reason="not running from a source checkout")
+def test_the_readme_trace_block_is_what_the_tool_prints(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    # The same rule for a trace an agent already sends. Its folder is the one its resource names, so
+    # where the audit runs does not change what it prints.
+    # Regenerate it with:  TZ=UTC assurance audit examples/traces/refund-agent.jsonl
+    monkeypatch.setenv("TZ", "UTC")
+    if hasattr(time, "tzset"):
+        time.tzset()
+    else:
+        pytest.skip("cannot pin the timezone on this platform")
+    assert main([str(TRACE)]) == 0
+    printed = capsys.readouterr().out.strip().splitlines()
+    block = re.search(
+        r"\$ assurance audit examples/traces/refund-agent\.jsonl\n(.*?)\n```", README.read_text(encoding="utf-8"), re.S
+    )
+    assert block, "the README no longer shows the sample trace"
+    assert block.group(1).strip().splitlines() == printed

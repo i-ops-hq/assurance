@@ -97,12 +97,13 @@ jobs:
             exit 1
           fi
 
-  # The recorder wraps the Anthropic and OpenAI SDKs without depending on either, so nothing above
-  # installs them and `test_recorder_sdks.py` skips there. Here both are installed, at the versions
-  # named, so a change in either SDK that would stop a call being recorded or counted fails this job
-  # rather than someone's run. Moving a version is a deliberate edit, as moving a pinned action is.
+  # The recorder wraps the Anthropic and OpenAI SDKs, and `FileExporter` takes the OpenTelemetry SDK's
+  # spans, without depending on any of them, so nothing above installs them and `test_recorder_sdks.py`
+  # and `test_otel_sdk.py` skip there. Here all three are installed, at the versions named, so a change
+  # in one that would stop a call being recorded, or a span being written, fails this job rather than
+  # someone's run. Moving a version is a deliberate edit, as moving a pinned action is.
   sdks:
-    name: the recorder against the real Anthropic and OpenAI SDKs
+    name: the recorder and the trace exporter against the real SDKs
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -113,16 +114,18 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install core and budget from this tree, and the two SDKs at the versions tested
+      - name: Install core and budget from this tree, and the three SDKs at the versions tested
         run: |
           python -m pip install --upgrade pip pytest
           python -m pip install -e packages/core
           python -m pip install -e packages/budget
-          python -m pip install "anthropic==1.11.0" "openai==3.22.1"
-      - name: The recorder's SDK tests, where a skip is a failure
+          python -m pip install "anthropic==1.11.0" "openai==3.22.1" "opentelemetry-sdk==1.45.0"
+      - name: The recorder's and the exporter's SDK tests, where a skip is a failure
         env:
           ASSURANCE_REQUIRE_SDKS: "1"
-        run: python -m pytest -q packages/budget/tests/test_recorder.py packages/budget/tests/test_recorder_sdks.py
+        run: >-
+          python -m pytest -q packages/budget/tests/test_recorder.py packages/budget/tests/test_recorder_sdks.py
+          packages/budget/tests/test_otel.py packages/budget/tests/test_otel_sdk.py
 
   build:
     runs-on: ubuntu-latest

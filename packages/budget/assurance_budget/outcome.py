@@ -112,12 +112,15 @@ def outcome(
     recorded: tuple[Check, ...] = (),
     no_prompt: str = _NO_PROMPT,
     asked: str = "the last prompt",
+    reads_unseen: str | None = None,
 ) -> dict[str, Any]:
     """The checks as a dict: the `outcome` key of `assurance audit --json`.
 
     A run record adds two of its own: the files its task says it should write (`expect`), and the
     checks its code made afterwards (`recorded`). `no_prompt` is what to say when there are no words
     to check the outcome against, and `asked` what those words are called: a run record's are its task.
+    `reads_unseen` says why a source that does not keep every read cannot tell that a file was not
+    opened: a file it shows neither read nor changed is then unknown, not "not opened".
     """
     rules = declared if declared is not None else Declared()
     checks: list[dict[str, Any]] = [_recorded_check(check) for check in recorded]
@@ -137,7 +140,7 @@ def outcome(
         not_checked.append(no_prompt)
     else:
         if walk is not None:
-            checks.extend(_file_check(name, prompt, walk) for name in names.files)
+            checks.extend(_file_check(name, prompt, walk, reads_unseen) for name in names.files)
             checks.extend(_command_check(named.label, named.argv, named.asked, prompt, walk) for named in names.commands)
             checks.extend(_test_check(name, prompt, walk) for name in names.tests)
         called = asked[0].upper() + asked[1:]
@@ -213,7 +216,7 @@ def _own(check: dict[str, Any]) -> str:
 # --- the checks -----------------------------------------------------------------------------------
 
 
-def _file_check(name: str, prompt: Prompt, walk: _Walk) -> dict[str, Any]:
+def _file_check(name: str, prompt: Prompt, walk: _Walk, reads_unseen: str | None = None) -> dict[str, Any]:
     changes = [(seq, at, path) for seq, at, paths, _ in walk.changes if seq > prompt.seq for path in paths if names_cover(name, path)]
     reads = [(seq, at, path) for seq, at, path in walk.reads if seq > prompt.seq and names_cover(name, path)]
     rewrites = [(seq, at, words) for seq, at, _, words in walk.changes if seq > prompt.seq and authored(words)]
@@ -227,6 +230,8 @@ def _file_check(name: str, prompt: Prompt, walk: _Walk) -> dict[str, Any]:
         seq, at, words = rewrites[-1]
         because = f"{' and '.join(authored(words))}{_at(at)} changed files without naming them, so whether it changed {name} cannot be told"
         return _check("prompt", "file", name, question, "unknown", "", because)
+    if reads_unseen is not None:
+        return _check("prompt", "file", name, question, "unknown", "", reads_unseen)
     before = [at for seq, at, paths, _ in walk.changes if seq < prompt.seq for path in paths if names_cover(name, path)]
     earlier = f"; last changed{_at(before[-1])}, before it" if before else ""
     return _check("prompt", "file", name, question, "not opened", f"not opened after the prompt{earlier}")

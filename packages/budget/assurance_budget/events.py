@@ -146,10 +146,23 @@ def _recorded_event(run: str, record_type: str, record: dict[str, Any], at: floa
     )
 
 
+def jsonl_lines(text: str) -> list[str]:
+    """JSON-lines text, split into its lines on newlines only.
+
+    `str.splitlines` also splits on characters JSON allows raw inside a string (U+2028, U+2029, U+0085,
+    and \\x0b, \\x0c, \\x1c-\\x1e), which cuts a record into pieces nothing can parse. Claude Code and Codex
+    both write such records: one Codex session lost 314 lines to it, and a Claude Code transcript a
+    tool result. A carriage return before the newline is dropped, as `splitlines` dropped it."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
 def parse(text: str) -> list[Event]:
     """Read JSONL text into events, refusing on the first line that cannot be read."""
     events: list[Event] = []
-    for line_no, line in enumerate(text.splitlines(), start=1):
+    for line_no, line in enumerate(jsonl_lines(text), start=1):
         stripped = line.strip()
         if not stripped:
             continue
