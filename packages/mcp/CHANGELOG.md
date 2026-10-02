@@ -1,3 +1,9 @@
+# 0.5.5
+
+- Listed on the MCP registry again. 0.5.4 reached PyPI, and its listing did not: its `server.json` still
+  said 0.5.3, and the publish job refuses a manifest that disagrees with the release. A test now fails
+  the pull request when they disagree. No change to the server or its tools.
+
 # 0.5.4
 
 - Requires `assurance-cli` 0.6.4. No change to the server or its tools.
