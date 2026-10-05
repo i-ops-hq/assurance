@@ -1,3 +1,16 @@
+# 0.2.18
+
+- **`--json` no longer names a Claude Code edit as made without reading.** Claude Code refuses an edit
+  to a file the session has not read, so every file `edited_without_read` named for it was a read this
+  reader did not record: on one real session, both of the files it named, beside 658 shell commands
+  it could not classify. The text report stopped saying so in 0.1.1; the JSON, which programs and other
+  models read without the caveat a person weighs, kept the bare list. `edited_without_read` is now
+  empty for Claude Code and unchanged elsewhere, and the finding moves to
+  `edits_with_no_recorded_read`: the files, whether the harness refuses an unread edit, the count of
+  unclassified commands, and a sentence saying what they mean. Where a harness does allow an unread
+  edit, the text report names it as "No read recorded before editing", beside the unclassified
+  commands that could hold the read.
+
 # 0.2.17
 
 - **`assurance serve`: a local endpoint for any agent and any workflow.** An agent in any language sends
