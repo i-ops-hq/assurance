@@ -7,7 +7,13 @@ Please do not open a public issue for a vulnerability.
 
 ## What this package does and does not do
 
-- **It writes nothing and opens no network connection.** It reads:
+- **It writes only what you ask it to, and never connects out.** `assurance hook install` and `remove`
+  rewrite the Claude Code settings file for the scope you choose, after showing you the change and
+  copying the file as it was to assurance's state folder (`~/.local/state/assurance`, or
+  `%LOCALAPPDATA%\assurance` on Windows). `assurance serve` keeps what agents send it in its store
+  there, and listens on 127.0.0.1 unless `--host` names another address. The recorder and
+  `FileExporter` write the file your code names. The audit, as a command or as a hook, writes nothing.
+- **It reads:**
   - the run log or transcript you name;
   - with `assurance audit` and no path, the Claude Code transcripts under `~/.claude/projects` (or
     `$CLAUDE_CONFIG_DIR/projects`) — only to find the session recorded for the current folder;

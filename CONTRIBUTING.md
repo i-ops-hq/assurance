@@ -1,6 +1,6 @@
 # Contributing
 
-Six packages live here, each with its own `CONTRIBUTING.md` (plus `packages/assurance`, which has no code and only installs the others). Read this page first, then the one for
+Seven packages live here, each with its own `CONTRIBUTING.md` (plus `packages/assurance`, which has no code and only installs the others). Read this page first, then the one for
 the package you are touching.
 
 Each one opens by naming the invariant that package may not break. Read it before changing anything:
@@ -13,11 +13,12 @@ Each one opens by naming the invariant that package may not break. Read it befor
 | [`packages/core`](packages/core/CONTRIBUTING.md) | no I/O, no model, no third-party dependency — it decides, callers bring the data |
 | [`packages/cli`](packages/cli/CONTRIBUTING.md) | never invent a denominator; "could not check" is not a pass |
 | [`packages/mcp`](packages/mcp/CONTRIBUTING.md) | read-only by construction, and the model never chooses the boundary |
+| [`packages/reach`](packages/reach/CONTRIBUTING.md) | read a graph, never build one or add an edge, and never mix what was read with what was inferred |
 
-All six are developed here. `packages/core` used to be generated from a private runtime; since
+All seven are developed here. `packages/core` used to be generated from a private runtime; since
 2026-09-24 this repository is its source of truth, and pull requests against it land like any other.
 
-## The rule all six follow
+## The rule all seven follow
 
 **Report what could not be checked at the same weight as what was.** Almost every tool prints its
 findings; almost none print their own blind spots, so a clean report and an incomplete one look
@@ -40,12 +41,13 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 
 python -m pip install --upgrade pip                 # see the note below — this one matters
 python -m pip install -e packages/core -e "packages/cli[dev]" -e "packages/mcp[dev]" \
-                      -e packages/budget -e packages/authority -e "packages/deps[dev]"
+                      -e packages/budget -e packages/authority -e "packages/deps[dev]" \
+                      -e packages/reach
 
-python -m pytest                                    # about 650 tests, about a minute
+python -m pytest                                    # every package's tests
 ```
 
-That is the same order CI installs in, and all six are listed because the root `pytest` collects
+That is the same order CI installs in, and all seven are listed because the root `pytest` collects
 every package's tests — install a subset and collection fails on the ones that are missing. To work
 on one package alone, install `core` plus that package and run `pytest packages/<name>`.
 
@@ -54,7 +56,7 @@ on one package alone, install `core` plus that package and run `pytest packages/
 setup.py or setup.cfg not found"*, which names the wrong problem — there is no `setup.py` here and
 there should not be.
 
-Every package sets `strict = true` under `[tool.mypy]`, and **CI runs it on all six**. Run it from
+Every package sets `strict = true` under `[tool.mypy]`, and **CI runs it on all seven**. Run it from
 inside the package you changed, which is where that configuration applies:
 
 ```bash

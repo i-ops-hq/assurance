@@ -46,10 +46,10 @@ the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.23 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.24 audit --hook --nudge" } ] } ] } }
 ```
 
-By hand, run `uvx assurance@0.1.23 --version` once first: `--offline` runs the copy uv already has, so
+By hand, run `uvx assurance@0.1.24 --version` once first: `--offline` runs the copy uv already has, so
 the hook never waits on PyPI.
 
 **Run-log budget** (JSONL with a per-run id):

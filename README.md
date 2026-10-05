@@ -158,14 +158,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.23 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.24 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.23 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.24 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
@@ -187,6 +187,7 @@ One install, one `assurance` command.
 | `assurance audit` | What did the coding-agent session in this folder, or your own agent's run or trace, do, and what did it skip? |
 | `assurance hook` | Run that audit after every Claude Code turn, or stop running it: `install`, `remove`, `status`. |
 | `assurance serve` | A local endpoint any agent sends its traces or runs to, and any workflow asks for a run's audit. |
+| `assurance reach` | What does a change to this file reach, by a code graph such as Graphify's, and how far behind the code is that graph? |
 | `assurance diff` | Did the work cover everything it should have? For example, retrieved docs vs. required docs. |
 | `assurance pin` | Did an MCP server quietly change a tool's description after you approved it? |
 | `assurance deps` | What will `pip install` or `npm install` run on your machine? Read without running it. |
@@ -471,6 +472,22 @@ here is audited the same from the files. It listens on 127.0.0.1, port 4318 unle
 otherwise, and asks for no credentials: keep it on this machine, or put it behind something that
 authenticates.
 
+## What a change reaches
+
+`assurance reach` reads a code graph, such as the one [Graphify](https://pypi.org/project/graphifyy/)
+builds from your code with no model, and says what a change to a file or folder reaches: each symbol
+that depends on it, hop by hop, at the line of the call or the import. What the graph read from the
+code is kept apart from what it inferred. Every report says first how far the graph is behind the
+code, checked by each file's content, and ends with what it could not determine.
+
+```bash
+graphify update .                       # writes graphify-out/graph.json
+assurance reach src/billing/money.py    # --json for a program, --depth to follow further
+```
+
+It builds no graph and adds no edge, so a dependency the graph does not hold is one it cannot see, and
+it names what it did not follow. [packages/reach](packages/reach) has an example and what it reads.
+
 ## Your project's own tests, checks and rules
 
 The audit knows pytest, `npm test`, `cargo test`, mypy, ruff, eslint, tsc and the like. A project's own
@@ -544,6 +561,7 @@ If it's useful to you, a ⭐ helps other people find it.
 | [`assurance-budget`](packages/budget) | `audit` for coding-agent sessions, `budget` for run logs |
 | [`assurance-deps`](packages/deps) | Reads what an install will run, without running it |
 | [`assurance-authority`](packages/authority) | Whether a task may go ahead for the person who asked |
+| [`assurance-reach`](packages/reach) | What a change reaches, by a code graph, and how far behind the code that graph is |
 | [`assurance-mcp`](packages/mcp) | The checks as read-only MCP tools, limited to `--root` |
 | [`assurance-core`](packages/core) | The pure decision library underneath. No I/O, no model, no dependencies |
 

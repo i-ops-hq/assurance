@@ -17,7 +17,7 @@ the org; it is enabled now and both routes work.
 
 ## What is in this repository, and what is not
 
-Six pure-Python packages. **Four of the six have no third-party runtime dependency at all**, and
+Seven pure-Python packages. **Five of the seven have no third-party runtime dependency at all**, and
 the two that do have exactly one each:
 
 | Package | Third-party runtime dependencies |
@@ -26,15 +26,18 @@ the two that do have exactly one each:
 | `assurance-deps` | none |
 | `assurance-budget` | none — `assurance-core` only |
 | `assurance-authority` | none — `assurance-core` only |
+| `assurance-reach` | none |
 | `assurance-cli` | `openpyxl`, to read `.xlsx` |
 | `assurance-mcp` | `mcp`, the protocol SDK |
 
 `pip show <package>` prints the `Requires:` line, so this is a claim anyone can check in five
 seconds — which is why it is stated per package rather than as a round number. "Zero dependencies"
-across all six would be a nicer sentence and two-sixths wrong.
+across all seven would be a nicer sentence and two-sevenths wrong.
 
-There is **no service here**: no network endpoints, no credentials, no daemon, no background
-process, no telemetry. Nothing in this repository phones home, and nothing in it listens.
+There is **no hosted service here**: no account, no credentials, no daemon, no telemetry, and
+nothing in this repository phones home. One command listens, and only while you run it: `assurance
+serve`, on 127.0.0.1 unless `--host` names another address, for the traces and run records your agents
+send it.
 
 ## What each package touches
 
@@ -44,8 +47,9 @@ process, no telemetry. Nothing in this repository phones home, and nothing in it
 | `assurance-cli` | files in the folder you name; for `pin`, your MCP config (project, `~/.cursor`, Claude Desktop) | two files, each only when you ask: the `.assurance.json` baseline, and a pin snapshot at the path you give `pin` | never itself — but `pin` **starts the stdio servers your MCP config names**, and they may |
 | `assurance-mcp` | files inside the folders granted with `--root` in its config — never a folder the model names outside them | nothing | stdio to its client only |
 | `assurance-deps` | a manifest you name, and archives already on disk | nothing | never |
-| `assurance-budget` | the log or transcript you name; with `audit` and no path, Claude Code transcripts under `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`) to find the one for this folder; limits from `~/.config/assurance/config.toml`, `.assurance/config.toml` and `ASSURANCE_MAX_*` | nothing | never |
+| `assurance-budget` | the log or transcript you name; with `audit` and no path, Claude Code transcripts under `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`) to find the one for this folder; limits from `~/.config/assurance/config.toml`, `.assurance/config.toml` and `ASSURANCE_MAX_*` | only when you ask: `hook install` and `hook remove` rewrite the Claude Code settings file for the scope you choose, after copying it as it was to assurance's state folder; `serve` keeps what it is sent in its store; the recorder and `FileExporter` write the file your code names | never connects out; `serve` listens on 127.0.0.1:4318 unless `--host` and `--port` say otherwise, only while it runs |
 | `assurance-authority` | one JSON file you name | nothing | never |
+| `assurance-reach` | the graph you name or the nearest `graphify-out/graph.json`, its manifest, and the files it names inside the folder it covers, to hash them; a listing of that folder | nothing | never |
 
 **`assurance-deps` is the one to look at hardest.** It reads package archives, which are written by
 whoever published them, and the whole reason to point it at one is that you do not trust it yet. It

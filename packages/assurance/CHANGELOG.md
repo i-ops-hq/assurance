@@ -1,3 +1,10 @@
+# 0.1.24
+
+- **`assurance reach`** (`assurance-reach` 0.1.0, new, and `assurance-cli` 0.6.5): what a change to a
+  file or folder reaches, by a code graph such as Graphify's, with each hop's call site, what the graph
+  read kept apart from what it inferred, how far behind the code the graph is, and what could not be
+  determined. The README's hook command and the plugin are pinned to this version.
+
 # 0.1.23
 
 - **The Stop hook says a finding once** (`assurance-budget` 0.2.18), and **the plugin's hook stands down

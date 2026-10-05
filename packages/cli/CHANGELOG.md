@@ -1,3 +1,9 @@
+# 0.6.5
+
+- **`assurance reach`** reaches `assurance-reach`: what a change to a file or folder reaches, by a code
+  graph such as Graphify's, and how far behind the code that graph is. Listed in `--help`, on the start
+  screen, and in `--version`.
+
 # 0.6.4
 
 - **`assurance serve`** reaches `assurance-budget`'s local endpoint, where any agent sends its traces or

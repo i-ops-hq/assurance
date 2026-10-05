@@ -16,8 +16,9 @@ pip install assurance-cli
 
 ## Quick start
 
-`assurance --help` lists: `init`, `check`, `diff`, `pin`, `drift`, `deps`, `budget`, `authority`, `audit`.
-`audit`, `budget`, `authority`, and `deps` forward to their packages when installed.
+`assurance --help` lists: `audit`, `hook`, `serve`, `reach`, `init`, `check`, `diff`, `pin`, `drift`,
+`deps`, `budget`, `authority`. `audit`, `hook`, `serve`, `reach`, `budget`, `authority` and `deps` forward
+to their packages when installed.
 
 Point `check` at a folder of dated files (real output from a temp folder with Jan, Feb, Apr CSVs):
 
@@ -36,7 +37,8 @@ With `--fail-on-gap` that same line exits `1`.
 - Coverage over any two key sets (`diff`)
 - MCP tool-description drift since a pin (`pin`)
 - Shift in a binary outcome stream (`drift`)
-- Forwards: session audit, run budget, authority review, dependency install hooks
+- Forwards: session audit, the Stop hook, the local endpoint, what a change reaches, run budget,
+  authority review, dependency install hooks
 
 ## In CI
 
