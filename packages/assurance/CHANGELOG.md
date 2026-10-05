@@ -1,5 +1,8 @@
 # 0.1.23
 
+- **The Stop hook says a finding once** (`assurance-budget` 0.2.18), and **the plugin's hook stands down
+  when a hook in your own settings already runs the audit after every turn**: Claude Code runs both,
+  and each said every finding, so each showed twice.
 - **Requires `assurance-budget` 0.2.18:** `assurance audit --json` no longer lists a Claude Code edit
   under `edited_without_read`, since that harness refuses an edit to a file the session has not read
   or written;

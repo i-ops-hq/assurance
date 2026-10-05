@@ -16,6 +16,21 @@ VERSION=0.1.23
 PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin"
 export PATH
 
+# A Stop hook you added yourself, in your settings or this project's, runs this same audit after every
+# turn, and Claude Code runs both, so each finding would be said twice. As a hook, this one stands down
+# and yours speaks; by hand, or from /assurance:audit, it always runs.
+case " $* " in
+  *" --hook "*)
+    for settings in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
+      "${CLAUDE_PROJECT_DIR:-.}/.claude/settings.json" "${CLAUDE_PROJECT_DIR:-.}/.claude/settings.local.json"; do
+      if [ -f "$settings" ] && grep -q 'assurance[^"]*audit --hook' "$settings" 2>/dev/null; then
+        cat >/dev/null
+        exit 0
+      fi
+    done
+    ;;
+esac
+
 if command -v uvx >/dev/null 2>&1; then
   case " $* " in
     *" --hook "*) ;;

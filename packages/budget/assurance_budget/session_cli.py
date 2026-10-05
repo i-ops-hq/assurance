@@ -66,7 +66,8 @@ SAMPLE_SESSION = Path(__file__).resolve().parent / "data" / "sample-session.json
 def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     """Claude Code Stop hook. Reads the hook input, audits the transcript, and always exits 0.
 
-    Speaks only when something is at stake (`assurance_budget.notice`). Check before proceeding: code
+    Speaks only when something is at stake (`assurance_budget.notice`), and says a finding once: not
+    again in a later turn while the evidence under it is the same. Check before proceeding: code
     was pushed, merged, published, deployed or committed on main while no passing test or check
     followed it, or while a command the project says must pass, or one the last prompt names, had not
     passed after it. Review suggested: a test or check after the last code edit failed, a path under
@@ -103,6 +104,11 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
             # read is not something the turn did, and it must not quiet what later turns say.
             _hook_print({"systemMessage": _end_sentence(f"{SETTINGS_UNREAD}, so what they declare is not used: {unread}")})
         return EXIT_OK
+    head = _notice_head(notice)
+    if any(text.startswith(head) for text in session.said):
+        # Said already, in an earlier turn. A finding carries its evidence (the edit, the command, the
+        # time), so had anything under it changed, the sentence would have, and it would be said again.
+        return EXIT_OK
     if "[audit]" in notice.finding:
         declared_note = ""  # the finding says it already
     out: dict[str, Any] = {"systemMessage": _notice_line(notice, declared_note)}
@@ -122,20 +128,34 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     return EXIT_OK
 
 
+def _notice_head(notice: Notice) -> str:
+    """The level and the finding: what the line you see opens with, and what says whether it was said."""
+    return f"assurance · {notice.level}: {_end_sentence(notice.finding)}"
+
+
+#: Kinds of unclassified command no `[audit]` entry can name: a declaration matches any run that begins
+#: with it, so `python -` would count every script fed to Python as a test, and a command inside
+#: `$( … )`, or one that could not be read, has no beginning to match.
+_UNDECLARABLE = frozenset({"python -", "python -c", "(inside $( ))", "(no command)", "(unparsed)"})
+
+
 def _notice_line(notice: Notice, declared_note: str) -> str:
     """The one line you see: the level first, then what happened."""
-    line = f"assurance · {notice.level}: {_end_sentence(notice.finding)}"
+    line = _notice_head(notice)
     if declared_note:
         return f"{line} {declared_note}"
     if notice.unclassified:
         # Told to you, not to Claude: an agent should not be the one declaring what counts as its check.
         n = sum(notice.unclassified.values())
         ran = _count_phrase(n, "command", "commands")
-        line += (
-            f" {ran} after the last code edit could not be classified "
-            f"({_unclassified_breakdown(notice.unclassified)}); if one of them is this project's own "
-            "test or check, declare it under [audit] in .assurance/config.toml and it will count."
-        )
+        line += f" {ran} after the last code edit could not be classified ({_unclassified_breakdown(notice.unclassified)})"
+        declarable = sorted((kind for kind in notice.unclassified if kind not in _UNDECLARABLE), key=lambda kind: (-notice.unclassified[kind], kind))
+        if declarable:
+            # Only what a declaration could name: one that cannot match is advice that cannot work.
+            which = declarable[0] if len(declarable) == 1 else f"{declarable[0]} or {declarable[1]}"
+            line += f"; if {which} is this project's own test or check, declare it under [audit] in .assurance/config.toml and it will count."
+        else:
+            line += "."
     return line
 
 
