@@ -743,7 +743,8 @@ def test_claude_code_sessions_do_not_print_edited_without_reading(
     assert report["edited_without_read"] == []
     assert report["edits_with_no_recorded_read"] == {
         "files": ["src/app.py"], "harness_refuses_unread_edit": True, "unclassified_commands": 0,
-        "means": "Claude Code refuses an edit to a file the session has not read, so each of these was read in a way this reader does not record.",
+        "means": ("Claude Code refuses an edit to a file the session has not read or written, so the session read or "
+                  "wrote each of these in a way this reader does not record."),
     }
 
 

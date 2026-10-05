@@ -121,8 +121,8 @@ assert [line["type"] for line in lines].count("tool") == 3
   project's
 - Shell commands it could not classify, named by kind (`python -c ×3, curl`); `Not read:` lines name why
 - Edits with no recorded read, in `--json` as `edits_with_no_recorded_read`, with what that rests on:
-  Claude Code refuses an edit to a file the session has not read, so there each is a read this reader
-  did not see, and `edited_without_read` stays empty and the text quiet
+  Claude Code refuses an edit to a file the session has not read or written, so there each is a read
+  or a write this reader did not see, and `edited_without_read` stays empty and the text quiet
 - Which runs in a JSONL log hit a ceiling or stalled with nothing new read
 - Which configured limits the log never exercised (silence, not a pass)
 - What the session touched next to what it had: MCP servers used and loaded but never used, skills

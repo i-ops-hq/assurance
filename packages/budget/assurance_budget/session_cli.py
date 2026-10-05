@@ -689,8 +689,10 @@ def no_recorded_read(files: Sequence[str], harness_refuses: bool, unclassified: 
     """Edits with no read this reader recorded, and what that rests on, so a program reading the
     JSON does not have to know it: the `edits_with_no_recorded_read` key of `--json`."""
     if harness_refuses:
-        means = ("Claude Code refuses an edit to a file the session has not read, so each of these was read "
-                 "in a way this reader does not record.")
+        # Read or written: a session can create a file through the shell and then edit it, and the
+        # harness allows that edit, so "read" alone would claim a read that may never have happened.
+        means = ("Claude Code refuses an edit to a file the session has not read or written, so the session "
+                 "read or wrote each of these in a way this reader does not record.")
     elif unclassified:
         means = (f"No read of these is recorded, and {_count_phrase(unclassified, 'shell command was', 'shell commands were')} "
                  "not classified, so a read may be among them.")
@@ -780,9 +782,9 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         for loop in loops:
             body.append(_loop_line(loop))
 
-    # Claude Code refuses to edit a file the model has not read, so in its transcripts an edit with
-    # no visible read means the read reached the model some way this reader does not see, not
-    # that the agent skipped it. Printing it would report our blind spot as the agent's fault.
+    # Claude Code refuses to edit a file the session has not read or written, so in its transcripts an
+    # edit with no visible read means the session read or wrote the file some way this reader does
+    # not see, not that the agent skipped the read. Printing it would report our blind spot as the agent's fault.
     # Elsewhere it prints, with the shell commands that could hold the read beside it.
     unseen = report.get("edits_with_no_recorded_read") or {}
     if unseen.get("files") and not unseen.get("harness_refuses_unread_edit"):

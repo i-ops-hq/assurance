@@ -1,7 +1,8 @@
 # 0.1.23
 
 - **Requires `assurance-budget` 0.2.18:** `assurance audit --json` no longer lists a Claude Code edit
-  under `edited_without_read`, since that harness refuses an edit to a file the session has not read;
+  under `edited_without_read`, since that harness refuses an edit to a file the session has not read
+  or written;
   the reader's unseen reads go under `edits_with_no_recorded_read`, with what they rest on. The
   README's hook command and the plugin are pinned to this version.
 

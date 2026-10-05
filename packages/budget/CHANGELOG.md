@@ -1,9 +1,10 @@
 # 0.2.18
 
 - **`--json` no longer names a Claude Code edit as made without reading.** Claude Code refuses an edit
-  to a file the session has not read, so every file `edited_without_read` named for it was a read this
-  reader did not record: on one real session, both of the files it named, beside 658 shell commands
-  it could not classify. The text report stopped saying so in 0.1.1; the JSON, which programs and other
+  to a file the session has not read or written, so every file `edited_without_read` named for it was
+  one the session read or wrote in a way this reader did not record: on one real session, both of the
+  files it named, one read in full by `cat`, one created by a heredoc and read by `sed`, beside 658
+  shell commands it could not classify. The text report stopped saying so in 0.1.1; the JSON, which programs and other
   models read without the caveat a person weighs, kept the bare list. `edited_without_read` is now
   empty for Claude Code and unchanged elsewhere, and the finding moves to
   `edits_with_no_recorded_read`: the files, whether the harness refuses an unread edit, the count of
