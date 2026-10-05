@@ -571,8 +571,8 @@ def build_report(
 
     What the reader could not account for sits beside what it could — `not_read` with its reasons,
     `unmatched_results`, and `unclassified_commands` broken down by command — so no count appears
-    without the part it could not count. `edited_without_read` is always here, even for sources
-    where the text report leaves it out.
+    without the part it could not count. `edits_with_no_recorded_read` is always here, with what it
+    rests on; `edited_without_read` names an edit as unread only where the harness allows one.
     """
     names = _RECORD_NAMES if record is not None else {}
     by_tool = dict(Counter(names.get(call.name, call.name) for call in session.tool_calls))
@@ -619,7 +619,10 @@ def build_report(
         "not_read": session.not_read,
         "not_read_reasons": dict(session.not_read_reasons),
         "unmatched_results": session.unmatched_results,
-        "edited_without_read": list(unread_edits),
+        # Under a harness that refuses an unread edit, none can be listed as one: what this reader
+        # found is its own blind spot, and it goes beside, under a key that says so.
+        "edited_without_read": [] if session.source in _READ_BEFORE_EDIT_ENFORCED else list(unread_edits),
+        "edits_with_no_recorded_read": no_recorded_read(unread_edits, session.source in _READ_BEFORE_EDIT_ENFORCED, unclassified),
         "after_last_edit": after,
         "unclassified_commands": unclassified,
         "unclassified_by_command": unclassified_by_command(session, declared),
@@ -680,6 +683,20 @@ def build_report(
     if project_notes:
         payload["project_limit_notes"] = project_notes
     return payload
+
+
+def no_recorded_read(files: Sequence[str], harness_refuses: bool, unclassified: int) -> dict[str, Any]:
+    """Edits with no read this reader recorded, and what that rests on, so a program reading the
+    JSON does not have to know it: the `edits_with_no_recorded_read` key of `--json`."""
+    if harness_refuses:
+        means = ("Claude Code refuses an edit to a file the session has not read, so each of these was read "
+                 "in a way this reader does not record.")
+    elif unclassified:
+        means = (f"No read of these is recorded, and {_count_phrase(unclassified, 'shell command was', 'shell commands were')} "
+                 "not classified, so a read may be among them.")
+    else:
+        means = "No read of these is recorded by a tool or a shell command this reader classifies."
+    return {"files": list(files), "harness_refuses_unread_edit": harness_refuses, "unclassified_commands": unclassified, "means": means}
 
 
 def _excerpt(text: str, limit: int = 80) -> str:
@@ -766,11 +783,13 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     # Claude Code refuses to edit a file the model has not read, so in its transcripts an edit with
     # no visible read means the read reached the model some way this reader does not see, not
     # that the agent skipped it. Printing it would report our blind spot as the agent's fault.
-    # It stays in --json for anyone checking the reader, and prints for sources whose harness
-    # does not enforce the read.
-    unread_edits = report.get("edited_without_read") or []
-    if unread_edits and report.get("source") not in _READ_BEFORE_EDIT_ENFORCED:
-        body.append(f"Edited without reading it first: {', '.join(unread_edits)}")
+    # Elsewhere it prints, with the shell commands that could hold the read beside it.
+    unseen = report.get("edits_with_no_recorded_read") or {}
+    if unseen.get("files") and not unseen.get("harness_refuses_unread_edit"):
+        body.append(_end_sentence(f"No read recorded before editing: {', '.join(unseen['files'])}" + (
+            f"; {_count_phrase(unseen['unclassified_commands'], 'shell command was', 'shell commands were')} not "
+            "classified, so a read may be among them" if unseen.get("unclassified_commands") else ""
+        )))
 
     after = report.get("after_last_edit")
     if after is not None:

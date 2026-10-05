@@ -884,4 +884,6 @@ def test_paths_are_shown_relative_to_the_recorded_cwd_even_through_a_symlink(
     path.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
 
     assert main([str(path), "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["edited_without_read"] == ["src/x.py"]
+    report = json.loads(capsys.readouterr().out)
+    assert report["edited_without_read"] == []  # Claude Code refuses an unread edit
+    assert report["edits_with_no_recorded_read"]["files"] == ["src/x.py"]
