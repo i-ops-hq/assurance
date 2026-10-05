@@ -1,0 +1,3 @@
+# Kept byte for byte as written: the manifests hold each file's MD5, and a checkout that
+# rewrote line endings would make every graph here read as behind the code.
+* -text

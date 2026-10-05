@@ -1,0 +1,790 @@
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "failed_sources": [],
+  "extracted_sources": [
+    "/home/dev/shop/shop/__init__.py",
+    "/home/dev/shop/shop/cli.py",
+    "/home/dev/shop/shop/invoice.py",
+    "/home/dev/shop/shop/labels.py",
+    "/home/dev/shop/shop/money.py",
+    "/home/dev/shop/shop/report.py",
+    "/home/dev/shop/shop/tax.py",
+    "/home/dev/shop/tests/test_tax.py"
+  ],
+  "nodes": [
+    {
+      "id": "shop_init",
+      "label": "__init__.py",
+      "file_type": "code",
+      "source_file": "shop/__init__.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_init_rationale_1",
+      "label": "A small shop: money, tax, invoices and a monthly report.",
+      "file_type": "rationale",
+      "source_file": "shop/__init__.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_cli",
+      "label": "cli.py",
+      "file_type": "code",
+      "source_file": "shop/cli.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_cli_main",
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "shop/cli.py",
+      "source_location": "L7",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_cli_rationale_1",
+      "label": "Print this month's total.",
+      "file_type": "rationale",
+      "source_file": "shop/cli.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_invoice",
+      "label": "invoice.py",
+      "file_type": "code",
+      "source_file": "shop/invoice.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_invoice_invoice",
+      "label": "Invoice",
+      "file_type": "code",
+      "source_file": "shop/invoice.py",
+      "source_location": "L7",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_invoice_invoice_init",
+      "label": ".__init__()",
+      "file_type": "code",
+      "source_file": "shop/invoice.py",
+      "source_location": "L8",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_invoice_invoice_subtotal",
+      "label": ".subtotal()",
+      "file_type": "code",
+      "source_file": "shop/invoice.py",
+      "source_location": "L11",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_invoice_invoice_total",
+      "label": ".total()",
+      "file_type": "code",
+      "source_file": "shop/invoice.py",
+      "source_location": "L14",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_invoice_rationale_1",
+      "label": "An invoice: lines, a subtotal, the tax on it.",
+      "file_type": "rationale",
+      "source_file": "shop/invoice.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_labels",
+      "label": "labels.py",
+      "file_type": "code",
+      "source_file": "shop/labels.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_labels_label",
+      "label": "label()",
+      "file_type": "code",
+      "source_file": "shop/labels.py",
+      "source_location": "L4",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_labels_rationale_1",
+      "label": "Shelf labels, which need nothing from money: a change there reaches nothing…",
+      "file_type": "rationale",
+      "source_file": "shop/labels.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_money",
+      "label": "money.py",
+      "file_type": "code",
+      "source_file": "shop/money.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_money_to_cents",
+      "label": "to_cents()",
+      "file_type": "code",
+      "source_file": "shop/money.py",
+      "source_location": "L4",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_money_money",
+      "label": "Money",
+      "file_type": "code",
+      "source_file": "shop/money.py",
+      "source_location": "L8",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_money_money_init",
+      "label": ".__init__()",
+      "file_type": "code",
+      "source_file": "shop/money.py",
+      "source_location": "L9",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_money_money_plus",
+      "label": ".plus()",
+      "file_type": "code",
+      "source_file": "shop/money.py",
+      "source_location": "L12",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_money_rationale_1",
+      "label": "Money in cents, so a total never drifts by a float.",
+      "file_type": "rationale",
+      "source_file": "shop/money.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_report",
+      "label": "report.py",
+      "file_type": "code",
+      "source_file": "shop/report.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_report_monthly",
+      "label": "monthly()",
+      "file_type": "code",
+      "source_file": "shop/report.py",
+      "source_location": "L6",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_report_rationale_1",
+      "label": "The monthly report: every invoice, totalled.",
+      "file_type": "rationale",
+      "source_file": "shop/report.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_tax",
+      "label": "tax.py",
+      "file_type": "code",
+      "source_file": "shop/tax.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_tax_tax",
+      "label": "tax()",
+      "file_type": "code",
+      "source_file": "shop/tax.py",
+      "source_location": "L8",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "shop_tax_rationale_1",
+      "label": "Sales tax on a total.",
+      "file_type": "rationale",
+      "source_file": "shop/tax.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "tests_test_tax",
+      "label": "test_tax.py",
+      "file_type": "code",
+      "source_file": "tests/test_tax.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "tests_test_tax_test_tax_on_ten",
+      "label": "test_tax_on_ten()",
+      "file_type": "code",
+      "source_file": "tests/test_tax.py",
+      "source_location": "L4",
+      "_callable": true,
+      "_origin": "ast"
+    }
+  ],
+  "links": [
+    {
+      "source": "shop_init_rationale_1",
+      "target": "shop_init",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/__init__.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_cli",
+      "target": "shop_invoice",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/cli.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_cli",
+      "target": "shop_report",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/cli.py",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_cli",
+      "target": "shop_cli_main",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/cli.py",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_cli_rationale_1",
+      "target": "shop_cli",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/cli.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice",
+      "target": "shop_money",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice",
+      "target": "shop_tax",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice",
+      "target": "shop_invoice_invoice",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice_invoice",
+      "target": "shop_invoice_invoice_init",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice_invoice",
+      "target": "shop_invoice_invoice_subtotal",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L11",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice_invoice",
+      "target": "shop_invoice_invoice_total",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L14",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice_invoice_total",
+      "target": "shop_money_money",
+      "relation": "references",
+      "context": "return_type",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L14",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice_invoice_total",
+      "target": "shop_invoice_invoice_subtotal",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L15",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice_rationale_1",
+      "target": "shop_invoice",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_labels",
+      "target": "shop_labels_label",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/labels.py",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_labels_rationale_1",
+      "target": "shop_labels",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/labels.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_money",
+      "target": "shop_money_to_cents",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/money.py",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_money",
+      "target": "shop_money_money",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/money.py",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_money_money",
+      "target": "shop_money_money_init",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/money.py",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_money_money",
+      "target": "shop_money_money_plus",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/money.py",
+      "source_location": "L12",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_money_money_plus",
+      "target": "shop_money_money",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/money.py",
+      "source_location": "L13",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_money_rationale_1",
+      "target": "shop_money",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/money.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_report",
+      "target": "shop_invoice",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/report.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_report",
+      "target": "shop_report_monthly",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/report.py",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_report_monthly",
+      "target": "shop_invoice_invoice",
+      "relation": "references",
+      "context": "generic_arg",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/report.py",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_report_rationale_1",
+      "target": "shop_report",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/report.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_tax",
+      "target": "shop_money",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/tax.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_tax",
+      "target": "shop_tax_tax",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/tax.py",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_tax_tax",
+      "target": "shop_money_money",
+      "relation": "references",
+      "context": "return_type",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/tax.py",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_tax_rationale_1",
+      "target": "shop_tax",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/tax.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "tests_test_tax",
+      "target": "shop_tax",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_tax.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "tests_test_tax",
+      "target": "tests_test_tax_test_tax_on_ten",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_tax.py",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_cli",
+      "target": "shop_invoice_invoice",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/cli.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_cli",
+      "target": "shop_report_monthly",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/cli.py",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice",
+      "target": "shop_money_money",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice",
+      "target": "shop_tax_tax",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/invoice.py",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_report",
+      "target": "shop_invoice_invoice",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/report.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_tax",
+      "target": "shop_money_money",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/tax.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_tax",
+      "target": "shop_money_to_cents",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/tax.py",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "tests_test_tax",
+      "target": "shop_tax_tax",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_tax.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_cli_main",
+      "target": "shop_report_monthly",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/cli.py",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_cli_main",
+      "target": "shop_invoice_invoice",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/cli.py",
+      "source_location": "L8",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_tax_tax",
+      "target": "shop_money_money",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/tax.py",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_tax_tax",
+      "target": "shop_money_to_cents",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "shop/tax.py",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "tests_test_tax_test_tax_on_ten",
+      "target": "shop_tax_tax",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "tests/test_tax.py",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_cli_main",
+      "target": "shop_invoice_invoice",
+      "relation": "uses",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "shop/cli.py",
+      "source_location": "L8",
+      "weight": 0.8,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice_invoice",
+      "target": "shop_money_money",
+      "relation": "uses",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "shop/invoice.py",
+      "source_location": "L14",
+      "weight": 0.8,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_report_monthly",
+      "target": "shop_invoice_invoice",
+      "relation": "uses",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "shop/report.py",
+      "source_location": "L6",
+      "weight": 0.8,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_tax_tax",
+      "target": "shop_money_money",
+      "relation": "uses",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "shop/tax.py",
+      "source_location": "L8",
+      "weight": 0.8,
+      "_origin": "ast"
+    },
+    {
+      "source": "shop_invoice_invoice_total",
+      "target": "shop_tax_tax",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "shop/invoice.py",
+      "source_location": "L15",
+      "weight": 1.0,
+      "_origin": "ast"
+    }
+  ],
+  "directed": false
+}

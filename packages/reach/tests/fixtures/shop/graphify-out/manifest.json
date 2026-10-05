@@ -1,0 +1,50 @@
+{
+  "shop/__init__.py": {
+    "mtime": 1791229138.8896174,
+    "seen": 1791229139.5483232,
+    "ast_hash": "921483fa5209adf6faa56dba87fef132",
+    "semantic_hash": ""
+  },
+  "shop/cli.py": {
+    "mtime": 1791229138.8984873,
+    "seen": 1791229139.548325,
+    "ast_hash": "68b07e566981eab47503f1372e67a0dd",
+    "semantic_hash": ""
+  },
+  "shop/invoice.py": {
+    "mtime": 1791229138.8952692,
+    "seen": 1791229139.5483258,
+    "ast_hash": "b5e048ee26eb57066ec3213c03627383",
+    "semantic_hash": ""
+  },
+  "shop/labels.py": {
+    "mtime": 1791229138.9001253,
+    "seen": 1791229139.548327,
+    "ast_hash": "df77bf4247fd9b77f8a3a941fb37a451",
+    "semantic_hash": ""
+  },
+  "shop/money.py": {
+    "mtime": 1791229138.8913698,
+    "seen": 1791229139.548327,
+    "ast_hash": "1424605a9c5697bcc57c73cf11062e17",
+    "semantic_hash": ""
+  },
+  "shop/report.py": {
+    "mtime": 1791229138.8968925,
+    "seen": 1791229139.548328,
+    "ast_hash": "6b54ccaf7fbb790d2c6bb69425ca7946",
+    "semantic_hash": ""
+  },
+  "shop/tax.py": {
+    "mtime": 1791229138.893368,
+    "seen": 1791229139.548328,
+    "ast_hash": "5d227c0881004d4e1358de7db372a246",
+    "semantic_hash": ""
+  },
+  "tests/test_tax.py": {
+    "mtime": 1791229138.9016504,
+    "seen": 1791229139.5483289,
+    "ast_hash": "429a41b7f4cc942128022a72a28251bc",
+    "semantic_hash": ""
+  }
+}
