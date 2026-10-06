@@ -6,7 +6,9 @@ Editing code is what Claude does all day, and being told so after every turn is 
 - **check before proceeding**: this turn pushed, merged, published, deployed or migrated, or
   committed on main, while code edited before it had no passing test or check after it.
 - **review suggested**: the last test or check after the last code edit failed in this turn, or
-  Claude's last message says the tests pass when nothing verified the last code edit.
+  Claude's last message says the tests pass when nothing verified the last code edit, or when the
+  last test or check it ran failed and no code edit this reads came after it: an edit it cannot see,
+  as through a heredoc, does not make "the tests pass" true.
 
 Edits to prose and assets (`.md`, `.txt`, `LICENSE`, images, fonts, …) are not code, so they neither
 need a test nor count against one. Every level is decided from the transcript's own records by code; no model is asked.
@@ -191,6 +193,7 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
     pending = _Edits()  # code edited since the last passing test or check
     last_edit: tuple[str, float | None, int, int] | None = None  # label, time, index, line
     runs: list[_Run] = []  # tests and checks of the project after the last code edit
+    every: list[_Run] = []  # the project's tests and checks, edit or none
     anywhere: list[_Run] = []  # the same wherever they ran: a test the prompt names counts where it ran
     protected: list[tuple[int, str]] = []  # (line, path): changed since the last prompt, protected, not asked for
     since_prompt = asked.prompt.seq if asked.prompt is not None else -1
@@ -212,6 +215,8 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
             continue
         run = _verification(call, command, declared, session.cwd)
         if run is not None:  # a test that failed errored, and is still a test
+            if not run.elsewhere:
+                every.append(run)
             if last_edit is not None:
                 anywhere.append(run)
                 if not run.elsewhere:
@@ -262,6 +267,10 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
             claim = _claim(session, boundary, pending, runs, last_edit, declared)
             if claim is not None:
                 findings.append(claim)
+    else:
+        contradicted = _claim_over_a_failure(session, boundary, every)
+        if contradicted is not None:
+            findings.append(contradicted)
     if not findings:
         return None
     unclassified: dict[str, int] = {}
@@ -371,6 +380,22 @@ def _claim(
         recognised = " it recognises" if after else ""
         why = f"no test or check{recognised} ran after {_edits(tuple(pending.paths), pending.last_at)}"
     return _Finding(text_seq, f"Claude's last message says the tests pass, but {why}", ask, after)
+
+
+def _claim_over_a_failure(session: Session, boundary: int, runs: list[_Run]) -> _Finding | None:
+    """Claude's last message says the tests pass, and the last test, or else the last check, it ran
+    failed before it, in a session with no code edit this reads. No edit is needed to make that
+    untrue: the tests may have been run three times over, failing the same way, and an edit made
+    through a heredoc is one this cannot see."""
+    text_seq, text = session.last_text
+    failing = _failing(runs)
+    if failing is None or text_seq <= max(boundary, failing.seq) or not claims_tests_pass(text):
+        return None
+    return _Finding(
+        text_seq,
+        f"Claude's last message says the tests pass, but the last {failing.noun} failed: {failing.label}",
+        "Fix what failed and run it again, or correct what you said.",
+    )
 
 
 def _failing(runs: list[_Run]) -> _Run | None:

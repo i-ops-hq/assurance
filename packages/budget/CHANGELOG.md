@@ -1,3 +1,13 @@
+# 0.2.19
+
+- **The Stop hook says when Claude claims the tests pass right after they failed, edit seen or not.**
+  Every finding was measured from the last code edit the hook recognises, so a session with none, or
+  whose edits it cannot see, as through a heredoc, could run a failing test three times and end with
+  "All tests pass now." while the hook said nothing, though `assurance audit` called it a loop and
+  `--fail-on-loop` failed on it. When Claude's last message says the tests pass and the last test run
+  of the project, or else its last check, failed before it, the hook now says so (*review
+  suggested*), once.
+
 # 0.2.18
 
 - **The Stop hook says a finding once.** A finding whose evidence had not changed was said again

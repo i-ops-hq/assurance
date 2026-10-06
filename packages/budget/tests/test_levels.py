@@ -333,6 +333,50 @@ def test_a_claim_over_an_earlier_failure_names_it(tmp_path: Path, capsys: pytest
     assert "says the tests pass, but the last test run after the last edit to app.py (" in _said(path, capsys)
 
 
+# --- "the tests pass" over a failure, with no code edit this reads ------------------------------------
+# Found by running the archetype through the hook: three rounds of the same failing test, nothing new
+# read, and then "All tests pass now." `audit` called it a loop and `--fail-on-loop` failed on it; the
+# hook said nothing, because every finding was measured from the last code edit, and there was none.
+
+
+def test_a_claim_after_tests_that_failed_with_no_edit_is_review_suggested(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    turn = [("prompt", "make the invoice tests pass"), FAIL, FAIL, FAIL, ("say", "All tests pass now.")]
+    out = _hook(_transcript(tmp_path, turn), capsys)
+    assert out is not None
+    told = str(out["systemMessage"])
+    assert told == "assurance · review suggested: Claude's last message says the tests pass, but the last test run failed: pytest -q."
+    assert "Fix what failed and run it again, or correct what you said." in out["hookSpecificOutput"]["additionalContext"]
+    # Said once: the next turn's "yes, they pass", over the same failure, is not a new finding.
+    assert _hook(_transcript(tmp_path, turn + [("notice", told), ("prompt", "sure?"), ("say", "Yes, all tests pass.")]), capsys) is None
+
+
+def test_an_edit_made_through_a_heredoc_does_not_make_it_true(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    heredoc = _bash("python - <<'EOF'\nopen('invoice.py', 'w').write('x')\nEOF")
+    path = _transcript(tmp_path, [("prompt", "fix the invoice"), heredoc, FAIL, ("say", "Fixed; the tests pass.")])
+    assert _said(path, capsys).startswith("assurance · review suggested: Claude's last message says the tests pass, but the last test run failed")
+
+
+def test_with_no_edit_a_claim_after_a_passing_run_is_silent(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = _transcript(tmp_path, [("prompt", "are the tests green?"), FAIL, PASS, ("say", "Yes, all tests pass.")])
+    assert _hook(path, capsys) is None
+
+
+def test_with_no_edit_a_failure_elsewhere_or_a_reply_that_claims_nothing_is_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    elsewhere = tmp_path.parent / f"{tmp_path.name}-other"
+    elsewhere.mkdir()
+    there = _bash(f"cd {elsewhere.as_posix()} && pytest -q", failed=True, output="1 failed, 2 passed in 0.10s")
+    assert _hook(_transcript(tmp_path, [("prompt", "and the other repo?"), there, ("say", "All tests pass here.")]), capsys) is None
+    assert _hook(_transcript(tmp_path, [("prompt", "make them pass"), FAIL, ("say", "One test still fails.")]), capsys) is None
+
+
+def test_with_no_edit_a_claim_before_the_failure_is_not_answered_by_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Said, and then a run that fails, with nothing said after it: no claim stands over the failure.
+    path = _transcript(tmp_path, [("prompt", "check them"), ("say", "All tests pass."), FAIL])
+    assert _hook(path, capsys) is None
+
+
 # --- what counts, read by code ----------------------------------------------------------------------
 
 

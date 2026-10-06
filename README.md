@@ -84,7 +84,7 @@ something is at stake, and names which first:
   your project says must pass, or a test your last prompt names, had not passed after it.
 - **review suggested**: the last test or check after the last code edit failed, a path your project
   protects was changed without your last prompt naming it, or Claude's last message says the tests
-  pass when nothing verified the edit.
+  pass when nothing verified the edit, or right after a test that failed.
 
 Otherwise it stays quiet: editing is what Claude does, and edits to prose and assets (`.md`, images,
 `LICENSE`, …) need no test. It says each finding once, and with `--nudge` it asks Claude to act on it
@@ -158,14 +158,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.24 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.25 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.24 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.25 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a

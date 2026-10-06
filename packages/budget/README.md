@@ -40,16 +40,16 @@ every turn and speaks when something is at stake: untested code pushed, merged, 
 committed on main, or shipped while a command the project says must pass or a test the last prompt
 names had not passed after the edit (*check before proceeding*); a failed test or check after the last
 code edit, a change to a path the project protects, or Claude saying the tests pass with nothing
-behind it (*review suggested*). It says a finding once, and not again while the edit, the command and the
-time it rests on are the same. `--nudge` also asks Claude to act (once per turn, and it never fails
-the session).
+behind it, or right after a test that failed (*review suggested*). It says a finding once, and not
+again while the edit, the command and the time it rests on are the same. `--nudge` also asks Claude
+to act (once per turn, and it never fails the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.24 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.25 audit --hook --nudge" } ] } ] } }
 ```
 
-By hand, run `uvx assurance@0.1.24 --version` once first: `--offline` runs the copy uv already has, so
+By hand, run `uvx assurance@0.1.25 --version` once first: `--offline` runs the copy uv already has, so
 the hook never waits on PyPI.
 
 **Run-log budget** (JSONL with a per-run id):

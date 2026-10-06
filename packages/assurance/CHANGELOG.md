@@ -1,3 +1,9 @@
+# 0.1.25
+
+- **Requires `assurance-budget` 0.2.19:** the Stop hook says when Claude claims the tests pass right after
+  they failed, whether or not it saw an edit. The README's hook command and the plugin are pinned to
+  this version.
+
 # 0.1.24
 
 - **`assurance reach`** (`assurance-reach` 0.1.0, new, and `assurance-cli` 0.6.5): what a change to a
