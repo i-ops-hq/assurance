@@ -729,14 +729,47 @@ def test_claude_code_sessions_do_not_print_edited_without_reading(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # Claude Code refuses an edit to an unread file, so an unseen read is the reader's blind spot,
-    # not the agent's. The text stays quiet; --json still carries it.
+    # not the agent's. The text stays quiet, and so does `edited_without_read` in --json, which a
+    # program reads without the caveat a person would weigh: the finding goes under a key that
+    # says what it rests on.
     later = tmp_path / "later"
     later.mkdir()
     path = _edit_session(later, attachment_first=False)
     assert main([str(path)]) == 0
-    assert "Edited without reading" not in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Edited without reading" not in out and "No read recorded" not in out
     assert main(["--json", str(path)]) == 0
-    assert json.loads(capsys.readouterr().out)["edited_without_read"] == ["src/app.py"]
+    report = json.loads(capsys.readouterr().out)
+    assert report["edited_without_read"] == []
+    assert report["edits_with_no_recorded_read"] == {
+        "files": ["src/app.py"], "harness_refuses_unread_edit": True, "unclassified_commands": 0,
+        "means": ("Claude Code refuses an edit to a file the session has not read or written, so the session read or "
+                  "wrote each of these in a way this reader does not record."),
+    }
+
+
+def test_where_the_harness_allows_an_unread_edit_it_is_named_with_what_could_hold_the_read(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from assurance_budget.session_cli import audit, format_report
+
+    path = _edit_session(tmp_path, attachment_first=False)
+    session = replace(read_claude_code(path), source="another-harness")
+    loops, report = audit(session, None, None)
+    assert report["edited_without_read"] == ["src/app.py"]
+    assert report["edits_with_no_recorded_read"]["harness_refuses_unread_edit"] is False
+    assert report["edits_with_no_recorded_read"]["means"] == "No read of these is recorded by a tool or a shell command this reader classifies."
+    assert "  No read recorded before editing: src/app.py." in format_report(session, loops, report)
+
+    report["edits_with_no_recorded_read"] = {**report["edits_with_no_recorded_read"], "unclassified_commands": 2}
+    assert ("  No read recorded before editing: src/app.py; 2 shell commands were not classified, so a read may be "
+            "among them.") in format_report(session, loops, report)
+    from assurance_budget.session_cli import no_recorded_read
+
+    assert [no_recorded_read(["src/app.py"], False, n)["means"] for n in (2, 1)] == [
+        "No read of these is recorded, and 2 shell commands were not classified, so a read may be among them.",
+        "No read of these is recorded, and 1 shell command was not classified, so a read may be among them.",
+    ]
 
 
 def test_title_link_and_agent_records_are_bookkeeping(tmp_path: Path) -> None:

@@ -40,15 +40,16 @@ every turn and speaks when something is at stake: untested code pushed, merged, 
 committed on main, or shipped while a command the project says must pass or a test the last prompt
 names had not passed after the edit (*check before proceeding*); a failed test or check after the last
 code edit, a change to a path the project protects, or Claude saying the tests pass with nothing
-behind it (*review suggested*). `--nudge` also asks Claude to act (once per turn, and it never fails
+behind it (*review suggested*). It says a finding once, and not again while the edit, the command and the
+time it rests on are the same. `--nudge` also asks Claude to act (once per turn, and it never fails
 the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.22 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.23 audit --hook --nudge" } ] } ] } }
 ```
 
-By hand, run `uvx assurance@0.1.22 --version` once first: `--offline` runs the copy uv already has, so
+By hand, run `uvx assurance@0.1.23 --version` once first: `--offline` runs the copy uv already has, so
 the hook never waits on PyPI.
 
 **Run-log budget** (JSONL with a per-run id):
@@ -120,7 +121,9 @@ assert [line["type"] for line in lines].count("tool") == 3
   read from where the command ran: work in another repository, or one nested in the folder, is not the
   project's
 - Shell commands it could not classify, named by kind (`python -c ×3, curl`); `Not read:` lines name why
-- Edits with no visible read, in `--json` (Claude Code itself refuses those, so the text stays quiet)
+- Edits with no recorded read, in `--json` as `edits_with_no_recorded_read`, with what that rests on:
+  Claude Code refuses an edit to a file the session has not read or written, so there each is a read
+  or a write this reader did not see, and `edited_without_read` stays empty and the text quiet
 - Which runs in a JSONL log hit a ceiling or stalled with nothing new read
 - Which configured limits the log never exercised (silence, not a pass)
 - What the session touched next to what it had: MCP servers used and loaded but never used, skills

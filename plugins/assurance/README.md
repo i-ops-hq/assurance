@@ -23,8 +23,8 @@ picture, across sessions, branches or teammates, Claude can point you to
 (`/assurance:board`). It runs nothing, and installs nothing unless you ask.
 
 What it runs, all of it: [`hooks/hooks.json`](hooks/hooks.json) (one Stop hook),
-[`scripts/assurance.sh`](scripts/assurance.sh) (50 lines, which find `uvx` and run the pinned
-`assurance`), [`skills/audit/SKILL.md`](skills/audit/SKILL.md) (run only when you type it; its one
+[`scripts/assurance.sh`](scripts/assurance.sh) (65 lines, which find `uvx` and run the pinned
+`assurance`, and as a hook stand down when your own settings already run it after every turn), [`skills/audit/SKILL.md`](skills/audit/SKILL.md) (run only when you type it; its one
 permission is to run that script), and [`skills/board/SKILL.md`](skills/board/SKILL.md) (words only,
 no permissions). Read them before you install it, as you should any plugin.
 

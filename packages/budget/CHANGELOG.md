@@ -1,3 +1,24 @@
+# 0.2.18
+
+- **The Stop hook says a finding once.** A finding whose evidence had not changed was said again
+  whenever Claude said again that the tests pass, turn after turn. It is now said once while the
+  edit, the command and the time it rests on are the same; a change to any of them is a new sentence,
+  and is said. A count of commands it could not classify that grows from turn to turn is not a new
+  finding. The advice to declare one of those commands under `[audit]` is given only for a command a
+  declaration could name, not for a script fed to Python on standard input or with `-c`, nor for a
+  command inside `$( )`.
+- **`--json` no longer names a Claude Code edit as made without reading.** Claude Code refuses an edit
+  to a file the session has not read or written, so every file `edited_without_read` named for it was
+  one the session read or wrote in a way this reader did not record: on one real session, both of the
+  files it named, one read in full by `cat`, one created by a heredoc and read by `sed`, beside 658
+  shell commands it could not classify. The text report stopped saying so in 0.1.1; the JSON, which programs and other
+  models read without the caveat a person weighs, kept the bare list. `edited_without_read` is now
+  empty for Claude Code and unchanged elsewhere, and the finding moves to
+  `edits_with_no_recorded_read`: the files, whether the harness refuses an unread edit, the count of
+  unclassified commands, and a sentence saying what they mean. Where a harness does allow an unread
+  edit, the text report names it as "No read recorded before editing", beside the unclassified
+  commands that could hold the read.
+
 # 0.2.17
 
 - **`assurance serve`: a local endpoint for any agent and any workflow.** An agent in any language sends

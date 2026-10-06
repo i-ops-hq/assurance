@@ -66,7 +66,8 @@ SAMPLE_SESSION = Path(__file__).resolve().parent / "data" / "sample-session.json
 def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     """Claude Code Stop hook. Reads the hook input, audits the transcript, and always exits 0.
 
-    Speaks only when something is at stake (`assurance_budget.notice`). Check before proceeding: code
+    Speaks only when something is at stake (`assurance_budget.notice`), and says a finding once: not
+    again in a later turn while the evidence under it is the same. Check before proceeding: code
     was pushed, merged, published, deployed or committed on main while no passing test or check
     followed it, or while a command the project says must pass, or one the last prompt names, had not
     passed after it. Review suggested: a test or check after the last code edit failed, a path under
@@ -103,6 +104,11 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
             # read is not something the turn did, and it must not quiet what later turns say.
             _hook_print({"systemMessage": _end_sentence(f"{SETTINGS_UNREAD}, so what they declare is not used: {unread}")})
         return EXIT_OK
+    head = _notice_head(notice)
+    if any(text.startswith(head) for text in session.said):
+        # Said already, in an earlier turn. A finding carries its evidence (the edit, the command, the
+        # time), so had anything under it changed, the sentence would have, and it would be said again.
+        return EXIT_OK
     if "[audit]" in notice.finding:
         declared_note = ""  # the finding says it already
     out: dict[str, Any] = {"systemMessage": _notice_line(notice, declared_note)}
@@ -122,20 +128,34 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     return EXIT_OK
 
 
+def _notice_head(notice: Notice) -> str:
+    """The level and the finding: what the line you see opens with, and what says whether it was said."""
+    return f"assurance · {notice.level}: {_end_sentence(notice.finding)}"
+
+
+#: Kinds of unclassified command no `[audit]` entry can name: a declaration matches any run that begins
+#: with it, so `python -` would count every script fed to Python as a test, and a command inside
+#: `$( … )`, or one that could not be read, has no beginning to match.
+_UNDECLARABLE = frozenset({"python -", "python -c", "(inside $( ))", "(no command)", "(unparsed)"})
+
+
 def _notice_line(notice: Notice, declared_note: str) -> str:
     """The one line you see: the level first, then what happened."""
-    line = f"assurance · {notice.level}: {_end_sentence(notice.finding)}"
+    line = _notice_head(notice)
     if declared_note:
         return f"{line} {declared_note}"
     if notice.unclassified:
         # Told to you, not to Claude: an agent should not be the one declaring what counts as its check.
         n = sum(notice.unclassified.values())
         ran = _count_phrase(n, "command", "commands")
-        line += (
-            f" {ran} after the last code edit could not be classified "
-            f"({_unclassified_breakdown(notice.unclassified)}); if one of them is this project's own "
-            "test or check, declare it under [audit] in .assurance/config.toml and it will count."
-        )
+        line += f" {ran} after the last code edit could not be classified ({_unclassified_breakdown(notice.unclassified)})"
+        declarable = sorted((kind for kind in notice.unclassified if kind not in _UNDECLARABLE), key=lambda kind: (-notice.unclassified[kind], kind))
+        if declarable:
+            # Only what a declaration could name: one that cannot match is advice that cannot work.
+            which = declarable[0] if len(declarable) == 1 else f"{declarable[0]} or {declarable[1]}"
+            line += f"; if {which} is this project's own test or check, declare it under [audit] in .assurance/config.toml and it will count."
+        else:
+            line += "."
     return line
 
 
@@ -571,8 +591,8 @@ def build_report(
 
     What the reader could not account for sits beside what it could — `not_read` with its reasons,
     `unmatched_results`, and `unclassified_commands` broken down by command — so no count appears
-    without the part it could not count. `edited_without_read` is always here, even for sources
-    where the text report leaves it out.
+    without the part it could not count. `edits_with_no_recorded_read` is always here, with what it
+    rests on; `edited_without_read` names an edit as unread only where the harness allows one.
     """
     names = _RECORD_NAMES if record is not None else {}
     by_tool = dict(Counter(names.get(call.name, call.name) for call in session.tool_calls))
@@ -619,7 +639,10 @@ def build_report(
         "not_read": session.not_read,
         "not_read_reasons": dict(session.not_read_reasons),
         "unmatched_results": session.unmatched_results,
-        "edited_without_read": list(unread_edits),
+        # Under a harness that refuses an unread edit, none can be listed as one: what this reader
+        # found is its own blind spot, and it goes beside, under a key that says so.
+        "edited_without_read": [] if session.source in _READ_BEFORE_EDIT_ENFORCED else list(unread_edits),
+        "edits_with_no_recorded_read": no_recorded_read(unread_edits, session.source in _READ_BEFORE_EDIT_ENFORCED, unclassified),
         "after_last_edit": after,
         "unclassified_commands": unclassified,
         "unclassified_by_command": unclassified_by_command(session, declared),
@@ -680,6 +703,22 @@ def build_report(
     if project_notes:
         payload["project_limit_notes"] = project_notes
     return payload
+
+
+def no_recorded_read(files: Sequence[str], harness_refuses: bool, unclassified: int) -> dict[str, Any]:
+    """Edits with no read this reader recorded, and what that rests on, so a program reading the
+    JSON does not have to know it: the `edits_with_no_recorded_read` key of `--json`."""
+    if harness_refuses:
+        # Read or written: a session can create a file through the shell and then edit it, and the
+        # harness allows that edit, so "read" alone would claim a read that may never have happened.
+        means = ("Claude Code refuses an edit to a file the session has not read or written, so the session "
+                 "read or wrote each of these in a way this reader does not record.")
+    elif unclassified:
+        means = (f"No read of these is recorded, and {_count_phrase(unclassified, 'shell command was', 'shell commands were')} "
+                 "not classified, so a read may be among them.")
+    else:
+        means = "No read of these is recorded by a tool or a shell command this reader classifies."
+    return {"files": list(files), "harness_refuses_unread_edit": harness_refuses, "unclassified_commands": unclassified, "means": means}
 
 
 def _excerpt(text: str, limit: int = 80) -> str:
@@ -763,14 +802,16 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         for loop in loops:
             body.append(_loop_line(loop))
 
-    # Claude Code refuses to edit a file the model has not read, so in its transcripts an edit with
-    # no visible read means the read reached the model some way this reader does not see, not
-    # that the agent skipped it. Printing it would report our blind spot as the agent's fault.
-    # It stays in --json for anyone checking the reader, and prints for sources whose harness
-    # does not enforce the read.
-    unread_edits = report.get("edited_without_read") or []
-    if unread_edits and report.get("source") not in _READ_BEFORE_EDIT_ENFORCED:
-        body.append(f"Edited without reading it first: {', '.join(unread_edits)}")
+    # Claude Code refuses to edit a file the session has not read or written, so in its transcripts an
+    # edit with no visible read means the session read or wrote the file some way this reader does
+    # not see, not that the agent skipped the read. Printing it would report our blind spot as the agent's fault.
+    # Elsewhere it prints, with the shell commands that could hold the read beside it.
+    unseen = report.get("edits_with_no_recorded_read") or {}
+    if unseen.get("files") and not unseen.get("harness_refuses_unread_edit"):
+        body.append(_end_sentence(f"No read recorded before editing: {', '.join(unseen['files'])}" + (
+            f"; {_count_phrase(unseen['unclassified_commands'], 'shell command was', 'shell commands were')} not "
+            "classified, so a read may be among them" if unseen.get("unclassified_commands") else ""
+        )))
 
     after = report.get("after_last_edit")
     if after is not None:

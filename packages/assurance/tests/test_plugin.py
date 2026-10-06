@@ -162,7 +162,10 @@ def _uv(tmp_path: Path, body: str) -> dict[str, str]:
     fake.parent.mkdir(exist_ok=True)
     fake.write_text('#!/bin/sh\necho "UV_OFFLINE=${UV_OFFLINE:-} $*" >> "$UVX_LOG"\n' + body, encoding="utf-8")
     fake.chmod(0o755)
-    return {"PATH": f"{fake.parent}:/usr/bin:/bin", "HOME": str(tmp_path), "UVX_LOG": str(tmp_path / "uvx.log")}
+    return {
+        "PATH": f"{fake.parent}:/usr/bin:/bin", "HOME": str(tmp_path), "UVX_LOG": str(tmp_path / "uvx.log"),
+        "CLAUDE_PROJECT_DIR": str(tmp_path / "project"),
+    }
 
 
 def _hook(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -214,6 +217,40 @@ def test_uvs_reason_reaches_the_message_as_valid_json(tmp_path: Path) -> None:
     env = _uv(tmp_path, _NOT_CACHED + "printf 'error: cannot open \"C:\\\\Users\\\\dev\"\\tnow\\n' >&2; exit 2\n")
     message = json.loads(_hook(env).stdout)["systemMessage"]
     assert '(error: cannot open "C:\\Users\\dev"now)' in message
+
+
+def _settings(path: Path, command: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}}), encoding="utf-8")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
+@pytest.mark.parametrize("where", ["user", "config dir", "project", "project, local"])
+def test_as_a_hook_it_stands_down_for_one_you_added_yourself(tmp_path: Path, where: str) -> None:
+    # Claude Code runs both, and each would say every finding: the same line twice, every turn.
+    env = _uv(tmp_path, "echo AUDIT-RAN; cat\n")
+    path = {
+        "user": tmp_path / ".claude" / "settings.json",
+        "config dir": tmp_path / "config" / "settings.json",
+        "project": tmp_path / "project" / ".claude" / "settings.json",
+        "project, local": tmp_path / "project" / ".claude" / "settings.local.json",
+    }[where]
+    if where == "config dir":
+        env["CLAUDE_CONFIG_DIR"] = str(tmp_path / "config")
+    _settings(path, "/opt/homebrew/bin/uvx --offline assurance@0.1.22 audit --hook --nudge")
+    run = _hook(env)
+    assert (run.returncode, run.stdout, run.stderr) == (0, "", "")
+    assert not Path(env["UVX_LOG"]).exists()  # uv never asked
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")
+def test_it_runs_beside_other_hooks_and_by_hand_beside_yours(tmp_path: Path) -> None:
+    env = _uv(tmp_path, "echo AUDIT-RAN; cat\n")
+    _settings(tmp_path / ".claude" / "settings.json", "npm test --silent")
+    assert _hook(env).stdout.startswith("AUDIT-RAN")
+    _settings(tmp_path / ".claude" / "settings.json", "uvx --offline assurance@0.1.22 audit --hook --nudge")
+    by_hand = subprocess.run(["sh", str(SCRIPT), "audit"], capture_output=True, text=True, env=env, check=False)
+    assert by_hand.stdout.startswith("AUDIT-RAN")  # /assurance:audit is asked for, never a second voice
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script")

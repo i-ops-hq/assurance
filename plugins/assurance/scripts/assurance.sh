@@ -12,9 +12,24 @@
 # outage) stops mattering after the first run. When the first run cannot fetch it, the turn is
 # reported as not audited: uv exits 2 when it cannot reach the index, and a Stop hook that exits 2
 # tells Claude to keep going.
-VERSION=0.1.22
+VERSION=0.1.23
 PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin"
 export PATH
+
+# A Stop hook you added yourself, in your settings or this project's, runs this same audit after every
+# turn, and Claude Code runs both, so each finding would be said twice. As a hook, this one stands down
+# and yours speaks; by hand, or from /assurance:audit, it always runs.
+case " $* " in
+  *" --hook "*)
+    for settings in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
+      "${CLAUDE_PROJECT_DIR:-.}/.claude/settings.json" "${CLAUDE_PROJECT_DIR:-.}/.claude/settings.local.json"; do
+      if [ -f "$settings" ] && grep -q 'assurance[^"]*audit --hook' "$settings" 2>/dev/null; then
+        cat >/dev/null
+        exit 0
+      fi
+    done
+    ;;
+esac
 
 if command -v uvx >/dev/null 2>&1; then
   case " $* " in
@@ -22,15 +37,15 @@ if command -v uvx >/dev/null 2>&1; then
     *)
       # By hand or from /assurance:audit. uv's own progress lines ("Installed 8 packages in 7ms" on a
       # first run) are left out of what it prints; uv's errors and the audit's own messages are not.
-      { err=$(uvx assurance==0.1.22 "$@" 2>&1 >&3); } 3>&1
+      { err=$(uvx assurance==0.1.23 "$@" 2>&1 >&3); } 3>&1
       status=$?
       [ -n "$err" ] && printf '%s\n' "$err" | grep -v -E '^(Downloading|Downloaded|Installed|Prepared|Resolved|Uninstalled|Audited|Built|Building|Updated) ' >&2
       exit "$status"
       ;;
   esac
   input=$(cat)
-  printf '%s' "$input" | UV_OFFLINE=1 uvx assurance==0.1.22 "$@" 2>/dev/null && exit 0
-  { err=$(printf '%s' "$input" | uvx assurance==0.1.22 "$@" 2>&1 >&3); } 3>&1 && exit 0
+  printf '%s' "$input" | UV_OFFLINE=1 uvx assurance==0.1.23 "$@" 2>/dev/null && exit 0
+  { err=$(printf '%s' "$input" | uvx assurance==0.1.23 "$@" 2>&1 >&3); } 3>&1 && exit 0
   why=$(printf '%s\n' "$err" | grep -m 1 '^error:' | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g')
   printf '{"systemMessage": "assurance: %s did not run%s, so this turn was not audited."}\n' "$VERSION" "${why:+ ($why)}"
   exit 0

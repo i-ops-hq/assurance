@@ -138,7 +138,7 @@ February 2026 Snyk scanned 3,984 agent skills from two public registries, ClawHu
 kind Claude Code, Cursor and OpenClaw load: 36.82% had at least one security flaw, 13.4% a critical
 one, and 76 carried confirmed malicious payloads for credential theft, backdoors and data exfiltration
 ([ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/)). This plugin is
-[`plugins/assurance/`](plugins/assurance): one Stop hook, one 50-line shell script that runs the pinned
+[`plugins/assurance/`](plugins/assurance): one Stop hook, one 65-line shell script that runs the pinned
 `uvx assurance==<version>`, a skill that only you can run, whose only permission is to run that script
 when you type `/assurance:audit`, and a skill of words alone that tells you about Rooms when you ask.
 It calls no model and sends nothing anywhere; the network is used once, by `uvx`, to fetch the pinned
@@ -158,14 +158,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.22 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.23 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.22 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.23 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
