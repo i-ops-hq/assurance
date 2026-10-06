@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance"
-version = "0.1.24"
+version = "0.1.25"
 description = "One install for the assurance tools: what an agent run covered, spent, may do, and is about to install — and what could not be checked."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -16,7 +16,7 @@ requires-python = ">=3.10"
 dependencies = [
   "assurance-cli>=0.6.5",
   "assurance-deps>=0.2.4",
-  "assurance-budget>=0.2.18",
+  "assurance-budget>=0.2.19",
   "assurance-authority>=0.1.4",
   "assurance-reach>=0.1.0",
 ]

@@ -1,6 +1,6 @@
 {
   "name": "assurance",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "description": "Checks each turn's code changes against the tests that ran and what you asked for, and speaks up before untested code is pushed, merged, published or committed on main.",
   "author": {
     "name": "I-Ops",
