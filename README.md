@@ -84,7 +84,7 @@ something is at stake, and names which first:
   your project says must pass, or a test your last prompt names, had not passed after it.
 - **review suggested**: the last test or check after the last code edit failed, a path your project
   protects was changed without your last prompt naming it, or Claude's last message says the tests
-  pass when nothing verified the edit.
+  pass when nothing verified the edit, or right after a test that failed.
 
 Otherwise it stays quiet: editing is what Claude does, and edits to prose and assets (`.md`, images,
 `LICENSE`, …) need no test. It says each finding once, and with `--nudge` it asks Claude to act on it

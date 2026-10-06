@@ -72,7 +72,8 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     followed it, or while a command the project says must pass, or one the last prompt names, had not
     passed after it. Review suggested: a test or check after the last code edit failed, a path under
     `must_not_touch` or the project's own settings file changed without the last prompt naming it, or
-    Claude's last message says the tests pass when nothing verified the edit. The line you see names
+    Claude's last message says the tests pass when nothing verified the edit, or right after a test
+    that failed. The line you see names
     the level first; with `nudge` Claude is also asked to act (`additionalContext`), never twice in
     one turn (`stop_hook_active`). A hook that cannot read its input says so and lets the session
     end; an audit tool must never be the reason a session breaks.
@@ -306,7 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Run as a Claude Code Stop hook: read the hook's JSON on stdin and tell you when something "
             "is at stake: untested code pushed, merged, published or committed on main, a failed test "
             "or check, a change to a path your settings protect, or a claim that the tests pass with "
-            "nothing behind it. Never fails the session"
+            "nothing behind it, or with a failure behind it. Never fails the session"
         ),
     )
     parser.add_argument(
