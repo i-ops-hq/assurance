@@ -1,0 +1,99 @@
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "failed_sources": [],
+  "extracted_sources": [
+    "/home/dev/mono/svc/api/money.py",
+    "/home/dev/mono/svc/api/tax.py"
+  ],
+  "nodes": [
+    {
+      "id": "money",
+      "label": "money.py",
+      "file_type": "code",
+      "source_file": "svc/api/money.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "money_money",
+      "label": "money()",
+      "file_type": "code",
+      "source_file": "svc/api/money.py",
+      "source_location": "L1",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "tax",
+      "label": "tax.py",
+      "file_type": "code",
+      "source_file": "svc/api/tax.py",
+      "source_location": "L1",
+      "_origin": "ast"
+    },
+    {
+      "id": "tax_tax",
+      "label": "tax()",
+      "file_type": "code",
+      "source_file": "svc/api/tax.py",
+      "source_location": "L4",
+      "_callable": true,
+      "_origin": "ast"
+    },
+    {
+      "id": "svc_api_money",
+      "label": "svc_api_money",
+      "file_type": "concept",
+      "type": "external",
+      "external": true,
+      "source_file": ""
+    }
+  ],
+  "links": [
+    {
+      "source": "money",
+      "target": "money_money",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "svc/api/money.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "tax",
+      "target": "svc_api_money",
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "svc/api/tax.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "tax",
+      "target": "tax_tax",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "svc/api/tax.py",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "tax_tax",
+      "target": "money_money",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "svc/api/tax.py",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    }
+  ],
+  "directed": false
+}

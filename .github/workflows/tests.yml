@@ -42,10 +42,11 @@ jobs:
           python -m pip install -e packages/budget
           python -m pip install -e packages/authority
           python -m pip install -e packages/deps
+          python -m pip install -e packages/reach
           python -m pip install -e packages/assurance
 
       - name: Tests
-        run: python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests packages/budget/tests packages/authority/tests packages/deps/tests packages/assurance/tests
+        run: python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests packages/budget/tests packages/authority/tests packages/deps/tests packages/reach/tests packages/assurance/tests
 
       - name: The baseline file is the only thing the CLI may write
         # Runs with the suite above. It runs again, named, because "read-only except one file you
@@ -80,6 +81,7 @@ jobs:
           python -m pip install -e packages/budget
           python -m pip install -e packages/authority
           python -m pip install -e "packages/deps[dev]"
+          python -m pip install -e packages/reach
 
       # From inside each package, which is where its configuration applies and the command
       # CONTRIBUTING gives. From the repository root mypy reads no config at all and answers with
@@ -87,7 +89,7 @@ jobs:
       - name: mypy --strict, every package, under its own config
         run: |
           failed=""
-          for pkg in core cli mcp budget authority deps; do
+          for pkg in core cli mcp budget authority deps reach; do
             echo "::group::assurance_$pkg"
             (cd "packages/$pkg" && python -m mypy --strict "assurance_$pkg") || failed="$failed assurance_$pkg"
             echo "::endgroup::"
@@ -133,7 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        package: [core, cli, mcp, budget, authority, deps, assurance]
+        package: [core, cli, mcp, budget, authority, deps, reach, assurance]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0

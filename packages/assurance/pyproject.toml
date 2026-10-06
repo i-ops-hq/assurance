@@ -4,20 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance"
-version = "0.1.23"
+version = "0.1.24"
 description = "One install for the assurance tools: what an agent run covered, spent, may do, and is about to install — and what could not be checked."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "I-Ops Operations Intelligence, LLC", email = "hello@i-ops.dev" }]
 requires-python = ">=3.10"
-# The four command-line tools, at the versions this tree tests against. `assurance-mcp` is left out on
+# The command-line tools, at the versions this tree tests against. `assurance-mcp` is left out on
 # purpose: it brings the MCP SDK and a web stack with it, and most people installing this want a
 # command, not a server. `pip install assurance-mcp` when you do.
 dependencies = [
-  "assurance-cli>=0.6.4",
+  "assurance-cli>=0.6.5",
   "assurance-deps>=0.2.4",
   "assurance-budget>=0.2.18",
   "assurance-authority>=0.1.4",
+  "assurance-reach>=0.1.0",
 ]
 keywords = ["ai-agents", "mcp", "rag", "assurance", "supply-chain", "guardrails", "llm-ops"]
 classifiers = [

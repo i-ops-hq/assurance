@@ -1,3 +1,7 @@
+# 0.5.6
+
+- Requires `assurance-cli` 0.6.5. No change to the server or its tools.
+
 # 0.5.5
 
 - Listed on the MCP registry again. 0.5.4 reached PyPI, and its listing did not: its `server.json` still

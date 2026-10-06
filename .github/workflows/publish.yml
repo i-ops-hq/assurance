@@ -13,7 +13,7 @@ name: publish
 #   3. commit                                            4. git tag <pkg>-vX.Y.Z && git push origin <pkg>-vX.Y.Z
 #   A GitHub Release with that CHANGELOG section follows on its own (release-notes.yml).
 #
-# Five packages share this repo, so a bare `v0.5.1` is ambiguous between them. The prefix is what
+# Several packages share this repo, so a bare `v0.5.1` is ambiguous between them. The prefix is what
 # this workflow keys on to know what to build, and what the changelog gate checks each heading
 # against.
 #
@@ -24,7 +24,7 @@ name: publish
 
 on:
   push:
-    tags: ["core-v*", "cli-v*", "mcp-v*", "budget-v*", "authority-v*", "deps-v*", "assurance-v*"]
+    tags: ["core-v*", "cli-v*", "mcp-v*", "budget-v*", "authority-v*", "deps-v*", "reach-v*", "assurance-v*"]
   workflow_dispatch:
 
 jobs:
@@ -46,8 +46,8 @@ jobs:
         run: |
           PKG="${GITHUB_REF_NAME%%-v*}"
           case "$PKG" in
-            core|cli|mcp|budget|authority|deps|assurance) ;;
-            *) echo "::error::Tag $GITHUB_REF_NAME names no package. Use core-vX.Y.Z, cli-vX.Y.Z, mcp-vX.Y.Z, budget-vX.Y.Z, authority-vX.Y.Z, deps-vX.Y.Z or assurance-vX.Y.Z."; exit 1 ;;
+            core|cli|mcp|budget|authority|deps|reach|assurance) ;;
+            *) echo "::error::Tag $GITHUB_REF_NAME names no package. Use core-vX.Y.Z, cli-vX.Y.Z, mcp-vX.Y.Z, budget-vX.Y.Z, authority-vX.Y.Z, deps-vX.Y.Z, reach-vX.Y.Z or assurance-vX.Y.Z."; exit 1 ;;
           esac
           echo "pkg=$PKG" >> "$GITHUB_OUTPUT"
           # packages/assurance is the front-door distribution, published under the bare name.
@@ -99,8 +99,9 @@ jobs:
           python -m pip install -e packages/budget
           python -m pip install -e packages/authority
           python -m pip install -e packages/deps
+          python -m pip install -e packages/reach
           python -m pip install -e packages/assurance
-          python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests packages/budget/tests packages/authority/tests packages/deps/tests packages/assurance/tests
+          python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests packages/budget/tests packages/authority/tests packages/deps/tests packages/reach/tests packages/assurance/tests
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

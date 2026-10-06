@@ -840,7 +840,7 @@ def test_help_lists_every_forwarded_command(capsys) -> None:
     with pytest.raises(SystemExit):
         main(["--help"])
     out = capsys.readouterr().out
-    for name in ("deps", "budget", "authority", "audit", "hook", "serve"):
+    for name in ("deps", "budget", "authority", "audit", "hook", "serve", "reach"):
         assert name in out
 
 
@@ -852,6 +852,16 @@ def test_the_serve_subcommand_reaches_the_server(capsys) -> None:
     assert done.value.code == 0
     out = capsys.readouterr().out
     assert out.startswith("usage: assurance serve") and "--port" in out and "--store" in out
+
+
+def test_the_reach_subcommand_reaches_the_graph_reader(capsys) -> None:
+    """`assurance reach` is forwarded whole to assurance-reach."""
+    pytest.importorskip("assurance_reach.cli")
+    with pytest.raises(SystemExit) as done:
+        main(["reach", "--help"])
+    assert done.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("usage: assurance reach") and "--graph" in out and "--depth" in out
 
 
 def test_the_hook_subcommand_reaches_the_installer(tmp_path: Path, capsys, monkeypatch) -> None:

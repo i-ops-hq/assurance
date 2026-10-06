@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assurance-reach"
+version = "0.1.0"
+description = "What a change to a file reaches, by a code graph such as Graphify's: each hop at its call site, how sure the graph is of it, how far the graph is behind the code, and what it cannot say."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["code-graph", "impact-analysis", "graphify", "agents", "assurance", "dependencies"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+  "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "mypy>=1.0"]
+
+[project.scripts]
+assurance-reach = "assurance_reach.cli:main"
+
+[project.urls]
+Source = "https://github.com/i-ops-hq/assurance"
+
+[tool.setuptools.packages.find]
+include = ["assurance_reach*"]
+
+[tool.setuptools.package-data]
+assurance_reach = ["py.typed"]
+
+[tool.mypy]
+strict = true
