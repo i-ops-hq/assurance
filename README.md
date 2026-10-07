@@ -432,8 +432,10 @@ Its task is the last thing the user said before its first model call, and its la
 
 `--fail-on-claim` exits 1 when a run says it is done and the record goes against it: a check that did
 not hold, or a step whose last run failed. A model's reply counts as saying so only when it says the
-tests pass; one that says it could not finish is shown beside what failed, not set against it. A trace
-holds only what its spans carry, and the audit sends nothing anywhere.
+tests pass; one that says it could not finish is shown beside what failed, not set against it. A
+Claude Code session is held the same way: when Claude's last reply says the tests pass, the last test
+or check that failed before it goes against it (`claim` in `--json`). A trace holds only what its
+spans carry, and the audit sends nothing anywhere.
 
 ## A local endpoint for any agent or workflow
 

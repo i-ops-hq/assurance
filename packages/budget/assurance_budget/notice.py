@@ -26,6 +26,7 @@ import shlex
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import PurePosixPath, PureWindowsPath
+from typing import Sequence
 
 from assurance_budget.asked import NamedCommand, includes, names_cover, names_in, pattern_covers
 from assurance_budget.sessions import (
@@ -380,6 +381,36 @@ def _claim(
         recognised = " it recognises" if after else ""
         why = f"no test or check{recognised} ran after {_edits(tuple(pending.paths), pending.last_at)}"
     return _Finding(text_seq, f"Claude's last message says the tests pass, but {why}", ask, after)
+
+
+def claim_against(session: Session, declared: Declared | None = None, already: Sequence[str] = ()) -> list[str]:
+    """What in the session goes against Claude's last message, when it says the tests pass: the last
+    test run of the project after the last code edit this reads, or else its last check, failed before
+    the message. The report's `claim`, and `--fail-on-claim`, read this; the Stop hook says the same
+    with what the turn did, once.
+
+    A run after the message does not answer it, as it does not in the hook: a claim is held against
+    what had happened when it was made. `already` names commands a failed must_run or prompt check
+    has said failed: that run is not said twice."""
+    text_seq, text = session.last_text
+    if text_seq < 0 or not claims_tests_pass(text):
+        return []
+    runs: list[_Run] = []
+    for call in session.tool_calls:
+        if call.refused or call.seq > text_seq:
+            continue
+        if not call.error and _code_edit(call, session.cwd) is not None:
+            runs.clear()  # what ran before an edit says nothing of the code after it
+            continue
+        command = shell_command(call) if call.name in _SHELL_TOOLS else None
+        run = None if command is None else _verification(call, command, declared, session.cwd)
+        if run is not None and not run.elsewhere:
+            runs.append(run)
+    failing = _failing(runs)
+    rules = declared if declared is not None else Declared()
+    if failing is None or any(_runs_required(failing.command, entry, rules) or entry in failing.command for entry in already):
+        return []
+    return [f"the last {failing.noun} failed: {failing.label}"]
 
 
 def _claim_over_a_failure(session: Session, boundary: int, runs: list[_Run]) -> _Finding | None:

@@ -25,7 +25,7 @@ from assurance_budget.config import (
 from assurance_budget.events import LogError
 from assurance_budget.decisions import decision_lines, decisions
 from assurance_budget.inventory import inventory, inventory_lines
-from assurance_budget.notice import Notice, claims_tests_pass, needs_earlier_lines, stop_notice
+from assurance_budget.notice import Notice, claim_against, claims_tests_pass, needs_earlier_lines, stop_notice
 from assurance_budget.otel import TRACE_SOURCE, is_trace, read_trace
 from assurance_budget.outcome import outcome, outcome_lines
 from assurance_budget.record import RunRecord, is_run_record, model_lines, model_summary, read_run_record
@@ -284,7 +284,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             f"Exit {EXIT_GATE} when a run says it is done and the record goes against it: a check that did "
             "not hold, or a step whose last run failed. A run record's claim, or a trace's assurance.claim "
-            "event, is what it says; a model's last reply counts when it says the tests pass"
+            "event, is what it says; a model's last reply counts when it says the tests pass. In a Claude "
+            "Code session, Claude's last reply saying the tests pass is held against the last test or check "
+            "that failed before it"
         ),
     )
     parser.add_argument(
@@ -453,10 +455,17 @@ def failed_gates(report: dict[str, Any]) -> list[str]:
         failed.append("loop")
     if outcome_failures(report):
         failed.append("outcome")
-    claim = (report.get("run") or {}).get("claim")
+    claim = _the_claim(report)
     if claim and claim["asserts"] and claim["against"]:
         failed.append("claim")
     return failed
+
+
+def _the_claim(report: dict[str, Any]) -> dict[str, Any] | None:
+    """What a report's run or session says at its end: a run record's or a trace's `run.claim`, or a
+    Claude Code session's `claim`, Claude's last reply when it says the tests pass."""
+    claim = report.get("claim") or (report.get("run") or {}).get("claim")
+    return claim if isinstance(claim, dict) else None
 
 
 def _with_task(declared: Declared, must_run: tuple[str, ...], must_not_touch: tuple[str, ...]) -> Declared:
@@ -543,14 +552,16 @@ def failed_last(session: Session, report: dict[str, Any]) -> list[str]:
 def _claim_line(report: dict[str, Any]) -> str | None:
     """A run's last word, next to what in the record does not bear it out. A model's reply that does
     not say the work is done is shown beside what failed, not set against it: it may say so itself."""
-    claim = (report.get("run") or {}).get("claim")
+    claim = _the_claim(report)
     if not claim:
         return None
     words = claim["excerpt"]
-    said = f"The run's last word: \"{words}\"" + ("" if words.endswith((".", "!", "?", "…")) else ".")
+    whose = "Claude's" if report.get("claim") else "The run's"
+    said = f"{whose} last word: \"{words}\"" + ("" if words.endswith((".", "!", "?", "…")) else ".")
     against = list(claim["against"])
     if not against:
-        return f"{said} Nothing in the record goes against it, which is not the same as bearing it out."
+        where = "session" if report.get("claim") else "record"
+        return f"{said} Nothing in the {where} goes against it, which is not the same as bearing it out."
     shown = "; ".join(against[:5]) + (f"; and {len(against) - 5} more" if len(against) > 5 else "")
     return f"{said} {'Against it' if claim.get('asserts', True) else 'At its end'}: {shown}."
 
@@ -666,6 +677,19 @@ def build_report(
         "outcome": _outcome(session, declared, record),
         "inventory": None if record is not None else inventory(session),
     }
+    if record is None:
+        # Claude's last reply, when it says the tests pass, held against the session as a run's claim
+        # is against its record: what did not hold, and the last test or check that failed before it.
+        seq, words = session.last_text
+        payload["claim"] = None if seq < 0 or not claims_tests_pass(words) else {
+            "excerpt": _excerpt(words),
+            "from": "reply",
+            "asserts": True,
+            "against": outcome_failures(payload) + claim_against(session, declared, [
+                check["subject"] for check in (payload["outcome"] or {}).get("checks") or []
+                if check.get("from") in ("must_run", "prompt") and check.get("answer") == "failed"
+            ]),
+        }
     if record is not None:
         task = record.task
         payload["run"] = {
