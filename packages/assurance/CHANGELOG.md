@@ -1,3 +1,10 @@
+# 0.1.26
+
+- **Requires `assurance-budget` 0.2.20:** `--json`, `--fail-on-claim` and the report hold a Claude Code
+  session's last reply, when it says the tests pass, against the last test or check that failed before
+  it, as the Stop hook already did. The README's hook command and the plugin are pinned to this
+  version.
+
 # 0.1.25
 
 - **Requires `assurance-budget` 0.2.19:** the Stop hook says when Claude claims the tests pass right after
