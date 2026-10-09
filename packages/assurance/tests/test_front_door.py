@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -32,8 +33,17 @@ def test_every_command_line_sibling_is_a_dependency(project: dict) -> None:
         and (p / "pyproject.toml").is_file()
         and "[project.scripts]" in (p / "pyproject.toml").read_text(encoding="utf-8")
     )
-    named = sorted(req.split(">")[0].split("[")[0].strip() for req in project["dependencies"])
+    named = sorted(re.split(r"[<>=!~\[ ]", req, maxsplit=1)[0].strip() for req in project["dependencies"])
     assert named == with_commands
+
+
+def test_the_audit_is_pinned_exactly(project: dict) -> None:
+    """`assurance@<version>`, as the hook and the plugin run it, must mean one audit: assurance-budget
+    pinned to the version in this tree, never floored, or a newer budget runs under an older number."""
+    budget = re.search(r'^version = "([^"]+)"', (PACKAGES / "budget" / "pyproject.toml").read_text(encoding="utf-8"), re.M)
+    assert budget
+    pins = [req for req in project["dependencies"] if req.startswith("assurance-budget")]
+    assert pins == [f"assurance-budget=={budget.group(1)}"], pins
 
 
 def test_the_command_is_the_cli_entry_point(project: dict) -> None:

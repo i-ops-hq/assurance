@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance"
-version = "0.1.26"
+version = "0.1.27"
 description = "One install for the assurance tools: what an agent run covered, spent, may do, and is about to install — and what could not be checked."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -13,10 +13,15 @@ requires-python = ">=3.10"
 # The command-line tools, at the versions this tree tests against. `assurance-mcp` is left out on
 # purpose: it brings the MCP SDK and a web stack with it, and most people installing this want a
 # command, not a server. `pip install assurance-mcp` when you do.
+#
+# assurance-budget is pinned exactly, not floored: it is the audit, and the hook and the plugin run
+# `assurance@<version>`. With a floor, `assurance@0.1.24` ran budget 0.2.19 once that existed, so a
+# pinned version named a minimum rather than what ran. Exact, one version is one audit; a budget fix
+# then ships only with a release of this package beside it.
 dependencies = [
   "assurance-cli>=0.6.5",
   "assurance-deps>=0.2.4",
-  "assurance-budget>=0.2.20",
+  "assurance-budget==0.2.20",
   "assurance-authority>=0.1.4",
   "assurance-reach>=0.1.0",
 ]

@@ -1,3 +1,10 @@
+# 0.1.27
+
+- **`assurance-budget` is pinned exactly, at 0.2.20.** It is the audit, and `assurance@<version>`, as
+  the Stop hook, the plugin and the README run it, named only a minimum: once a newer budget existed,
+  an older version number ran it. Now one version is one audit. The README's hook command and the
+  plugin are pinned to this version.
+
 # 0.1.26
 
 - **Requires `assurance-budget` 0.2.20:** `--json`, `--fail-on-claim` and the report hold a Claude Code

@@ -51,13 +51,14 @@ def test_a_floor_on_a_sibling_names_the_version_this_tree_tests_against() -> Non
             sibling = name.lower().replace("_", "-")
             if sibling not in packages:
                 continue
-            floor = re.search(r">=\s*([0-9][^,;\s]*)", rest)
+            # `==` pins exactly, as the front door pins the audit (assurance-budget); the rule is the same.
+            floor = re.search(r"(>=|==)\s*([0-9][^,;\s]*)", rest)
             if not floor:
-                wrong.append(f"{dist} requires {sibling} with no >= floor")
+                wrong.append(f"{dist} requires {sibling} with no >= floor or == pin")
                 continue
             current = _version(packages[sibling])
-            if floor.group(1) != current:
-                wrong.append(f"{dist} requires {sibling}>={floor.group(1)}, this tree has {current}")
+            if floor.group(2) != current:
+                wrong.append(f"{dist} requires {sibling}{floor.group(1)}{floor.group(2)}, this tree has {current}")
     assert not wrong, (
         "; ".join(wrong) + " — raise the floor and bump that package's version in the same commit"
     )
