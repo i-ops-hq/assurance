@@ -331,6 +331,7 @@ def _loopback(host: str) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """The `assurance serve` command line: where to listen, the store, and how much to print."""
     parser = argparse.ArgumentParser(
         prog="assurance serve",
         description=(

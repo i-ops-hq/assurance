@@ -42,6 +42,8 @@ class GraphError(ValueError):
 
 @dataclass(frozen=True)
 class Node:
+    """A symbol, file or concept the graph holds, where it is defined."""
+
     id: str
     label: str
     file: str
@@ -53,6 +55,8 @@ class Node:
 
 @dataclass(frozen=True)
 class Edge:
+    """One relation between two nodes, from the one that depends to what it depends on, with where."""
+
     source: str
     """The node that depends."""
     target: str
@@ -76,6 +80,8 @@ class FileState:
 
 @dataclass(frozen=True)
 class Graph:
+    """A graph as read: its nodes and edges, the folder it covers, its manifest, and what could not be read."""
+
     path: Path
     root: Path
     """The folder the graph covers, which its file paths are relative to."""

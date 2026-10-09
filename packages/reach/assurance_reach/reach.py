@@ -38,6 +38,8 @@ NOT_DEPENDENCIES = {"contains": "structure", "method": "structure", "rationale_f
 
 @dataclass(frozen=True)
 class Reached:
+    """A symbol a change reaches, how many hops away, the hop that reached it, and how sure that path is."""
+
     node: Node
     depth: int
     via: Edge
@@ -49,6 +51,8 @@ class Reached:
 
 @dataclass(frozen=True)
 class Reach:
+    """What a change to a path reaches, and what the walk left undetermined."""
+
     changed: str
     """The path asked about, relative to the graph's root."""
     start: tuple[Node, ...]

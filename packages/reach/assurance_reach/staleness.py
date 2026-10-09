@@ -31,6 +31,8 @@ _CHUNK = 1 << 20
 
 @dataclass(frozen=True)
 class Staleness:
+    """How far the graph is behind the files it read, and what could not be checked."""
+
     how: str
     """`content`, by the manifest's MD5s, or `time`, by modification times against the graph's."""
     read: int
@@ -58,6 +60,7 @@ class Staleness:
 
 
 def staleness(graph: Graph, changed_path: str) -> Staleness:
+    """How far `graph` is behind the folder it covers, and the state now of `changed_path`."""
     if graph.manifest is not None:
         files = sorted(graph.manifest)
         how = "content"

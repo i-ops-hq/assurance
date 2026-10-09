@@ -24,6 +24,7 @@ _SHOWN = 8  # names listed in a sentence before the rest are counted
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """The `assurance reach` command line: the path, the graph, its root, the depth, and `--json`."""
     parser = argparse.ArgumentParser(
         prog="assurance reach",
         description=(
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run `assurance reach`: 0 when it answered, 2 when it could not."""
     args = build_parser().parse_args(list(argv) if argv is not None else None)
     if args.depth < 0:
         print("assurance reach: --depth is a number of hops, 0 or more", file=sys.stderr)
@@ -122,6 +124,8 @@ def report(graph: Graph, found: Reach, behind: Staleness) -> dict[str, Any]:
 
 
 def format_report(graph: Graph, found: Reach, behind: Staleness) -> str:
+    """The answer as text: how far the graph is behind, what the change reaches by confidence, and what
+    could not be determined."""
     lines = [f"What a change to {found.changed} reaches, by {_shown_path(graph.path)}", "", *graph.notes, _staleness_line(graph, behind)]
     if found.start and behind.path != "unchanged":
         lines.append(_asked_path_line(found.changed, behind.path))

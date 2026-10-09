@@ -67,6 +67,9 @@ class Task:
 
 @dataclass(frozen=True)
 class ModelCall:
+    """One call to a model, as the run recorded it: which model, the tokens each way, how long it took,
+    why it stopped, and its error if it failed. `seq` places it among the run's other lines."""
+
     seq: int
     at: float | None
     provider: str
@@ -104,6 +107,9 @@ class Check:
 
 @dataclass(frozen=True)
 class RunRecord:
+    """A run as `assurance audit` reads it from a run record (assurance.run/1) or a trace: what it did,
+    the model calls, decisions and checks it recorded, the task it was given, and its last word."""
+
     session: Session
     """The run in the terms the audit reads a Claude Code session in: tools, edits, commands."""
     runs: tuple[str, ...]
