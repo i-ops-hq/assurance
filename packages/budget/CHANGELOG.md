@@ -1,3 +1,15 @@
+# 0.2.20
+
+- **`--json`, `--fail-on-claim` and the report hold a Claude Code session's "the tests pass" against
+  what failed.** The Stop hook said when Claude's last reply claimed the tests pass right after a test
+  failed; nothing else did, because a run's claim was built only for run records and traces, so on a
+  Claude Code session `--json` had no claim, `--fail-on-claim` exited 0 and the report was silent. A
+  Claude Code session's report now carries `claim`: Claude's last reply, when it says the tests pass,
+  with what goes against it, as a run's claim has: an outcome that did not hold, and the last test run
+  of the project after the last code edit, or else its last check, that failed before the reply.
+  `--fail-on-claim` fails on it, the report says it ("Claude's last word: ... Against it: ..."), and the
+  report and the hook read runs through the same code.
+
 # 0.2.19
 
 - **The Stop hook says when Claude claims the tests pass right after they failed, edit seen or not.**

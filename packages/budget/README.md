@@ -46,10 +46,10 @@ to act (once per turn, and it never fails the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.25 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.26 audit --hook --nudge" } ] } ] } }
 ```
 
-By hand, run `uvx assurance@0.1.25 --version` once first: `--offline` runs the copy uv already has, so
+By hand, run `uvx assurance@0.1.26 --version` once first: `--offline` runs the copy uv already has, so
 the hook never waits on PyPI.
 
 **Run-log budget** (JSONL with a per-run id):
@@ -140,7 +140,8 @@ assert [line["type"] for line in lines].count("tool") == 3
   console exporter prints, read by the GenAI, OpenInference and OpenLLMetry conventions; `FileExporter`
   writes one from the tracer an agent already has (`assurance_budget.otel`, in the root README)
 - A run's last word held against what failed: `--fail-on-claim` exits 1 when a run says it is done and
-  a check did not hold, or a step's last run failed
+  a check did not hold, or a step's last run failed; in a Claude Code session, when Claude's last reply
+  says the tests pass and the last test or check before it failed (`claim` in `--json`)
 - `assurance serve`: a local endpoint any agent sends OTLP traces (protobuf or JSON) or run record
   lines to, and any workflow asks for a run's audit and verdict (`assurance_budget.serve`, in the root
   README)
