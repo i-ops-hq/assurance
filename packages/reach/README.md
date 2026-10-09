@@ -74,6 +74,28 @@ Not determined: not followed, as not dependencies: contains 8, method 5, rationa
   graph places in no file; records in the graph it could not read, by why. A path the graph holds nothing in is reported as unknown, not as reaching
   nothing.
 
+## From Python
+
+The same answer, as values, for a program that wants more than `--json`:
+
+```python
+from pathlib import Path
+
+from assurance_reach.graph import load
+from assurance_reach.reach import reach
+from assurance_reach.staleness import staleness
+
+# The small project above, and the graph Graphify built of it.
+graph = load(Path("tests/fixtures/shop/graphify-out/graph.json"))
+found = reach(graph, "shop/money.py", depth=3)
+behind = staleness(graph, "shop/money.py")
+
+assert not behind.behind  # the graph is current
+assert len(found.reached) == 11
+by_extracted = {hit.node.label for hit in found.reached if hit.confidence == "EXTRACTED"}
+assert "tax()" in by_extracted and "Invoice" not in by_extracted  # Invoice is reached only by an inferred edge
+```
+
 ## What it reads
 
 ```
