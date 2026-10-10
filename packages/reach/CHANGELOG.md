@@ -1,3 +1,17 @@
+# 0.1.1
+
+- `--before X --after Y --declared PATH`: did the change do what it said, and nothing else? Compares
+  two graphs and sorts every dependency change into inside or outside the paths declared before the
+  run. An edge is `(source, target, relation)`, so a call that moves is not a change; a change in
+  confidence is reported on its own, because EXTRACTED becoming INFERRED is a loss of evidence.
+  Two graphs that cannot be compared are refused rather than diffed, and that includes an after
+  graph the working tree has moved past — an edit made after it was built is invisible to it.
+- `owners`: who owns a file, read from CODEOWNERS and never inferred. GitHub's pattern language,
+  including `**`, `?` and character classes, with the last matching rule winning. A line it cannot
+  read does not quietly drop out: because the last match wins, an unreadable rule that comes after
+  the last readable one that matches may own the file instead, so the answer is **undetermined**
+  rather than the earlier rule's owner.
+
 # 0.1.0
 
 - **`assurance reach <path>`: what a change to a file or folder reaches, by a code graph.** It reads a

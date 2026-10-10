@@ -38,6 +38,7 @@ assurance — your AI agent says it's done. This tells you what it didn't check.
   assurance hook install                  run the audit after every Claude Code turn (remove undoes it)
   assurance serve                         a local endpoint any agent sends its traces or runs to
   assurance reach src/money.py            what a change to a file reaches, by a code graph
+  assurance clearance src/money.py        ...and whether the asker is cleared for every owner it reaches
   assurance diff --expected A --found B   was everything that should have been read, read?
   assurance pin --save | --check          did an MCP server change a tool after you approved it?
   assurance deps package.json             what an install will execute, read without running it
@@ -97,6 +98,12 @@ def main(argv: list[str] | None = None) -> int:
     tail = list(sys.argv[1:] if argv is None else argv)
     if tail and tail[0] in FORWARDED:
         return _run_forwarded(tail[0], tail[1:])
+    if tail and tail[0] == "clearance":
+        # Lives here rather than in a sibling because it joins two of them, and importing either
+        # from the other would give a tool about dependency graphs a worse one. Forwarded the same
+        # way so its own parser owns `--help`.
+        from assurance_cli.clearance import main as clearance_main  # noqa: PLC0415 — lazy, like the siblings
+        return int(clearance_main(tail[1:]))
     if not tail:
         print(_START_HERE, end="")
         return 0
@@ -130,6 +137,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "reach", add_help=False,
         help="What a change to a file or folder reaches, by a code graph such as Graphify's, and how far behind the code it is",
+    )
+
+    sub.add_parser(
+        "clearance", add_help=False,
+        help="Whether the person who asked is cleared for every owner their change reaches",
     )
 
     init_parser = sub.add_parser("init", help="Write .assurance.json baseline")

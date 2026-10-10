@@ -6,6 +6,7 @@ package docstring for why MCP depends on the CLI package rather than the reverse
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from assurance_cli.gather import check_coverage as _check_coverage
@@ -70,6 +71,75 @@ def check_staleness(
         return _check_staleness(_boundary().confine(folder), document, source, recorded_facts=recorded_facts)
     except _EXPLAINABLE as exc:
         return _refused(str(exc))
+
+
+def reach(folder: str, path: str, depth: int = 3) -> dict[str, Any]:
+    """What a change to `path` would reach, so an agent can ask before it acts rather than after.
+
+    The question this exists for is the one a worker cannot answer about itself: *if I change this,
+    what else depends on it.* The answer is the producer's graph walked backwards, never a guess —
+    so an agent that asks gets edges with call sites, or it gets told the graph is behind the code
+    and by how much. Both are usable; a confident answer from a stale graph would not be.
+
+    Read-only by construction: it opens the graph and the files the staleness check compares, both
+    inside the granted roots, and writes nothing.
+    """
+    try:
+        root = Path(_boundary().confine(folder))
+    except _EXPLAINABLE as exc:  # BoundaryError is a PathEscapeError, so this covers it too
+        return _refused(str(exc))
+    try:
+        from assurance_reach.graph import GraphError, find_graph, load
+        from assurance_reach.reach import reach as _reach, relative
+        from assurance_reach.staleness import staleness
+    except ImportError:  # pragma: no cover - the dependency is declared, so this is a broken install
+        return _refused("assurance-reach is not installed, so what a change reaches cannot be answered")
+
+    target = (root / path).resolve()
+    if not _inside(target, root):
+        return _refused(f"{path} is outside the folder this may read")
+    graph_path = find_graph(target) or find_graph(root)
+    if graph_path is None:
+        return _refused(
+            "no code graph found. Build one with a producer such as Graphify (`graphify update .`) "
+            "in the folder this may read."
+        )
+    try:
+        graph = load(graph_path, root)
+        changed = relative(graph, str(target))
+    except (GraphError, ValueError) as exc:
+        return _refused(str(exc))
+    found = _reach(graph, changed, None if depth == 0 else depth)
+    behind = staleness(graph, changed)
+    return {
+        "changed": found.changed,
+        "reached": [
+            {"label": item.node.label, "file": item.node.file, "line": item.via.line,
+             "relation": item.via.relation, "depth": item.depth, "confidence": item.confidence}
+            for item in found.reached
+        ],
+        "reached_count": len(found.reached),
+        "beyond_depth": found.past_depth,
+        "not_followed": found.unfollowed,
+        "graph": {
+            "path": str(graph_path),
+            "behind": behind.behind,
+            "checked_by": behind.how,
+            "files_read": behind.read,
+            "changed_since": list(behind.changed),
+            "new_since": list(behind.new),
+            "gone_since": list(behind.gone),
+            "asked_path": behind.path,
+        },
+    }
+
+
+def _inside(path: Path, base: Path) -> bool:
+    try:
+        path.relative_to(base)
+    except ValueError:
+        return False
+    return True
 
 
 def check_set_coverage(

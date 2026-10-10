@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-reach"
-version = "0.1.0"
+version = "0.1.1"
 description = "What a change to a file reaches, by a code graph such as Graphify's: each hop at its call site, how sure the graph is of it, how far the graph is behind the code, and what it cannot say."
 readme = "README.md"
 license = { text = "Apache-2.0" }

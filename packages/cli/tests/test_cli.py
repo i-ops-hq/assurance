@@ -840,7 +840,7 @@ def test_help_lists_every_forwarded_command(capsys) -> None:
     with pytest.raises(SystemExit):
         main(["--help"])
     out = capsys.readouterr().out
-    for name in ("deps", "budget", "authority", "audit", "hook", "serve", "reach"):
+    for name in ("deps", "budget", "authority", "audit", "hook", "serve", "reach", "clearance"):
         assert name in out
 
 

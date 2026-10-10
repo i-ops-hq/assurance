@@ -1,3 +1,14 @@
+# 0.6.6
+
+- `assurance clearance PATH --declaration FILE --principal ID`: whether the person who asked is
+  cleared for every owner their change reaches. Joins `assurance-reach` to `assurance-authority`
+  without either package depending on the other — both are imported lazily here, so neither gains
+  a dependency.
+- The decision goes through `authority.review`, so there is one implementation of the rule and a
+  declaration `assurance authority` would refuse is refused identically.
+- It never answers over part of a change: a reached file whose owner is unowned or undetermined
+  makes the result NOT_ASKED, never PROCEED. Exit 1 for a finding, including one it could not check.
+
 # 0.6.5
 
 - **`assurance reach`** reaches `assurance-reach`: what a change to a file or folder reaches, by a code

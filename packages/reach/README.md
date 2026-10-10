@@ -96,6 +96,31 @@ by_extracted = {hit.node.label for hit in found.reached if hit.confidence == "EX
 assert "tax()" in by_extracted and "Invoice" not in by_extracted  # Invoice is reached only by an inferred edge
 ```
 
+## Did the change do what it said?
+
+Build a graph before the change and one after, declare beforehand which paths the change is
+supposed to touch, and ask:
+
+```sh
+assurance reach --before before.json --after after.json --declared src/billing/
+```
+
+It sorts every dependency change into inside or outside those paths. An edge is
+`(source, target, relation)`, so a call that moves down a file is not a change; a change in how sure
+the producer is of an edge is reported on its own. Two graphs it cannot compare are refused rather
+than diffed, and that includes an after graph the working tree has moved past: an edit made after
+the graph was built is invisible to it, so a confident "nothing else changed" would be wrong.
+
+Exit 1 when the outcome did not hold, or when the comparison cannot be trusted. Exit 0 when it held.
+
+## Who owns what a change reaches
+
+`assurance_reach.owners` reads CODEOWNERS and never infers an owner. It implements GitHub's pattern
+language, and the last matching rule wins, as GitHub specifies. A line it cannot read does not
+quietly drop out: because the last match wins, an unreadable rule that comes *after* the last
+readable one that matches may own the file instead, so the answer is **undetermined** rather than
+the earlier rule's owner. `assurance clearance`, in `assurance-cli`, is what joins that to authority.
+
 ## What it reads
 
 ```
