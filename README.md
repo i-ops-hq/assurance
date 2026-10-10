@@ -158,14 +158,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.27 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.28 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.27 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.28 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
@@ -188,6 +188,7 @@ One install, one `assurance` command.
 | `assurance hook` | Run that audit after every Claude Code turn, or stop running it: `install`, `remove`, `status`. |
 | `assurance serve` | A local endpoint any agent sends its traces or runs to, and any workflow asks for a run's audit. |
 | `assurance reach` | What does a change to this file reach, by a code graph such as Graphify's, and how far behind the code is that graph? |
+| `assurance clearance` | Is the person who asked cleared for every owner their change reaches? |
 | `assurance diff` | Did the work cover everything it should have? For example, retrieved docs vs. required docs. |
 | `assurance pin` | Did an MCP server quietly change a tool's description after you approved it? |
 | `assurance deps` | What will `pip install` or `npm install` run on your machine? Read without running it. |

@@ -10,6 +10,7 @@ from assurance_mcp import __version__
 from assurance_mcp.boundary import configure, parse
 from assurance_mcp.checks import (
     check_coverage,
+    reach,
     check_retrieval_coverage,
     check_set_coverage,
     check_staleness,
@@ -152,6 +153,18 @@ def check_retrieval_coverage_tool(
     corpus they are often the more alarming line.
     """
     return check_retrieval_coverage(expected_documents, retrieved_chunks, scope, derivation)
+
+
+@_read_only_tool()
+def reach_tool(folder: str = "", path: str = "", depth: int = 3) -> dict[str, Any]:
+    """What a change to a file or folder would reach, before the change is made.
+
+    `folder` is one the server was granted; `path` is relative to it. `depth` is hops to follow,
+    0 for no limit. The answer names each reached symbol with the call site that carried the
+    dependency and how sure the graph is of it, and says how far behind the code the graph is —
+    an agent that acts on a stale graph should know that it did.
+    """
+    return reach(folder, path, depth)
 
 
 def main() -> None:

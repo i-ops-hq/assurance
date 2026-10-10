@@ -16,9 +16,12 @@ from typing import Any, Sequence
 from assurance_reach.graph import CONFIDENCE, Graph, GraphError, find_graph, load
 from assurance_reach.reach import NOT_DEPENDENCIES, Reach, Reached, reach, relative
 from assurance_reach.staleness import WALK_LIMIT, Staleness, staleness
+from assurance_reach.verify import Comparison, compare
 
 SCHEMA = "assurance.reach/1"
+VERIFY_SCHEMA = "assurance.reach.verify/1"
 EXIT_OK = 0
+EXIT_FINDING = 1
 EXIT_UNREADABLE = 2
 _SHOWN = 8  # names listed in a sentence before the rest are counted
 
@@ -33,7 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
             "of it; how far the graph is behind the code; and what it could not determine."
         ),
     )
-    parser.add_argument("path", help="The file or folder whose change to follow")
+    parser.add_argument("path", nargs="?", help="The file or folder whose change to follow")
+    parser.add_argument("--before", metavar="FILE", help="A graph built before the change (with --after, asks whether it did what it said)")
+    parser.add_argument("--after", metavar="FILE", help="A graph built after the change")
+    parser.add_argument("--declared", metavar="PATH", action="append", default=[],
+                        help="A path the change was declared to touch, before it ran; repeatable")
     parser.add_argument("--graph", metavar="FILE", help="The graph (default: the nearest graphify-out/graph.json above the path)")
     parser.add_argument("--root", metavar="DIR", help="The folder the graph's paths are relative to (default: the one it records)")
     parser.add_argument("--depth", type=int, default=3, help="Hops to follow (default 3; 0 for no limit)")
@@ -44,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run `assurance reach`: 0 when it answered, 2 when it could not."""
     args = build_parser().parse_args(list(argv) if argv is not None else None)
+    if args.before or args.after:
+        return _run_verify(args)
+    if args.path is None:
+        print("assurance reach: a path to follow, or --before and --after to check a change that ran",
+              file=sys.stderr)
+        return EXIT_UNREADABLE
     if args.depth < 0:
         print("assurance reach: --depth is a number of hops, 0 or more", file=sys.stderr)
         return EXIT_UNREADABLE
@@ -68,6 +81,97 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         print(format_report(graph, found, behind))
     return EXIT_OK
+
+
+def _run_verify(args: argparse.Namespace) -> int:
+    """`--before X --after Y --declared P`: did the change do what it said, and nothing else?"""
+    if not (args.before and args.after):
+        print("assurance reach: --before and --after are given together", file=sys.stderr)
+        return EXIT_UNREADABLE
+    if not args.declared:
+        # A comparison with no declaration would report every change as undeclared, which reads as
+        # an accusation rather than a finding. Refuse, the way the audit refuses a claim nobody made.
+        print("assurance reach: --declared names a path the change was supposed to touch; without "
+              "one there is nothing to hold the result against", file=sys.stderr)
+        return EXIT_UNREADABLE
+    try:
+        before = load(Path(args.before), Path(args.root) if args.root else None)
+        after = load(Path(args.after), Path(args.root) if args.root else None)
+    except (GraphError, ValueError) as exc:
+        print(f"assurance reach: {_shown(str(exc))}", file=sys.stderr)
+        return EXIT_UNREADABLE
+    # The after graph is only worth comparing if it still describes the tree. An edit made after it
+    # was built is invisible to it, so a change can read as held while an undeclared edit sits on
+    # disk — verified by doing exactly that before this check existed.
+    stale: list[str] = []
+    for scope in args.declared or ["."]:
+        try:
+            behind = staleness(after, scope.strip().strip("/") or ".")
+        except (GraphError, ValueError):
+            continue
+        if behind.behind:
+            what = ", ".join([*behind.changed[:3], *behind.new[:3], *behind.gone[:3]]) or "files it read"
+            stale.append(f"the after graph is behind the code it describes, by {what}, "
+                         f"checked by {behind.how}")
+        if behind.walk_stopped or behind.unlisted or behind.outside:
+            stale.append("the check for files newer than the after graph could not see all of them, "
+                         "so there may be changes neither graph records")
+        break
+    out = compare(before, after, tuple(args.declared), tuple(dict.fromkeys(stale)))
+    print(json.dumps(verify_report(out), indent=2) if args.as_json else format_verify(out))
+    # Same table as the rest of the family: 1 is something to look at, including something it
+    # could not check. An outcome that did not hold is that, and so is a comparison it cannot trust.
+    return EXIT_FINDING if not out.held else EXIT_OK
+
+
+def verify_report(out: Comparison) -> dict[str, Any]:
+    """The comparison as a dict: what `--json` prints."""
+    return {
+        "schema": VERIFY_SCHEMA,
+        "declared": list(out.declared),
+        "held": out.held,
+        "changes": [
+            {"source": c.key[0], "target": c.key[1], "relation": c.key[2], "kind": c.kind,
+             "file": c.file, "line": c.line, "was": c.was, "now": c.now, "declared": c.declared}
+            for c in out.changes
+        ],
+        "undeclared": len(out.undeclared),
+        "inside_declared": len(out.inside),
+        "unplaced": len(out.unplaced),
+        "silent": list(out.silent),
+        "nodes_added": [n.id for n in out.nodes_added],
+        "nodes_removed": [n.id for n in out.nodes_removed],
+        "unsound": list(out.unsound),
+    }
+
+
+def format_verify(out: Comparison) -> str:
+    """The sentence a reviewer needs, then everything it could not settle."""
+    if out.unsound:
+        lines = ["This comparison cannot be trusted, so nothing below would mean anything:"]
+        lines += [f"  {_shown(reason)}" for reason in out.unsound]
+        return "\n".join(lines)
+    declared = ", ".join(out.declared)
+    lines = [
+        f"Declared: {declared}. "
+        f"{len(out.changes)} dependency change(s): {len(out.inside)} inside, {len(out.undeclared)} outside."
+    ]
+    lines.append("  The change did what it said, and nothing else." if out.held
+                 else "  The outcome did NOT hold.")
+    for change in out.undeclared[:_SHOWN]:
+        where = f"{_shown(change.file)}:{_shown(change.line)}" if change.file else "no call site recorded"
+        lines.append(f"  Outside every declared path: {change.kind} "
+                     f"{_shown(change.key[0])} -{_shown(change.key[2])}-> {_shown(change.key[1])} at {where}.")
+    if len(out.undeclared) > _SHOWN:
+        lines.append(f"  ...and {len(out.undeclared) - _SHOWN} more outside.")
+    if out.silent:
+        lines.append(f"  Declared but nothing changed there: {', '.join(_shown(p) for p in out.silent)}.")
+    if out.unplaced:
+        lines.append(f"  Not determined: {len(out.unplaced)} change(s) the graph places in no file, "
+                     "so neither inside nor outside what was declared.")
+    if out.nodes_added or out.nodes_removed:
+        lines.append(f"  Symbols: {len(out.nodes_added)} new, {len(out.nodes_removed)} gone.")
+    return "\n".join(lines)
 
 
 def report(graph: Graph, found: Reach, behind: Staleness) -> dict[str, Any]:

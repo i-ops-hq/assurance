@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance"
-version = "0.1.27"
+version = "0.1.28"
 description = "One install for the assurance tools: what an agent run covered, spent, may do, and is about to install — and what could not be checked."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -19,11 +19,11 @@ requires-python = ">=3.10"
 # pinned version named a minimum rather than what ran. Exact, one version is one audit; a budget fix
 # then ships only with a release of this package beside it.
 dependencies = [
-  "assurance-cli>=0.6.5",
+  "assurance-cli>=0.6.6",
   "assurance-deps>=0.2.4",
   "assurance-budget==0.2.20",
   "assurance-authority>=0.1.4",
-  "assurance-reach>=0.1.0",
+  "assurance-reach>=0.1.1",
 ]
 keywords = ["ai-agents", "mcp", "rag", "assurance", "supply-chain", "guardrails", "llm-ops"]
 classifiers = [

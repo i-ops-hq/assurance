@@ -94,12 +94,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e packages/core
+          python -m pip install -e packages/reach
           python -m pip install -e "packages/cli[dev]"
           python -m pip install -e "packages/mcp[dev]"
           python -m pip install -e packages/budget
           python -m pip install -e packages/authority
           python -m pip install -e packages/deps
-          python -m pip install -e packages/reach
           python -m pip install -e packages/assurance
           python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests packages/budget/tests packages/authority/tests packages/deps/tests packages/reach/tests packages/assurance/tests
 

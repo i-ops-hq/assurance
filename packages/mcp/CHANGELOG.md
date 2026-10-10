@@ -1,3 +1,12 @@
+# 0.5.7
+
+- A `reach_tool`, so an agent can ask what a change would touch *before* it makes it. The answer is
+  the producer's code graph walked backwards — each reached symbol with the call site that carried
+  the dependency and how sure the graph is of it — plus how far behind the code the graph is, because
+  an agent acting on a stale graph should know that it did. Read-only, and confined to the granted
+  roots like every other tool here.
+- Requires `assurance-reach` 0.1.0.
+
 # 0.5.6
 
 - Requires `assurance-cli` 0.6.5. No change to the server or its tools.

@@ -1,3 +1,12 @@
+# 0.1.28
+
+- `assurance clearance` arrives with `assurance-cli` 0.6.6: whether the person who asked is cleared
+  for every owner their change reaches.
+- `assurance reach --before X --after Y --declared PATH` arrives with `assurance-reach` 0.1.1: did
+  the change do what it said, and nothing else?
+- Floors moved to `assurance-cli>=0.6.6` and `assurance-reach>=0.1.1`; `assurance-budget` stays
+  pinned exactly.
+
 # 0.1.27
 
 - **`assurance-budget` is pinned exactly, at 0.2.20.** It is the audit, and `assurance@<version>`, as
