@@ -34,15 +34,18 @@ jobs:
       # that shipped that core version failed on itself — the badge read "tests failing" for an hour
       # on 2026-09-02 with nothing wrong in the code. `released-against-itself` cannot happen here.
       - name: Install every package from this tree, in dependency order
+        # bash on every OS: Windows' default shell carries on after a failed install, and the
+        # failure then surfaces in the tests as a missing module rather than here, where it happened.
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e packages/core
+          python -m pip install -e packages/reach
           python -m pip install -e "packages/cli[dev]"
           python -m pip install -e "packages/mcp[dev]"
           python -m pip install -e packages/budget
           python -m pip install -e packages/authority
           python -m pip install -e packages/deps
-          python -m pip install -e packages/reach
           python -m pip install -e packages/assurance
 
       - name: Tests
@@ -76,12 +79,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip mypy
           python -m pip install -e packages/core
+          python -m pip install -e packages/reach
           python -m pip install -e "packages/cli[dev]"
           python -m pip install -e "packages/mcp[dev]"
           python -m pip install -e packages/budget
           python -m pip install -e packages/authority
           python -m pip install -e "packages/deps[dev]"
-          python -m pip install -e packages/reach
 
       # From inside each package, which is where its configuration applies and the command
       # CONTRIBUTING gives. From the repository root mypy reads no config at all and answers with
