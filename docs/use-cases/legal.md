@@ -9,13 +9,20 @@ A legal research agent writes a confident memo from four of the six documents th
 A claims agent summarises a year of monthly reports with March missing. The answer reads complete,
 and nothing in it says what was never read.
 
-## Where Assurance sits
+## The workflow, with Assurance in it
 
+```mermaid
+flowchart LR
+    s0(["Question"])
+    s1["Agent retrieves<br/>documents"]
+    A["🛡️ Assurance<br/>every required<br/>document read?"]
+    s3["Memo"]
+    s4(["Attorney<br/>review"])
+    s0 --> s1 --> A --> s3 --> s4
+    style A stroke:#dc2626,stroke-width:3px
 ```
-question ─▶ agent retrieves ─▶ assurance diff: required documents vs. what was retrieved
-         ─▶ agent reads a folder of reports ─▶ assurance check: which periods are missing
-         ─▶ agent answers ─▶ CI or the agent's own wrapper stops on a gap (exit 1)
-```
+
+The red box is Assurance. Everything around it is your workflow as it is today.
 
 ## Set it up
 
