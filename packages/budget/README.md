@@ -48,10 +48,10 @@ and it never fails the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.29 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.30 audit --hook --nudge" } ] } ] } }
 ```
 
-By hand, run `uvx assurance@0.1.29 --version` once first: `--offline` runs the copy uv already has, so
+By hand, run `uvx assurance@0.1.30 --version` once first: `--offline` runs the copy uv already has, so
 the hook never waits on PyPI.
 
 **Run-log budget** (JSONL with a per-run id):
@@ -168,8 +168,8 @@ anyway` or `ran before it`), and `not_recorded`, what the record left out that a
 | kind | answers |
 |---|---|
 | `file` | `changed`, `read`, `not opened`, `unknown` |
-| `command` | `passed`, `failed`, `unknown`, `not run`, `no code edited` |
-| `test` | `passed`, `failed`, `unknown`, `not run` |
+| `command` | `passed`, `failed`, `unknown`, `not run`, `ran no tests`, `no code edited` |
+| `test` | `passed`, `failed`, `unknown`, `not run`, `ran no tests` |
 | `paths` | `untouched`, `changed`, `unknown` |
 
 ### The inventory

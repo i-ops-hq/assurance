@@ -1,3 +1,10 @@
+# 0.1.30
+
+- **Requires `assurance-budget` 0.2.22, pinned exactly:** Maven, Gradle, Bazel, Django, Rails, monorepo
+  runners and security scanners recognised; a project's `package.json`, `Makefile` and `justfile`
+  scripts read; a run of no tests not counted as a pass; failures quoted as the runner printed them;
+  sub-agents' work counted. The plugin and the README's hook command are pinned to this version.
+
 # 0.1.29
 
 - **Requires `assurance-budget` 0.2.21, pinned exactly:** the Stop hook speaks at three levels, a

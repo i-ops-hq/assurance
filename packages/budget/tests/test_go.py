@@ -168,7 +168,7 @@ def _hook(path: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> dic
 
 @pytest.mark.parametrize("command, output, ends", [
     ("go test ./... 2>&1 | tail -3", "gotest_fail.txt", ": go test ./..."),  # was `./....`
-    ("pytest -q", None, ": pytest -q."),  # a label that does not end a sentence still gets one
+    ("pytest -q", None, ": pytest -q (1 failed in 0.10s)."),  # with what the runner printed, then one full stop
 ])
 def test_the_hook_names_the_failed_command_with_one_full_stop(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], command: str, output: str | None, ends: str

@@ -54,7 +54,9 @@ from the declaration and the graph, and no one's clearance is lent to the person
 - A record per session of what was edited, what ran after the last edit and how it ended, what your
   last prompt named and what happened to it, and what could not be classified.
 - A clear line between what was checked and what was not: an unclassified command is named, never
-  counted as a pass.
+  counted as a pass, and a run of zero tests is called that, not a pass.
+- It knows a Java shop's commands out of the box: `./mvnw verify`, `./gradlew check`, `mvn -DskipTests
+  package` (compiled, tested nothing), and the scripts in your `Makefile`.
 - Nothing leaves the machine. It calls no model and no network service, so it can run where agents
   are otherwise refused.
 

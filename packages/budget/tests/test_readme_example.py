@@ -152,7 +152,7 @@ def test_the_readme_hook_lines_are_what_the_hook_says(tmp_path: Path, monkeypatc
              ("14:04", "edit", "src/billing/invoice.py")]
     said = [
         _hook_line(tmp_path, start),
-        _hook_line(tmp_path, [*start, ("14:05", "bash", (test, True, "1 failed, 11 passed in 0.33s"))]),
+        _hook_line(tmp_path, [*start, ("14:05", "bash", (test, True, "FAILED tests/test_invoice.py::test_eur_rounding - assert 10.01 == 10.0\n1 failed, 11 passed in 0.33s"))]),
         _hook_line(tmp_path, [*start, ("14:06", "bash", ("git push origin fix-rounding", False, "ok"))]),
     ]
     block = re.search(r"\n(assurance · note: .*?)\n```", README.read_text(encoding="utf-8"), re.S)

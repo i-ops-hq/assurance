@@ -62,6 +62,10 @@ seconds = 3600
 - **stop and check** on a push, merge, publish, deploy, migration or commit on main with code that no
   passing test or check followed, naming the edit and the command.
 - A **suggested review** when `.github/workflows/` or `infra/prod/` changed without being asked for.
+- Security and infrastructure scans are read: semgrep, trivy, gitleaks, checkov, `pip-audit`,
+  `npm audit`, `terraform validate`, `helm lint`. One that fails after the last edit is a **suggested
+  review**, quoting what it printed; one that passes does not count as testing your code, and
+  `terraform validate && terraform apply` over untested code is still a **stop and check**.
 - Commands are read from where they ran: a push in another repository is not counted as this one's.
 
 ## What it does not do

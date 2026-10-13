@@ -45,6 +45,7 @@ from assurance_budget.sessions import (
     after_last_edit,
     bash_kinds_count,
     changed_limits_file,
+    changed_manifests,
     display_path,
     edited_without_read,
     find_latest_session,
@@ -52,9 +53,11 @@ from assurance_budget.sessions import (
     input_label,
     read_claude_code,
     read_claude_code_tail,
-    transcript_changed_limits_file,
+    transcript_changes,
+    transcript_has_note,
     unclassified_bash_count,
     unclassified_by_command,
+    with_learned,
 )
 
 EXIT_OK = 0
@@ -98,15 +101,22 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     try:
         transcript = Path(data["transcript_path"]).expanduser()
         session, whole = read_claude_code_tail(transcript, HOOK_WINDOW)
-        declared, declared_note, set_aside, unread = _hook_declared(session, _limits_file_changed(transcript, session, whole))
+        limits, changed = changed_limits_file(session), changed_manifests(session)  # the lines read, sub-agents' included
+        if not whole:
+            before_limits, before_changed = transcript_changes(transcript, session.cwd)
+            limits, changed = limits or before_limits, changed | before_changed
+        declared, declared_note, set_aside, unread = _hook_declared(session, limits)
+        declared = with_learned(declared, _project_dir(session), changed)
         if not whole and needs_earlier_lines(session, declared, set_aside=set_aside):
             session, whole = read_claude_code(transcript), True
         notice = stop_notice(session, declared, set_aside=set_aside)
         if notice is not None and notice.level == NOTE and not whole and stretch_may_predate(session, declared):
-            # A note is said once per stretch of untested edits, and this one may have been said
-            # before the lines read: read them all before saying it again.
-            session, whole = read_claude_code(transcript), True
-            notice = stop_notice(session, declared, set_aside=set_aside)
+            # A note is said once per stretch of untested edits, and this stretch began before the
+            # lines read. Whether a note was said before them is looked for, not parsed for: reading a
+            # long session whole on every turn costs seconds, and a note kept back is the cheaper
+            # mistake than a note said twice.
+            if transcript_has_note(transcript):
+                notice = None
     except LogError as exc:
         _hook_print({"systemMessage": f"assurance: could not read this session ({exc}); nothing audited."})
         return EXIT_OK
@@ -178,17 +188,6 @@ def _notice_line(notice: Notice, declared_note: str) -> str:
 #: How much of the end of a transcript the Stop hook reads first; `needs_earlier_lines` says when it
 #: must read all of it.
 HOOK_WINDOW = 2_000_000
-
-
-def _limits_file_changed(transcript: Path, session: Session, whole: bool) -> bool:
-    """Whether the session changed `.assurance/config.toml` at any point, not only in the window.
-
-    Trusting a project's declared checks depends on it, and a write early in a long session is as
-    much a write as a late one.
-    """
-    if whole:
-        return changed_limits_file(session)
-    return transcript_changed_limits_file(transcript, session.cwd)
 
 
 #: How the hook opens when it cannot read the settings. Not `assurance:` or `assurance ·`, which mark a
@@ -437,6 +436,7 @@ def audit(session: Session, record: RunRecord | None, ceilings: Ceilings | None)
     cannot be read."""
     limits_changed = changed_limits_file(session)
     declared, declared_from, declared_notes = load_declared(_project_dir(session), trust_project=not limits_changed)
+    declared = with_learned(declared, _project_dir(session), changed_manifests(session))
     if record is not None and record.task is not None:
         declared = _with_task(declared, record.task.must_run, record.task.must_not_touch)
     loops = detect_loops(session.tool_calls)
@@ -466,7 +466,8 @@ def failed_gates(report: dict[str, Any]) -> list[str]:
     an outcome that did not hold, and a run's claim the record goes against."""
     failed: list[str] = []
     after = report.get("after_last_edit")
-    if after is not None and after["tests"] == 0 and after["checks"] == 0:
+    # A run of no tests verified nothing, and a scan checked something other than the code.
+    if after is not None and after["tests"] - after.get("tests_empty", 0) == 0 and after["checks"] - after.get("scans", 0) == 0:
         failed.append("unverified")
     if report.get("loops"):
         failed.append("loop")
@@ -507,8 +508,9 @@ def outcome_failures(report: dict[str, Any]) -> list[str]:
     failed: list[str] = []
     for check in (report.get("outcome") or {}).get("checks") or []:
         answer, origin, subject = check["answer"], check["from"], check["subject"]
-        if origin == "must_run" and answer in ("failed", "not run"):
-            failed.append(f"{subject}, which must pass after an edit, {'failed' if answer == 'failed' else 'did not run after the last one'}")
+        if origin == "must_run" and answer in ("failed", "not run", "ran no tests"):
+            said = {"failed": "failed", "not run": "did not run after the last one", "ran no tests": "ran no tests"}[answer]
+            failed.append(f"{subject}, which must pass after an edit, {said}")
         elif origin == "must_not_touch" and answer == "changed":
             failed.append(f"{subject}, which must not be touched, was changed")
         elif origin == "task" and answer == "not written":
@@ -654,6 +656,7 @@ def build_report(
         "cwd": session.cwd,
         "duration_seconds": duration,
         "tool_calls": len(session.tool_calls),
+        "subagent_calls": session.subagent_calls,
         "failed": failed,
         "refused": len(refused),
         "refused_calls": refused,
@@ -704,7 +707,7 @@ def build_report(
             "asserts": True,
             "against": outcome_failures(payload) + claim_against(session, declared, [
                 check["subject"] for check in (payload["outcome"] or {}).get("checks") or []
-                if check.get("from") in ("must_run", "prompt") and check.get("answer") == "failed"
+                if check.get("from") in ("must_run", "prompt") and check.get("answer") in ("failed", "ran no tests")
             ]),
         }
     if record is not None:
@@ -834,6 +837,8 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         fail_bit += f", {len(refused)} refused" if refused else ""
         breakdown = _tool_breakdown(report["by_tool"])
         call_bit = _count_phrase(n, "tool call", "tool calls")
+        if report.get("subagent_calls"):
+            call_bit += f" ({report['subagent_calls']} by sub-agents)"
         lines.append(f"{call_bit}{fail_bit} — {breakdown}" if breakdown else f"{call_bit}{fail_bit}")
 
     body: list[str] = []

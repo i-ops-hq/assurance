@@ -46,8 +46,8 @@ SCHEMA = "assurance.outcome/1"
 #: The answers each kind of check can give.
 ANSWERS = {
     "file": ("changed", "read", "not opened", "unknown"),
-    "command": ("passed", "failed", "unknown", "not run", "no code edited"),
-    "test": ("passed", "failed", "unknown", "not run"),
+    "command": ("passed", "failed", "unknown", "not run", "ran no tests", "no code edited"),
+    "test": ("passed", "failed", "unknown", "not run", "ran no tests"),
     "paths": ("untouched", "changed", "unknown"),
     "output": ("written", "not written", "unknown"),
     "check": ("passed", "failed", "unknown"),
@@ -265,6 +265,8 @@ def _run_check(origin: str, subject: str, question: str, runs: list[_Run], since
         earlier = f"; it last {ran}{_at(before[-1].at)}, before that" if before else ""
         return _check(origin, "command", subject, question, "not run", f"did not run after {where}{earlier}")
     run = after[-1]
+    if run.outcome == "empty":
+        return _check(origin, "command", subject, question, "ran no tests", f"ran no tests{_at(run.at)}, after {where}")
     if run.outcome == "unknown":
         because = f"it ran{_at(run.at)} piped into another command or followed by one, so its result is not its own"
         return _check(origin, "command", subject, question, "unknown", "", because)
@@ -277,6 +279,8 @@ def _test_check(name: str, prompt: Prompt, walk: _Walk) -> dict[str, Any]:
     tests = [run for run in walk.runs if run.noun == "test run" and run.seq > since]
     for run in reversed(tests):
         result = _test_result(run, name)
+        if result == "empty":
+            return _check("prompt", "test", name, question, "ran no tests", f"{run.label} ran no tests{_at(run.at)}, after {where}")
         if result is not None:
             return _check("prompt", "test", name, question, result, f"{result}{_at(run.at)} in {run.label}, after {where}")
     if not tests:

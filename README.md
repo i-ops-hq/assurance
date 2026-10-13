@@ -86,7 +86,7 @@ when there is something to say, at one of three levels, named first:
 
 ```
 assurance · note: no test or check has passed since the last edit to src/billing/invoice.py (14:04). Run pytest -q tests/test_invoice.py before you commit or push.
-assurance · suggested review: the last test run after the last edit to src/billing/invoice.py (14:04) failed: pytest -q tests/test_invoice.py.
+assurance · suggested review: the last test run after the last edit to src/billing/invoice.py (14:04) failed: pytest -q tests/test_invoice.py (tests/test_invoice.py::test_eur_rounding; 1 failed, 11 passed in 0.33s).
 assurance · stop and check: pushed at 14:06 with no passing test or check after the last edit to src/billing/invoice.py (14:04).
 ```
 
@@ -94,6 +94,10 @@ assurance · stop and check: pushed at 14:06 with no passing test or check after
 uvx assurance@latest hook install   # shows the change to ~/.claude/settings.json, asks, then writes it
 uvx assurance hook remove           # takes it out again; nothing else changes
 ```
+
+It knows the test commands of Maven, Gradle, Bazel, Django, Rails, jest, vitest, go, cargo and more,
+reads your `package.json`, `Makefile` and `justfile` scripts to learn yours, and never counts a run of
+zero tests as a pass. [What it recognises](docs/guide/project-rules.md).
 
 Or as a Claude Code plugin: `claude plugin marketplace add i-ops-hq/assurance`, then
 `claude plugin install assurance@i-ops-hq`. It never blocks or fails a session. Everything about

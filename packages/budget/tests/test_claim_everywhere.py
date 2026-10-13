@@ -74,7 +74,7 @@ def test_a_claim_over_a_failed_run_is_held_against_it_everywhere(
             in capsys.readouterr().out)
     # The Stop hook names the same run: the gate, the report and the hook do not disagree.
     assert run_hook(json.dumps({"transcript_path": str(path)}), nudge=True) == 0
-    assert "failed: python -m pytest tests/ -q." in json.loads(capsys.readouterr().out)["systemMessage"]
+    assert "failed: python -m pytest tests/ -q (2 failed, 5 passed in 0.12s)." in json.loads(capsys.readouterr().out)["systemMessage"]
 
 
 def test_a_claim_a_later_passing_run_bears_out_is_not_held_against(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

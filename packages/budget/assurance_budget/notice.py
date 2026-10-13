@@ -51,10 +51,13 @@ from assurance_budget.sessions import (
     _unclassified_counts,
     bash_edit_targets,
     bash_label,
+    changed_paths_in_project,
     changes_limits_file,
     classify_bash,
     display_path,
     exit_status_is_reported,
+    failure_evidence,
+    is_scan,
     names_only_outside,
     outcome_of_check_run,
     outcome_of_test_run,
@@ -235,9 +238,11 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
                 anywhere.append(run)
                 if not run.elsewhere:
                     runs.append(run)
-            if run.outcome == "passed" and not run.elsewhere:
+            if run.outcome == "passed" and not run.elsewhere and run.noun != "scan":  # a scan checks something else
                 pending.paths.clear()
-            if not run.elsewhere:  # a run elsewhere is read on, as any other command: `…; git push`
+            # A run elsewhere is read on, as any other command, and so is one that also ships:
+            # `terraform validate && terraform apply`, `go build ./... && git push`.
+            if not run.elsewhere and (call.error or not ship_action(command, call.branch, session.cwd, call.cwd)):
                 continue
         what = None if call.error else ship_action(command, call.branch, session.cwd, call.cwd)
         if not what or call.seq <= boundary:
@@ -319,6 +324,8 @@ def _note(
     unclassified: dict[str, int] = {}
     if last is not None and last.outcome == "unknown":
         finding = f"{last.label}, the last {last.noun} after {edits}, was piped or followed by another command, so whether it passed is unknown"
+    elif last is not None and last.outcome == "empty":
+        finding = f"{last.label}, the last {last.noun} after {edits}, ran no tests"
     else:
         unclassified = dict(_unclassified_counts(session.tool_calls[pending.last_i + 1 :], declared))
         recognised = " it recognises" if unclassified else ""
@@ -363,10 +370,10 @@ def _ship_reasons(
     reasons: list[_Finding] = []
     for entry, run in required:
         if run is not None and run.outcome == "failed":
-            reasons.append(_Finding(run.seq, f"while {_must_pass(entry, rules)}, had failed after {edit}", _ask_required(entry, rules)))
+            reasons.append(_Finding(run.seq, f"while {_must_pass(entry, rules)}, had failed after {edit}{_shown(run)}", _ask_required(entry, rules)))
     failing = _failing(runs)
     if failing is not None:
-        reasons.append(_Finding(failing.seq, f"while the last {failing.noun} after {edit} had failed: {failing.label}", _ASK_VERIFY))
+        reasons.append(_Finding(failing.seq, f"while the last {failing.noun} after {edit} had failed: {failing.label}{_shown(failing)}", _ASK_VERIFY))
     if pending.paths and runs and runs[-1].outcome == "unknown":
         reasons.append(_Finding(
             pending.last_seq,
@@ -374,6 +381,8 @@ def _ship_reasons(
             "or followed by another command, so whether it passed is unknown",
             _ASK_VERIFY,
         ))
+    elif pending.paths and runs and runs[-1].outcome == "empty":
+        reasons.append(_Finding(pending.last_seq, f"while {runs[-1].label}, the last {runs[-1].noun} after {edit}, ran no tests", _ASK_VERIFY))
     elif pending.paths:
         recognised = " it recognises" if between else ""
         why = f"with no passing test or check{recognised} after {_edits(tuple(pending.paths), pending.last_at)}"
@@ -381,6 +390,8 @@ def _ship_reasons(
     for entry, run in required:
         if run is None:
             reasons.append(_Finding(last_edit[3], f"while {_must_pass(entry, rules)}, did not run after {edit}", _ask_required(entry, rules)))
+        elif run.outcome == "empty":
+            reasons.append(_Finding(run.seq, f"while {_must_pass(entry, rules)}, ran no tests after {edit}", _ask_required(entry, rules)))
         elif run.outcome == "unknown":
             reasons.append(_Finding(
                 run.seq,
@@ -397,7 +408,9 @@ def _ship_reasons(
         if run is None:
             text, evidence = f"while {named.label}, named in the last prompt, did not run after {where}", since
         elif run.outcome == "failed":
-            text, evidence = f"while {named.label}, named in the last prompt, had failed after {where}", run.seq
+            text, evidence = f"while {named.label}, named in the last prompt, had failed after {where}{_shown(run)}", run.seq
+        elif run.outcome == "empty":
+            text, evidence = f"while {named.label}, named in the last prompt, ran no tests after {where}", run.seq
         elif run.outcome == "unknown":
             text = (
                 f"while {named.label}, named in the last prompt, was piped or followed by another command "
@@ -426,8 +439,11 @@ def _claim(
     after = dict(_unclassified_counts(session.tool_calls[last_edit[2] + 1 :], declared))
     ask = "Run the tests for what you changed, so that what you said rests on a result that can be seen, or correct it."
     if failing is not None:
-        why = f"the last {failing.noun} after {_edit(last_edit)} failed: {failing.label}"
+        why = f"the last {failing.noun} after {_edit(last_edit)} failed: {failing.label}{_shown(failing)}"
         ask = "Fix what failed and run it again, or correct what you said."
+    elif runs and runs[-1].outcome == "empty":
+        why = f"{runs[-1].label}, the last {runs[-1].noun} after {_edit(last_edit)}, ran no tests"
+        ask = "Run the tests that cover what you changed, so that what you said rests on a result that can be seen, or correct it."
     elif runs and runs[-1].outcome == "unknown":
         why = (
             f"{runs[-1].label}, the last {runs[-1].noun} after {_edit(last_edit)}, was piped or "
@@ -466,10 +482,15 @@ def claim_against(session: Session, declared: Declared | None = None, already: S
         run = None if command is None else _verification(call, command, declared, session.cwd)
         if run is not None and not run.elsewhere:
             runs.append(run)
-    failing = _failing(runs)
     rules = declared if declared is not None else Declared()
+    tests = [run for run in runs if run.noun == "test run"]
+    failing = _failing(runs)
+    if failing is None and tests and tests[-1].outcome == "empty":
+        failing = tests[-1]  # a run of no tests verified nothing the claim could rest on
     if failing is None or any(_runs_required(failing.command, entry, rules) or entry in failing.command for entry in already):
         return []
+    if failing.outcome == "empty":
+        return [f"the last test run ran no tests: {failing.label}"]
     return [f"the last {failing.noun} failed: {failing.label}"]
 
 
@@ -484,7 +505,7 @@ def _claim_over_a_failure(session: Session, boundary: int, runs: list[_Run]) -> 
         return None
     return _Finding(
         text_seq,
-        f"Claude's last message says the tests pass, but the last {failing.noun} failed: {failing.label}",
+        f"Claude's last message says the tests pass, but the last {failing.noun} failed: {failing.label}{_shown(failing)}",
         "Fix what failed and run it again, or correct what you said.",
     )
 
@@ -492,7 +513,7 @@ def _claim_over_a_failure(session: Session, boundary: int, runs: list[_Run]) -> 
 def _failing(runs: list[_Run]) -> _Run | None:
     """The last test run if it failed, else the last check if it failed: each says something the
     other cannot, so a passing test does not excuse a failing type check."""
-    for noun in ("test run", "check"):
+    for noun in ("test run", "check", "scan"):
         mine = [run for run in runs if run.noun == noun]
         if mine and mine[-1].outcome == "failed":
             return mine[-1]
@@ -512,8 +533,14 @@ def _failures(runs: list[_Run], rules: Declared) -> list[_Run]:
 def _failure_phrase(run: _Run, last_edit: tuple[str, float | None, int, int], rules: Declared) -> str:
     entry = next((entry for entry in rules.must_run if _runs_required(run.command, entry, rules)), None)
     if entry is not None:
-        return f"{_must_pass(entry, rules)}, failed after {_edit(last_edit)}"
-    return f"the last {run.noun} after {_edit(last_edit)} failed: {run.label}"
+        return f"{_must_pass(entry, rules)}, failed after {_edit(last_edit)}{_shown(run)}"
+    return f"the last {run.noun} after {_edit(last_edit)} failed: {run.label}{_shown(run)}"
+
+
+def _shown(run: _Run) -> str:
+    """What the runner printed that shows the failure, in brackets: the evidence, not a verdict on it."""
+    evidence = failure_evidence(run.tail)
+    return f" ({evidence})" if evidence else ""
 
 
 def _required_runs(runs: list[_Run], rules: Declared) -> list[tuple[str, _Run | None]]:
@@ -637,7 +664,7 @@ def stretch_may_predate(session: Session, declared: Declared | None) -> bool:
             continue
         command = shell_command(call) if call.name in _SHELL_TOOLS else None
         run = None if command is None else _verification(call, command, declared, session.cwd)
-        if run is not None and not run.elsewhere and run.outcome == "passed":
+        if run is not None and not run.elsewhere and run.outcome == "passed" and run.noun != "scan":
             pending, passed = False, True
     return pending and last_edit > boundary and not started_here
 
@@ -675,7 +702,7 @@ def needs_earlier_lines(session: Session, declared: Declared | None = None, *, s
         run = _verification(call, command, declared, session.cwd)
         if run is not None and not run.elsewhere:
             at_stake = run.outcome == "failed"
-        elif not call.error and ship_action(command, call.branch, session.cwd, call.cwd):
+        if not at_stake and not call.error and ship_action(command, call.branch, session.cwd, call.cwd):
             at_stake = uses_prompt = True
     text_seq, text = session.last_text
     at_stake = at_stake or (text_seq > boundary and claims_tests_pass(text))
@@ -729,28 +756,22 @@ def _verification(call: ToolCall, command: str, declared: Declared | None, cwd: 
         return _Run(call.seq, "test run", label, outcome, command, call.at, call.result_tail, elsewhere)
     outcome = outcome_of_check_run(command, call.error, call.result_tail, declared, exit_known)
     label = bash_label(command, "check", declared) if elsewhere else _project_label(command, "check", declared, cwd, call.cwd)
-    return _Run(call.seq, "check", label, outcome, command, call.at, call.result_tail, elsewhere)
+    noun = "scan" if is_scan(command, declared) else "check"
+    return _Run(call.seq, noun, label, outcome, command, call.at, call.result_tail, elsewhere)
     return None
 
 
 def changed_paths(call: ToolCall, cwd: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """The files inside the project a call changed, prose or code, relative to it; and the commands in
     it that changed files without naming them (`git apply`, `git pull`)."""
-    if call.error or call.refused:
-        return (), ()
-    if call.name in _CHANGE_TOOLS:
-        path = _call_path(call)
-        if path is None or not Place(cwd).within(path):
-            return (), ()
-        return (display_path(path, cwd),), ()
-    if call.name in _SHELL_TOOLS:
-        command = shell_command(call)
-        targets = bash_edit_targets(command, cwd, call.cwd) if command is not None else None
-        if not targets or command is None:
-            return (), ()
-        named = tuple(dict.fromkeys(display_path(target, cwd) for target in targets if target))
-        return named, tree_rewrites(command, cwd, call.cwd) if "" in targets else ()
-    return (), ()
+    named = changed_paths_in_project(call, cwd)
+    if call.error or call.refused or call.name not in _SHELL_TOOLS:
+        return named, ()
+    command = shell_command(call)
+    targets = bash_edit_targets(command, cwd, call.cwd) if command is not None else None
+    if not targets or command is None:
+        return named, ()
+    return named, tree_rewrites(command, cwd, call.cwd) if "" in targets else ()
 
 
 def authored(words: tuple[str, ...]) -> tuple[str, ...]:

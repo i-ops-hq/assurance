@@ -16,12 +16,13 @@ import posixpath
 import re
 import shlex
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator, Literal, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Literal, Mapping, Sequence
 
 from assurance_budget.events import LogError, jsonl_lines
+from assurance_budget.manifests import MANIFESTS, Learned, learn
 from assurance_budget.powershell import Shell, powershell_as_posix
 
 #: Top-level `type` values that are bookkeeping, not turns or tool calls. Explicit — no catch-all.
@@ -141,6 +142,13 @@ _WRAPPER_NO_ARG = frozenset({"time", "sudo", "command", "exec", "xargs", "env"})
 _RUNNER_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("pnpm", "exec"),
     ("pnpm", "dlx"),
+    ("npm", "exec"),
+    ("yarn", "exec"),
+    ("bun", "x"),
+    ("bundle", "exec"),
+    ("coverage", "run", "-m"),  # `coverage run -m pytest` runs pytest
+    ("pipx", "run"),
+    ("rye", "run"),
     ("uv", "run"),
     ("poetry", "run"),
     ("pipenv", "run"),
@@ -180,9 +188,13 @@ class Declared:
     must_run: tuple[str, ...] = ()
     must_not_touch: tuple[str, ...] = ()
     origins: tuple[tuple[str, str], ...] = ()
+    learned: tuple[Learned, ...] = ()
+    """Scripts the project's own manifests say run a test or a check (`assurance_budget.manifests`):
+    what `npm run test:unit` is, read from `package.json`, not from its name."""
 
     def kind(self, argv: Sequence[str]) -> BashKind | None:
-        """`test` or `check` when `argv` begins with a declared test or check, else None."""
+        """`test` or `check` when `argv` begins with a declared test or check, or with a script the
+        project's manifests say runs one, else None."""
         head = tuple(argv)
         for command in self.tests:
             want = declared_argv(command)
@@ -192,6 +204,9 @@ class Declared:
             want = declared_argv(command)
             if want and head[: len(want)] == want:
                 return "check"
+        best = max((one for one in self.learned if head[: len(one.argv)] == one.argv), key=lambda one: len(one.argv), default=None)
+        if best is not None:
+            return "test" if best.kind == "test" else "check"
         return None
 
     def required(self, argv: Sequence[str]) -> str | None:
@@ -206,6 +221,47 @@ class Declared:
     def origin(self, entry: str) -> str:
         """The file that declared a `must_run` or `must_not_touch` entry."""
         return next((source for declared, source in self.origins if declared == entry), "")
+
+
+def with_learned(declared: Declared | None, project: Path, changed: Iterable[str] = ()) -> Declared:
+    """`declared`, knowing what the project's manifests say its scripts run. `changed` names the
+    manifests the session changed, which teach nothing: see `assurance_budget.manifests`."""
+    base = declared if declared is not None else Declared()
+    learned = learn(Path(project), lambda line, known: classify_bash(line, replace(base, learned=known)), changed)
+    return replace(base, learned=learned) if learned else base
+
+
+def changed_manifests(session: Session) -> frozenset[str]:
+    """The manifests at the project's top that the session changed: what they say is not used. Besides
+    an edit or a write to one, `npm pkg set` changes package.json, and a shell command that writes
+    files and names a manifest (`git checkout other -- package.json`) is taken to have changed it:
+    trusting a file that might have changed is the mistake to avoid, and the cost of the other is
+    only that its scripts are read by their names."""
+    changed = {path for call in session.tool_calls for path in changed_paths_in_project(call, session.cwd) if path in MANIFESTS}
+    for call in session.tool_calls:
+        command = shell_command(call) if call.name in _SHELL_TOOLS and not call.error and not call.refused else None
+        if command is None:
+            continue
+        if re.search(r"\bnpm\s+(?:pkg\s+(?:set|delete)|set-script)\b", command):
+            changed.add("package.json")
+        named = [name for name in MANIFESTS if name in command and re.search(rf"(?:^|[\s/'\"]){re.escape(name)}(?:$|[\s'\"])", command)]
+        if named and classify_bash(command) == "write":  # not `jq .scripts package.json`, which only reads it
+            changed.update(named)
+    return frozenset(changed)
+
+
+def changed_paths_in_project(call: ToolCall, cwd: str) -> tuple[str, ...]:
+    """The files inside the project a call changed, relative to it with forward slashes."""
+    if call.error or call.refused:
+        return ()
+    if call.name in _CHANGE_TOOLS:
+        path = _call_path(call)
+        return (display_path(path, cwd),) if path is not None and Place(cwd).within(path) else ()
+    if call.name in _SHELL_TOOLS:
+        command = shell_command(call)
+        targets = bash_edit_targets(command, cwd, call.cwd) if command is not None else None
+        return tuple(dict.fromkeys(display_path(target, cwd) for target in targets or () if target))
+    return ()
 
 
 @functools.lru_cache(maxsize=256)
@@ -253,6 +309,36 @@ _TEST_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("phpunit",),
     ("tox",),
     ("nox",),
+    # Framework and platform runners, found probing what enterprise stacks type (2026-10-13).
+    ("python", "manage.py", "test"),
+    ("django-admin", "test"),
+    ("rails", "test"),
+    ("rails", "spec"),
+    ("rake", "test"),
+    ("rake", "spec"),
+    ("php", "artisan", "test"),
+    ("pest",),
+    ("mix", "test"),
+    ("flutter", "test"),
+    ("dart", "test"),
+    ("cargo", "nextest"),
+    ("cypress", "run"),
+    ("playwright", "test"),
+    ("hatch", "test"),
+    ("ng", "test"),
+    ("ng", "e2e"),
+    ("react-scripts", "test"),
+    ("karma", "start"),
+    ("ava",),
+    ("jasmine",),
+    ("cabal", "test"),
+    ("stack", "test"),
+    ("dune", "test"),
+    ("lein", "test"),
+    ("zig", "build", "test"),
+    ("meson", "test"),
+    ("opa", "test"),
+    ("composer", "test"),
 )
 _CHECK_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("npm", "run", "typecheck"),
@@ -278,7 +364,102 @@ _CHECK_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("tsc",),
     ("flake8",),
     ("pyright",),
+    # Compiling is a check: it says the code builds, not that it works.
+    ("cargo", "check"),
+    ("cargo", "build"),
+    ("go", "build"),
+    ("dotnet", "build"),
+    ("swift", "build"),
+    ("vue-tsc",),
+    ("svelte-check",),
+    ("deno", "check"),
+    ("deno", "lint"),
+    # Linters and formatters in check mode.
+    ("pylint",),
+    ("pycodestyle",),
+    ("pydocstyle",),
+    ("basedpyright",),
+    ("isort", "--check"),
+    ("isort", "--check-only"),
+    ("rubocop",),
+    ("standardrb",),
+    ("phpstan",),
+    ("psalm",),
+    ("stylelint",),
+    ("biome", "check"),
+    ("biome", "lint"),
+    ("biome", "ci"),
+    ("oxlint",),
+    ("ktlint",),
+    ("detekt",),
+    ("swiftlint",),
+    ("clang-tidy",),
+    ("cppcheck",),
+    ("sqlfluff", "lint"),
+    ("yamllint",),
+    ("actionlint",),
+    ("dotnet", "format", "--verify-no-changes"),
+    ("next", "lint"),
+    ("ng", "lint"),
 )
+#: Checks of something other than the code edited: security scanners, and infrastructure checked
+#: without being changed. One that fails is said, as any check is; one that passes says nothing about
+#: the code, so it is a scan, and leaves an edit as untested as it was.
+_SCAN_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("semgrep",),
+    ("bandit",),
+    ("trivy",),
+    ("grype",),
+    ("snyk", "test"),
+    ("snyk", "code", "test"),
+    ("snyk", "iac", "test"),
+    ("pip-audit",),
+    ("npm", "audit"),
+    ("pnpm", "audit"),
+    ("yarn", "audit"),
+    ("safety", "check"),
+    ("safety", "scan"),
+    ("gitleaks",),
+    ("trufflehog",),
+    ("osv-scanner",),
+    ("govulncheck",),
+    ("cargo", "audit"),
+    ("cargo", "deny"),
+    ("bundle-audit",),
+    ("bundler-audit",),
+    ("brakeman",),
+    ("checkov",),
+    ("tfsec",),
+    ("terrascan",),
+    ("kics",),
+    ("hadolint",),
+    ("terraform", "validate"),
+    ("terraform", "plan"),
+    ("tofu", "validate"),
+    ("tofu", "plan"),
+    ("tflint",),
+    ("helm", "lint"),
+    ("kubectl", "diff"),
+    ("kubeconform",),
+    ("kubeval",),
+    ("kube-linter",),
+    ("conftest",),
+    ("cfn-lint",),
+)
+_CHECK_PREFIXES = _CHECK_PREFIXES + _SCAN_PREFIXES
+
+
+def _by_head(prefixes: tuple[tuple[str, ...], ...]) -> dict[str, tuple[tuple[str, ...], ...]]:
+    """The prefixes by the program they start with, longest first: a command is compared only with
+    the ones that could match it, not with every program known."""
+    heads: dict[str, list[tuple[str, ...]]] = {}
+    for prefix in prefixes:
+        heads.setdefault(prefix[0], []).append(prefix)
+    return {head: tuple(sorted(found, key=len, reverse=True)) for head, found in heads.items()}
+
+
+_TEST_BY_HEAD = _by_head(_TEST_PREFIXES)
+_CHECK_BY_HEAD = _by_head(_CHECK_PREFIXES)
 _READ_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("git", "status"),
     ("git", "log"),
@@ -528,6 +709,8 @@ class Session:
     command, a background task's notice): what the outcome is checked against."""
     said: tuple[str, ...] = ()
     """What this tool's Stop hook showed earlier in the session, word for word, in order."""
+    subagent_calls: int = 0
+    """Of `tool_calls`, how many its sub-agents made: see `with_subagents`."""
 
 
 #: `attachment` records that give the model a file's contents, so Claude Code counts it as read.
@@ -547,7 +730,7 @@ def read_claude_code(path: Path) -> Session:
         raise LogError(f"cannot read {target}: {exc}") from exc
     except UnicodeDecodeError as exc:
         raise LogError(f"{target} is not UTF-8 text, so not a Claude Code transcript ({exc.reason})") from exc
-    return _parse_lines(raw_lines, target)
+    return with_subagents(_parse_lines(raw_lines, target), target)
 
 
 def read_claude_code_tail(path: Path, window: int) -> tuple[Session, bool]:
@@ -577,7 +760,90 @@ def read_claude_code_tail(path: Path, window: int) -> tuple[Session, bool]:
         text = data[newline + 1 :].decode("utf-8") if newline >= 0 else ""
     except UnicodeDecodeError as exc:
         raise LogError(f"{target} is not UTF-8 text, so not a Claude Code transcript ({exc.reason})") from exc
-    return _parse_lines(jsonl_lines(text), target, cwd=cwd), False
+    session = _parse_lines(jsonl_lines(text), target, cwd=cwd)
+    return with_subagents(session, target, since=_first_at(session)), False
+
+
+def _first_at(session: Session) -> float | None:
+    return min((call.at for call in session.tool_calls if call.at is not None), default=None)
+
+
+#: Past this size a sub-agent's transcript is not read: what it holds is then not counted, as before.
+_SUBAGENT_MAX_BYTES = 50_000_000
+
+
+def with_subagents(session: Session, transcript: Path, since: float | None = None) -> Session:
+    """`session` with the tool calls of the sub-agents it started, each where it happened.
+
+    Claude Code keeps a sub-agent's work in its own transcript, beside the session's
+    (`<session>/subagents/agent-<id>.jsonl`), and the session's own holds only the call that started
+    it and what it said back. A test a sub-agent ran, or a file it edited, is the session's work: left
+    out, the hook says nothing tested an edit a sub-agent tested, and misses the edits it made.
+
+    A sub-agent the session waited for (`requestShape` other than `background`) ran between the call
+    that started it and its result, so its calls go right after that call. One in the background ran
+    alongside, so each of its calls goes after the last of the session's own made before it. `since`
+    skips the transcripts last written before then: the hook reads only the end of a long session.
+    """
+    folder = Path(transcript).with_suffix("") / "subagents"
+    if not folder.is_dir():
+        return session
+    spawned = {call.id: index for index, call in enumerate(session.tool_calls)}
+    placed: list[tuple[int, int, ToolCall]] = []  # (after which of the session's own calls, order, call)
+    order = 0
+    for path in sorted(folder.glob("agent-*.jsonl")):
+        try:
+            if path.stat().st_size > _SUBAGENT_MAX_BYTES or (since is not None and path.stat().st_mtime < since):
+                continue
+            sub = _parse_lines(jsonl_lines(path.read_text(encoding="utf-8")), path, cwd=session.cwd)
+        except (OSError, UnicodeDecodeError, LogError):
+            continue  # a sub-agent's transcript that cannot be read adds nothing; the session's own still says what it says
+        meta = _subagent_meta(path)
+        start = spawned.get(str(meta.get("toolUseId", "")))
+        background = meta.get("requestShape") == "background" or start is None
+        for call in sub.tool_calls:
+            after = _after_by_time(session.tool_calls, call.at) if background else start
+            if after is None:
+                after = start if start is not None else -1
+            placed.append((after, order, call))
+            order += 1
+    if not placed:
+        return session
+    placed.sort(key=lambda item: (item[0], item[1]))
+    merged: list[ToolCall] = []
+    moved: dict[int, int] = {}  # a main call's index -> its index in the merged list
+    queue = iter(placed)
+    upcoming = next(queue, None)
+    while upcoming is not None and upcoming[0] < 0:
+        merged.append(replace(upcoming[2], seq=-1))
+        upcoming = next(queue, None)
+    for index, call in enumerate(session.tool_calls):
+        moved[index] = len(merged)
+        merged.append(call)
+        while upcoming is not None and upcoming[0] == index:
+            merged.append(replace(upcoming[2], seq=call.seq))
+            upcoming = next(queue, None)
+    reads = tuple((moved.get(before, len(merged)), path) for before, path in session.attached_reads)
+    return replace(session, tool_calls=tuple(merged), attached_reads=reads, subagent_calls=len(placed))
+
+
+def _subagent_meta(path: Path) -> dict[str, Any]:
+    try:
+        meta = json.loads(path.with_name(path.name[: -len(".jsonl")] + ".meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _after_by_time(calls: tuple[ToolCall, ...], at: float | None) -> int | None:
+    """The index of the session's last own call made at or before `at`; None when there is none."""
+    if at is None:
+        return None
+    found = None
+    for index, call in enumerate(calls):
+        if call.at is not None and call.at <= at:
+            found = index
+    return found
 
 
 def transcript_changed_limits_file(path: Path, cwd: str) -> bool:
@@ -588,18 +854,59 @@ def transcript_changed_limits_file(path: Path, cwd: str) -> bool:
     result of each tool call on them, which says whether that call failed. The answer is the one a
     full read gives; the cost is those lines, not the transcript.
     """
-    target = Path(path)
+    session = _calls_naming(Path(path), cwd, (b"config.toml",))
+    return session is not None and changed_limits_file(session)
+
+
+def transcript_has_note(path: Path) -> bool:
+    """Whether the hook said a note anywhere in the transcript: a byte search for its attachment, not a
+    parse. Claude Code writes `·` as it is, or escaped."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError as exc:
+        raise LogError(f"cannot read {path}: {exc}") from exc
+    for marker in (NOTE_HEAD.encode(), json.dumps(NOTE_HEAD)[1:-1].encode()):
+        if any(b'"hook_system_message"' in line for line in _lines_containing(data, marker).values()):
+            return True
+    return False
+
+
+def transcript_changes(path: Path, cwd: str) -> tuple[bool, frozenset[str]]:
+    """`changed_limits_file` and `changed_manifests` over a whole transcript and its sub-agents', in one
+    read of each, as `transcript_changed_limits_file` reads it: what the hook needs of the lines before
+    its window. A sub-agent's change is the session's change."""
+    needles = (b"config.toml", b"npm pkg", b"set-script", *(name.encode() for name in MANIFESTS))
+    limits, changed = False, frozenset[str]()
+    folder = Path(path).with_suffix("") / "subagents"
+    for transcript in [Path(path), *(sorted(folder.glob("agent-*.jsonl")) if folder.is_dir() else [])]:
+        try:
+            session = _calls_naming(transcript, cwd, needles)
+        except LogError:
+            if transcript == Path(path):
+                raise
+            continue  # a sub-agent's transcript that cannot be read: as `with_subagents` leaves it
+        if session is not None:
+            limits = limits or changed_limits_file(session)
+            changed = changed | changed_manifests(session)
+    return limits, changed
+
+
+def _calls_naming(target: Path, cwd: str, needles: tuple[bytes, ...]) -> Session | None:
+    """The session made of only the lines that contain one of `needles`, with the result of each tool
+    call on them; None when no line does."""
     try:
         # Read, not memory-mapped: Claude Code is appending to this file while the hook runs, and on
         # Windows a mapped view can get in the way of the writer. A plain read never does.
         data = target.read_bytes()
     except OSError as exc:
         raise LogError(f"cannot read {target}: {exc}") from exc
-    lines = _lines_containing(data, b"config.toml")
+    lines: dict[int, bytes] = {}
+    for needle in needles:
+        lines.update(_lines_containing(data, needle))
     if not lines:
-        return False
-    ids: set[str] = set()
-    for raw in lines.values():
+        return None
+    ids: dict[str, int] = {}  # a tool call's id -> where the line that made it ends
+    for offset, raw in lines.items():
         try:
             record = json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -607,17 +914,28 @@ def transcript_changed_limits_file(path: Path, cwd: str) -> bool:
         message = record.get("message") if isinstance(record, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, list):
-            ids.update(
-                b["id"] for b in content
-                if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str)
-            )
-    for tool_id in ids:
-        lines.update(_lines_containing(data, json.dumps(tool_id).encode()))
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use" and isinstance(block.get("id"), str):
+                    ids.setdefault(block["id"], offset + len(raw))
+    for tool_id, after in ids.items():
+        # Its result comes after it, and usually within a few lines: looked for from there, not from
+        # the start of a transcript that can run to hundreds of megabytes once per call. Lines that
+        # name the call before its result (a hook's progress) are kept on the way, as a full read keeps them.
+        needle = json.dumps(tool_id).encode()
+        at = data.find(needle, after)
+        while at >= 0:
+            start = data.rfind(b"\n", 0, at) + 1
+            end = data.find(b"\n", at)
+            end = len(data) if end < 0 else end
+            lines[start] = data[start:end]
+            if b'"tool_result"' in lines[start]:
+                break
+            at = data.find(needle, end)
     try:
         text = [lines[offset].decode("utf-8") for offset in sorted(lines)]
     except UnicodeDecodeError:
-        return changed_limits_file(read_claude_code(target))  # which says what is wrong with the file
-    return changed_limits_file(_parse_lines(text, target, cwd=cwd))
+        return read_claude_code(target)  # which says what is wrong with the file
+    return _parse_lines(text, target, cwd=cwd)
 
 
 def _lines_containing(data: bytes, needle: bytes) -> dict[int, bytes]:
@@ -1253,9 +1571,11 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
     tests = 0
     tests_failed = 0
     tests_unknown = 0
+    tests_empty = 0
     checks = 0
     checks_failed = 0
     checks_unknown = 0
+    scans = 0
     test_runs: list[dict[str, Any]] = []
     check_runs: list[dict[str, Any]] = []
     for call in session.tool_calls[last_i + 1 :]:
@@ -1276,6 +1596,8 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
                 tests_failed += 1
             elif outcome == "unknown":
                 tests_unknown += 1
+            elif outcome == "empty":
+                tests_empty += 1
             test_runs.append(
                 {
                     "command": typed,
@@ -1286,6 +1608,7 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
             )
         elif kind == "check":
             checks += 1
+            scans += is_scan(command, declared)
             outcome = outcome_of_check_run(command, call.error, call.result_tail, declared, exit_known)
             if outcome == "failed":
                 checks_failed += 1
@@ -1306,9 +1629,11 @@ def after_last_edit(session: Session, declared: Declared | None = None) -> dict[
         "tests": tests,
         "tests_failed": tests_failed,
         "tests_unknown": tests_unknown,
+        "tests_empty": tests_empty,
         "checks": checks,
         "checks_failed": checks_failed,
         "checks_unknown": checks_unknown,
+        "scans": scans,
         "test_runs": test_runs,
         "test_labels": _group_test_labels(test_runs),
         "check_runs": check_runs,
@@ -1326,16 +1651,115 @@ def outcome_of_test_run(
     declared: Declared | None = None,
     exit_known: bool = True,
 ) -> str:
-    """`passed`, `failed` or `unknown` for one test command.
+    """`passed`, `failed`, `unknown` or `empty` for one test command.
 
     The tool's error flag is the command's exit status, which is the test's only when nothing after
     the test can replace it: `pytest -q | tail -8` exits with tail's status, `pytest; echo done`
     with echo's. Then the result is read from a runner summary line in the output, if there is one
     (`1 failed, 2 passed in 0.03s`), and is otherwise unknown — never assumed to have passed.
+
+    `empty` is a run that ran no tests, whatever it exited with: `jest --passWithNoTests` and
+    `ctest` with nothing to run exit 0, and a filter that matches nothing makes any runner a pass
+    that verified nothing. Found in a public report of an agent claiming success over `ctest` that
+    ran zero tests (2026-04); read from what the runner printed, so a run cut short is not called
+    empty.
     """
-    if exit_known and _exit_is_visible(command, "test", declared):
+    visible = exit_known and _exit_is_visible(command, "test", declared)
+    if ran_no_tests(result_tail, whole=visible and len(result_tail) < _RESULT_TAIL_CHARS):
+        return "empty"  # pytest exits 5 and jest 1 when nothing ran: the exit is the emptiness, not a failure
+    if visible:
         return "failed" if error else "passed"
     return _unless_flagged(_runner_summary(result_tail, _cut_from_the_end(command, declared)), error, exit_known)
+
+
+#: What runners print when a run found nothing to run: the whole run, never one package of it.
+_RAN_NONE = re.compile(
+    r"^=+ no tests ran in [\d.]+s"  # pytest
+    r"|^collected 0 items"  # pytest
+    r"|^\s*No tests? (?:files )?found\b"  # jest, vitest, playwright
+    r"|^No tests were found"  # ctest
+    r"|^Ran 0 tests in"  # unittest
+    r"|^\s*0 passing\b"  # mocha
+    r"|^0 examples, 0 failures\b"  # rspec
+    r"|^No tests executed!"  # phpunit
+    r"|^\s*No test is available|^\s*Total tests: 0\b"  # dotnet
+    r"|^\s*No tests found for given includes"  # gradle
+    r"|^(?:\[INFO\] )?No tests to run\."  # maven
+    r"|^\s*Starting 0 tests\b",  # cargo nextest
+    re.M,
+)
+#: A count of tests that ran, anywhere in the output: one part of a run with none in it is not the run.
+_RAN_SOME = re.compile(
+    r"\b[1-9]\d* (?:passed|passing|failed|failing|errors?|examples?)\b|Tests run: [1-9]|Passed:\s+[1-9]|Total tests: [1-9]"
+    r"|^ok\s+\S+\s+[\d.]+s\s*$|^test result: \w+\. [1-9]|^Ran [1-9]\d* tests? in",
+    re.M,
+)
+_PYTEST_FINAL = re.compile(r"^=+ (.+) in [\d.]+s(?: \([\d:]+\))? =+$", re.M)
+_CARGO_BINARY = re.compile(r"^test result: \w+\. (\d+) passed; (\d+) failed", re.M)
+_GO_LINE = re.compile(r"^(ok|FAIL|\?)\s+\S+.*$", re.M)
+
+
+#: What a runner prints for each test that failed, its name in the first group.
+_FAILED_TEST = re.compile(
+    r"^(?:FAILED|ERROR) (\S*(?:::|\.py)\S*?)(?: - .*)?$"  # pytest's short summary: a node id, or a file
+    r"|^--- FAIL: (\S+)"  # go test
+    r"|^test (\S+) \.\.\. FAILED$"  # cargo
+    r"|^ *(?:FAIL|×|✕) +(.+?)(?: +\[.*\])?(?: +\(?\d+ ?m?s\)?)?$"  # vitest, jest; not go's `FAIL<tab>package`
+    r"|^(?:FAIL|ERROR): (\S+ \([\w.]+\))"  # unittest
+    r"|^(\S+ > .+) FAILED$"  # gradle
+    r"|^\s*Failed (\S+) \["  # dotnet
+    r"|^\[ERROR\]\s+(\w[\w.$]*\.\w+:\d+)"  # maven surefire
+    r"|^\d+\) (\S+::\S+)$",  # phpunit
+    re.M,
+)
+#: A runner's count line on a failed run: the last one in the output is the run's.
+_FAILED_COUNT = re.compile(
+    r"\b\d+ (?:failed|failing|failures?)\b|test result: FAILED|Tests run: \d+, Failures: [1-9]|FAILED \((?:failures|errors)=|\btests? failed\b",
+)
+_EVIDENCE_MAX = 140
+
+
+def failure_evidence(tail: str) -> str:
+    """What the runner printed that shows the failure, quoted: the first test it names as failed (and
+    how many more), and its count line. `tests/test_tax.py::test_eur and 1 more; 2 failed, 9 passed in
+    0.31s`. Empty when it printed neither: nothing is made up to fill the space."""
+    names = [next(group for group in m.groups() if group) for m in _FAILED_TEST.finditer(tail)]
+    names = list(dict.fromkeys(name.strip() for name in names if name.strip()))
+    counts = [
+        " ".join(re.sub(r"^\[\w+\]\s*", "", line.strip().strip("=").strip()).split())
+        for line in tail.splitlines() if _FAILED_COUNT.search(line)
+    ]
+    parts = []
+    if names:
+        parts.append(names[0] + (f" and {len(names) - 1} more" if len(names) > 1 else ""))
+    if counts:
+        parts.append(counts[-1])
+    said = "; ".join(parts)
+    return said if len(said) <= _EVIDENCE_MAX else said[: _EVIDENCE_MAX - 1] + "…"
+
+
+def ran_no_tests(tail: str, whole: bool = False) -> bool:
+    """Whether a test run's output says it ran no test at all: an explicit "no tests" from the
+    runner; a pytest run whose final line counts only skipped or deselected tests. And, when `whole`
+    says the output is all there, cargo whose every test binary held nothing, and go whose every
+    package had no test files or no test to run: those count parts, and an output cut by `| tail`
+    or kept only at its end can hide the parts that ran."""
+    if not tail or _RAN_SOME.search(tail):
+        return False  # something ran: the part that held nothing is not the run
+    if _RAN_NONE.search(tail):
+        return True
+    final = _PYTEST_FINAL.findall(tail)
+    if final and not re.search(r"\b(?:passed|failed|errors?|xpassed|xfailed)\b", final[-1]) and re.search(r"\b(?:skipped|deselected)\b", final[-1]):
+        return True
+    if not whole:
+        return False
+    results = _CARGO_BINARY.findall(tail)
+    if results and all(passed == "0" and failed == "0" for passed, failed in results):
+        return True
+    lines = [m.group(0) for m in _GO_LINE.finditer(tail)]
+    if lines and all(line.startswith("?") and "[no test files]" in line or line.startswith("ok") and "[no tests to run]" in line for line in lines):
+        return True
+    return False
 
 
 def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
@@ -1857,23 +2281,26 @@ def _group_test_labels(test_runs: list[dict[str, Any]]) -> list[str]:
     totals: dict[str, int] = {}
     fails: dict[str, int] = {}
     unknown: dict[str, int] = {}
+    empty: dict[str, int] = {}
     for run in test_runs:
         label = str(run.get("label") or run["command"])
         if label not in totals:
             order.append(label)
-            totals[label] = fails[label] = unknown[label] = 0
+            totals[label] = fails[label] = unknown[label] = empty[label] = 0
         totals[label] += 1
         outcome = run.get("outcome") or ("failed" if run.get("failed") else "passed")
         if outcome == "failed":
             fails[label] += 1
         elif outcome == "unknown":
             unknown[label] += 1
+        elif outcome == "empty":
+            empty[label] += 1
     labels: list[str] = []
     for label in order:
-        n, failed, unk = totals[label], fails[label], unknown[label]
+        n, failed, unk, none = totals[label], fails[label], unknown[label], empty[label]
         text = label if n == 1 else f"{label} ×{n}"
         # `pytest failed`, `pytest ×3 failed`, `pytest ×3, 1 failed` — and the same for unknown.
-        for count, word in ((failed, "failed"), (unk, "result unknown")):
+        for count, word in ((failed, "failed"), (unk, "result unknown"), (none, "ran no tests")):
             if count == n:
                 text += f" {word}"
             elif count:
@@ -2347,6 +2774,24 @@ def _truncate_label(label: str, limit: int = _LABEL_MAX) -> str:
     return label[: limit - 1] + "…"
 
 
+def is_scan(command: str, declared: Declared | None = None) -> bool:
+    """Whether every test or check in `command` is a scan (`_SCAN_PREFIXES`): a check of something other
+    than the code edited, so its passing verifies no edit. A declared check is the project's, never a scan."""
+    try:
+        segments = split_shell_segments(strip_heredoc_bodies(command))
+    except ValueError:
+        return False
+    scans = False
+    for tokens in segments:
+        if _classify_segment(tokens, declared) not in ("test", "check"):
+            continue
+        argv = _normalise_argv(_drop_redirections(tokens)) or []
+        if (declared is not None and declared.kind(argv) is not None) or not any(_startswith(argv, prefix) for prefix in _SCAN_PREFIXES):
+            return False
+        scans = True
+    return scans
+
+
 def classify_bash(command: str, declared: Declared | None = None) -> BashKind:
     """Classify a shell command after heredoc strip, quote-aware split, and argv normalisation.
 
@@ -2487,6 +2932,7 @@ def _normalise_argv(tokens: list[str]) -> list[str] | None:
 
     # Basename + python/pip alias.
     base = _program_name(argv[0])
+    base = _PROGRAM_ALIASES.get(base, base)
     if base in _PYTHON_NAMES or base.startswith("python3."):
         argv[0] = "python"
     elif base in _PIP_NAMES:
@@ -2698,10 +3144,15 @@ def _classify_argv(argv: list[str], raw_tokens: list[str] | None = None) -> Bash
         return "read"
     if argv[0] == "tee" and _tee_has_file_arg(argv):
         return "write"
-    for prefix in _TEST_PREFIXES:
+    tool_kind = _classify_tool(argv)
+    if tool_kind is not None:
+        return tool_kind
+    for prefix in _TEST_BY_HEAD.get(argv[0], ()):
         if _startswith(argv, prefix):
             return "test"
-    for prefix in _CHECK_PREFIXES:
+    for prefix in _CHECK_BY_HEAD.get(argv[0], ()):
+        if _startswith(argv, prefix) and _fixes(argv):
+            return "write"  # `eslint --fix`, `rubocop -a`: it rewrites files, and says it checked them
         if _startswith(argv, prefix):
             return "check"
     write_kind = _classify_write(argv)
@@ -2711,6 +3162,228 @@ def _classify_argv(argv: list[str], raw_tokens: list[str] | None = None) -> Bash
         if _startswith(argv, prefix):
             return "read"
     return "unclassified"
+
+
+#: Programs whose names differ from the tool they run: a wrapper script checked into the repository.
+_PROGRAM_ALIASES = {"mvnw": "mvn", "gradlew": "gradle", "bazelisk": "bazel", "sbtn": "sbt"}
+
+
+def _classify_tool(argv: list[str]) -> BashKind | None:
+    """Build tools and task runners that take their goals, tasks or targets anywhere among their
+    flags, so no fixed prefix can say what they ran: `mvn -q -pl api verify`, `./gradlew :app:test
+    -x lint`, `nx run-many -t test`. None for anything else, and for a run of these that is neither
+    a test nor a check (`mvn clean`, `make install`)."""
+    prog, rest = argv[0], argv[1:]
+    if _DRY_RUN.get(prog, frozenset()) & set(rest):
+        return "read"  # it says what it would run, and runs none of it
+    if prog == "mvn":
+        return _maven(rest)
+    if prog == "gradle":
+        return _gradle(rest)
+    if prog == "sbt":
+        return _sbt(rest)
+    if prog == "bazel":
+        command = next((word for word in rest if not word.startswith("-")), "")
+        return "test" if command in ("test", "coverage") else "check" if command == "build" else None
+    if prog == "xcodebuild":
+        return "test" if {"test", "test-without-building"} & set(rest) else "check" if "build" in rest else None
+    if prog in ("nx", "turbo", "lerna"):
+        return _by_target_names(_monorepo_targets(prog, rest))
+    if prog in ("npm", "pnpm", "yarn", "bun"):
+        return _package_script(prog, rest)
+    if prog in ("make", "just"):
+        return _by_target_names(_words(rest, _MAKE_VALUE_FLAGS), check_is_test=prog == "make")
+    return None
+
+
+#: Flags that make a checker rewrite the files it checks. Short ones only for the tools that mean that.
+_FIX_FLAGS = frozenset({"--fix", "--write", "--autofix", "--apply", "--fix-only", "--unsafe-fixes", "--autocorrect", "--autocorrect-all"})
+_SHORT_FIX_FLAGS = {"rubocop": frozenset({"-a", "-A"}), "standardrb": frozenset({"--fix"}), "ktlint": frozenset({"-F"}),
+                    "swiftlint": frozenset({"--fix", "--autocorrect"}), "black": frozenset(), "isort": frozenset()}
+
+
+def _fixes(argv: list[str]) -> bool:
+    flags = set(argv[1:])
+    return bool(flags & _FIX_FLAGS or flags & _SHORT_FIX_FLAGS.get(argv[0], frozenset())) and "--check" not in flags and "--dry-run" not in flags
+
+
+#: Flags that make a tool print what it would do instead of doing it.
+_DRY_RUN: dict[str, frozenset[str]] = {
+    "make": frozenset({"-n", "--dry-run", "--just-print", "--recon", "-p", "--print-data-base", "-q", "--question"}),
+    "just": frozenset({"-n", "--dry-run", "--show", "-s", "--list", "-l", "--summary", "--evaluate", "--dump"}),
+    "gradle": frozenset({"--dry-run", "-m", "tasks", "help", "--help", "-h"}),
+    "turbo": frozenset({"--dry-run", "--dry", "--dry-run=json", "--graph"}),
+    "nx": frozenset({"--dry-run", "--graph", "show"}),
+    "lerna": frozenset({"--dry-run", "list", "ls"}),
+    "xcodebuild": frozenset({"-showBuildSettings", "-list", "-showdestinations", "-showsdks", "-showTestPlans"}),
+    "bazel": frozenset({"query", "cquery", "aquery", "info", "--nobuild"}),
+    "mvn": frozenset({"-h", "--help", "help:effective-pom", "dependency:tree", "-v", "--version"}),
+    "sbt": frozenset({"tasks", "projects", "about", "help"}),
+}
+
+
+def _words(args: list[str], takes_value: frozenset[str]) -> list[str]:
+    """The arguments that are not flags, nor the value of a flag that takes one, nor `NAME=value`."""
+    words: list[str] = []
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in takes_value:
+            skip = True
+        elif not arg.startswith("-") and "=" not in arg:
+            words.append(arg)
+    return words
+
+
+_MAVEN_VALUE_FLAGS = frozenset({
+    "-f", "--file", "-s", "--settings", "-gs", "--global-settings", "-pl", "--projects", "-rf",
+    "--resume-from", "-T", "--threads", "-P", "--activate-profiles", "-l", "--log-file", "-t",
+    "--toolchains", "-D", "--define", "-b", "--builder",
+})
+#: Maven lifecycle phases that run the tests on the way: every phase from `test` on.
+_MAVEN_TESTING = frozenset({"test", "prepare-package", "package", "pre-integration-test", "integration-test",
+                            "post-integration-test", "verify", "install", "deploy"})
+_MAVEN_COMPILING = frozenset({"validate", "compile", "test-compile", "process-test-classes"})
+
+
+def _maven(args: list[str]) -> BashKind | None:
+    goals = _words(args, _MAVEN_VALUE_FLAGS)
+    if any(goal == "deploy" or goal.startswith(("release:", "deploy:")) for goal in goals):
+        return None  # it ships what it built: its failure may be the upload's, not a test's
+    skipped = any(arg.startswith(("-DskipTests", "-Dmaven.test.skip")) and not arg.endswith("=false") for arg in args)
+    testing = any(goal in _MAVEN_TESTING or goal.endswith((":test", ":integration-test")) for goal in goals)
+    if testing and not skipped:
+        return "test"
+    if testing or any(goal in _MAVEN_COMPILING or goal.endswith(":check") for goal in goals):
+        return "check"
+    return None
+
+
+_GRADLE_VALUE_FLAGS = frozenset({
+    "-x", "--exclude-task", "-p", "--project-dir", "-b", "--build-file", "-c", "--settings-file",
+    "--tests", "-g", "--gradle-user-home", "-I", "--init-script", "--console", "--max-workers",
+    "--warning-mode", "--priority", "-D", "-P",
+})
+
+
+def _gradle(args: list[str]) -> BashKind | None:
+    excluded = {args[i + 1].rsplit(":", 1)[-1] for i, arg in enumerate(args[:-1]) if arg in ("-x", "--exclude-task")}
+    tasks = [task.rsplit(":", 1)[-1] for task in _words(args, _GRADLE_VALUE_FLAGS)]
+    if any(_SHIPS_NAMES.search(task.lower()) or task.startswith(("publish", "upload", "release")) for task in tasks):
+        return None  # `build publish`: its failure may be the upload's
+    if any(_gradle_test(task) for task in tasks) and not any(_gradle_test(task) for task in excluded):
+        return "test"
+    if any(task in ("check", "build", "assemble") or _gradle_test(task) or _gradle_check(task) for task in tasks):
+        return "check"  # `build -x test` compiles and lints, and runs no test
+    return None
+
+
+def _gradle_test(task: str) -> bool:
+    """`test`, `check` and `build` (which run it), `integrationTest`, `testDebugUnitTest`, `connectedCheck`."""
+    if task.endswith("Classes") or task.startswith(("assemble", "compile")):
+        return False  # `testClasses`, `assembleAndroidTest`: they compile the tests and run none
+    return task in ("test", "check", "build", "connectedCheck") or task.startswith("test") or task.endswith(("Test", "Tests"))
+
+
+def _gradle_check(task: str) -> bool:
+    return task.startswith(("compile", "lint", "detekt", "ktlint", "spotless", "checkstyle", "pmd", "spotbugs")) or task.endswith(("Check", "Lint"))
+
+
+def _sbt(args: list[str]) -> BashKind | None:
+    commands = [word.split()[0].lstrip("+") for word in args if word.strip() and not word.startswith("-")]
+    if any(c in ("test", "testOnly", "testQuick") or c.endswith(("/test", ":test", "/testOnly")) for c in commands):
+        return "test"
+    if any(c in ("compile", "scalafmtCheck", "scalafmtCheckAll", "scalafmtSbtCheck") or c.endswith("/compile") for c in commands):
+        return "check"
+    return None
+
+
+def _monorepo_targets(prog: str, args: list[str]) -> list[str]:
+    """The targets an nx, turbo or lerna run names: `nx test app`, `nx run app:test`, `nx run-many
+    -t test lint`, `nx affected --target=test`, `turbo run test`, `lerna run test`."""
+    targets: list[str] = []
+    taking = False
+    for arg in args:
+        if arg.startswith(("--target=", "--targets=", "-t=")):
+            targets.extend(arg.split("=", 1)[1].split(","))
+            taking = False
+        elif arg in ("-t", "--target", "--targets"):
+            taking = True
+        elif arg.startswith("-"):
+            taking = False
+        elif taking:
+            targets.extend(arg.split(","))
+    if targets:
+        return targets
+    words = [word for word in args if not word.startswith("-")]
+    if prog == "nx" and words[:1] == ["run"] and len(words) > 1:
+        return [words[1].rsplit(":", 1)[-1]]
+    if words[:1] == ["run"]:
+        return words[1:]
+    return words[:1] if prog == "nx" else words
+
+
+_PACKAGE_MANAGER_COMMANDS = frozenset({
+    "install", "i", "ci", "add", "remove", "rm", "uninstall", "update", "upgrade", "up", "link", "unlink",
+    "publish", "pack", "init", "create", "dlx", "exec", "x", "why", "info", "view", "outdated", "list", "ls",
+    "config", "set", "cache", "login", "logout", "version", "start", "dev", "build", "workspace", "workspaces",
+})
+
+
+def _package_script(prog: str, args: list[str]) -> BashKind | None:
+    """`npm run test:unit`, `pnpm test:e2e`, `yarn lint:ci`: a script the package declares, by its
+    name until the package's own manifest says what it runs; and `yarn jest`, `pnpm vitest run`,
+    which run a binary the package installed."""
+    words = [arg for arg in args if not arg.startswith("-")]
+    if not words:
+        return None
+    if words[0] in ("run", "run-script") and len(words) > 1:
+        return _by_target_names([words[1]])
+    if prog == "npm" or words[0] in _PACKAGE_MANAGER_COMMANDS:
+        return None
+    named = _by_target_names([words[0]])
+    if named is not None:
+        return named
+    binary = _classify_argv(words) if prog in ("yarn", "pnpm", "bun") else "unclassified"
+    return binary if binary in ("test", "check") else None
+
+
+_MAKE_VALUE_FLAGS = frozenset({"-C", "--directory", "-f", "--file", "--makefile", "-j", "--jobs", "-I", "--include-dir",
+                               "-o", "--old-file", "-W", "--what-if", "--justfile", "--working-directory", "-d"})
+
+
+def _by_target_names(names: list[str], check_is_test: bool = False) -> BashKind | None:
+    """Whether a target, script or recipe is a test or a check by the name a project gave it:
+    `test`, `test:unit`, `unit-test`, `e2e`; `lint`, `typecheck`, `lint:ci`. Read from its name only
+    when nothing says what it runs; a manifest the project keeps says that, when it is read."""
+    kinds = {_name_kind(name, check_is_test) for name in names}
+    return "test" if "test" in kinds else "check" if "check" in kinds else None
+
+
+_TEST_NAMES = re.compile(r"^(?:tests?|specs?|e2e|unit|integration|it|ci)(?:[:_\-./].*)?$|[:_\-.](?:tests?|specs?|e2e)$")
+_CHECK_NAMES = re.compile(r"^(?:lint|typecheck|type-check|types|check-types|check|tsc|vet|fmt-check|format-check|format:check|fmt:check|audit|security)(?:[:_\-./].*)?$|[:_\-.](?:lint|typecheck)$")
+#: Names that ship whatever else they say: `ci-deploy`, `test:publish`, `check-and-release`. Read as a
+#: test, a deploy that failed would be "the last test run failed".
+_SHIPS_NAMES = re.compile(r"(?:^|[:_\-.])(?:deploy|publish|release|push|upload|ship|promote|prod)(?:$|[:_\-.])")
+
+
+#: Names that change files whatever else they say: `lint:fix`, `test:update-snapshots`, `format`.
+_CHANGES_NAMES = re.compile(r"(?:^|[:_\-.])(?:fix|write|update|u|snapshots?|clean|reset|format|fmt)(?:$|[:_\-.])")
+
+
+def _name_kind(name: str, check_is_test: bool = False) -> BashKind | None:
+    if _SHIPS_NAMES.search(name):
+        return None
+    if _CHANGES_NAMES.search(name) and not name.endswith(("check", "-check", ":check")):
+        return None
+    if check_is_test and (name == "check" or name.startswith(("check:", "check-", "check_"))):
+        return "test"  # `make check` runs the test suite, by the GNU convention
+    if _TEST_NAMES.search(name):
+        return "test"
+    if _CHECK_NAMES.search(name):
+        return "check"
+    return None
 
 
 def _tee_has_file_arg(argv: list[str]) -> bool:
