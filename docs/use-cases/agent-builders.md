@@ -9,13 +9,20 @@ A policy or a fast decision model allows a step, and the step's own check fails.
 anyway. The run ends with *"Done: the tests pass"* over a failed `pytest`. Your tracing shows every
 span, and none of them says the run's claim was false.
 
-## Where Assurance sits
+## The workflow, with Assurance in it
 
+```mermaid
+flowchart LR
+    s0(["Request"])
+    s1["Your agent<br/>runs"]
+    s2["Run record<br/>or traces"]
+    A["🛡️ Assurance<br/>does &quot;done&quot; match<br/>the record?"]
+    s4(["Result"])
+    s0 --> s1 --> s2 --> A --> s4
+    style A stroke:#dc2626,stroke-width:3px
 ```
-your agent ─▶ writes run.jsonl, or exports OTel traces ─▶ assurance audit
-           ─▶ or posts to assurance serve (local)      ─▶ GET /v1/runs/<id>?fail_on=claim,outcome
-           ─▶ your wrapper or CI stops on verdict.passed == false
-```
+
+The red box is Assurance. Everything around it is your workflow as it is today.
 
 ## Set it up
 

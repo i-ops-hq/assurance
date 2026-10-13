@@ -10,13 +10,20 @@ config, because it was nearby. A new package it installed runs a script on a mac
 on it. The MCP server it calls for the EHR changed a tool's description since your security team
 approved it. None of these show up in the agent's summary.
 
-## Where Assurance sits
+## The workflow, with Assurance in it
 
+```mermaid
+flowchart LR
+    s0(["Task"])
+    s1["Agent edits<br/>the code"]
+    A["🛡️ Assurance<br/>patient data untouched?<br/>installs read first?"]
+    s3["Review"]
+    s4(["Release"])
+    s0 --> s1 --> A --> s3 --> s4
+    style A stroke:#dc2626,stroke-width:3px
 ```
-agent session ─▶ edits a protected path ─▶ suggested review, naming the path and the rule
-              ─▶ before an install     ─▶ assurance deps (what will this run? read, never run)
-              ─▶ in CI                 ─▶ assurance pin --check (did an MCP tool change since approval?)
-```
+
+The red box is Assurance. Everything around it is your workflow as it is today.
 
 ## Set it up
 

@@ -9,7 +9,7 @@
 [![tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-2563eb)](LICENSE)
 
-[Quick start](#quick-start) · [Co-change](#what-usually-changes-with-what-you-just-changed) · [Use cases](#use-cases) · [Commands](#commands) · [After every turn](#run-it-after-every-turn-if-you-want-that) · [Feedback](#tell-us-where-its-wrong)
+[Quick start](#quick-start) · [Co-change](#what-usually-changes-with-what-you-just-changed) · [Use cases](#use-cases) · [Commands](#commands) · [After every turn](#run-it-after-every-turn-if-you-want-that) · [Workflow](#where-it-sits-in-your-workflow) · [Feedback](#tell-us-where-its-wrong)
 
 </div>
 
@@ -189,6 +189,32 @@ zero tests as a pass. [What it recognises](docs/guide/project-rules.md).
 Or as a Claude Code plugin: `claude plugin marketplace add i-ops-hq/assurance`, then
 `claude plugin install assurance@i-ops-hq`. It never blocks or fails a session. Everything about
 pinning, sharing it with a team, Windows and what the plugin runs: [the hook guide](docs/guide/hook.md).
+
+## Where it sits in your workflow
+
+```mermaid
+flowchart LR
+    s0(["Prompt"])
+    s1["AI agent<br/>edits code"]
+    s2["Agent runs<br/>the tests"]
+    A["🛡️ Assurance<br/>checks what<br/>really happened"]
+    s4(["Commit, push,<br/>deploy"])
+    s0 --> s1 --> s2 --> A --> s4
+    style A stroke:#dc2626,stroke-width:3px
+```
+
+The red box is Assurance. Everything else is your workflow as it is today: after each turn,
+Assurance reads what the agent actually did, tells you when something needs a look, and says
+nothing otherwise. The same check can gate CI.
+
+**One fix, step by step:**
+
+```mermaid
+flowchart LR
+    s0(["Fix the EUR<br/>rounding"]) --> s1["Edits<br/>invoice.py"] --> A1["🛡️ note<br/>run pytest first"] --> s2["pytest:<br/>1 failed"] --> A2["🛡️ suggested review<br/>fix it"] --> s3["pytest:<br/>12 passed"] --> s4(["Push"])
+    style A1 stroke:#dc2626,stroke-width:3px
+    style A2 stroke:#dc2626,stroke-width:3px
+```
 
 ## Guides
 
