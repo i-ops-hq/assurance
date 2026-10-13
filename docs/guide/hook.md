@@ -9,6 +9,11 @@ every hook message with "Stop says", so the hook names its level first, and ther
 | **suggested review** | The last test or check after the last code edit failed; a path your project protects was changed without your last prompt naming it; or Claude's last message says the tests pass when nothing verified the edit, or right after a test that failed. | You, and with `--nudge` Claude: fix it, or say plainly why not. |
 | **stop and check** | The turn pushed, merged, published, deployed, ran a migration or committed on main, while code edited before it (with Edit or Write, or with `sed -i`, `>`, `git apply` and the like) had no test or check after it that visibly passed, or while a command your project says must pass, or a test your last prompt names, had not passed after it. | You, and with `--nudge` Claude: verify it before anything builds on it. |
 
+A failure is shown as the runner printed it: the test that failed and its count line, such as
+`tests/test_invoice.py::test_eur_rounding; 1 failed, 11 passed in 0.33s`. Work done by Claude's
+sub-agents counts as the session's: a test a sub-agent ran, or a file it edited, is read from the
+sub-agent's own transcript beside the session's.
+
 Otherwise it stays quiet: edits to prose and assets (`.md`, images, `LICENSE`, …) need no test. It says
 each finding once. A test piped into `tail` or followed by `; echo` doesn't count as passed: its exit
 status is the other command's, so the result is read from the runner's summary line or reported as
@@ -80,14 +85,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.29 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.30 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.29 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.30 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a

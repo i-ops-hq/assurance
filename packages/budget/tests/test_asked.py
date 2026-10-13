@@ -85,7 +85,7 @@ def test_test_names_are_snake_case_pytest_ids_or_go_names_in_backticks() -> None
 def test_commands_are_tests_and_checks_in_backticks_or_shell_blocks() -> None:
     text = (
         "Fix it and run `pytest -q tests/test_a.py`, then `ruff check .`; `git push` after.\n"
-        "```bash\n$ go test ./... \\\n    -race\nmake lint\n# a comment\n```\n"
+        "```bash\n$ go test ./... \\\n    -race\nmake tidy\n# a comment\n```\n"
         "```python\npytest.main()\n```"
     )
     commands = [(c.label, c.asked) for c in names_in(text, CWD).commands]

@@ -7,6 +7,7 @@ what it hands back when it cannot answer — rather than the walk itself, which 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,12 @@ def test_it_answers_what_a_change_would_reach_with_the_call_site(granted: Path) 
 def test_it_says_how_far_behind_the_code_the_graph_is(granted: Path) -> None:
     """An agent acting on a stale graph should know that it did."""
     project(granted)
-    (granted / "pay" / "money.py").write_text("x = 2  # changed after the graph\n", encoding="utf-8")
+    changed = granted / "pay" / "money.py"
+    changed.write_text("x = 2  # changed after the graph\n", encoding="utf-8")
+    # Later than the graph by its stamp, not by the clock: written straight after it, both can carry
+    # the same time on Windows, and the graph then looks as new as the change (seen on CI, 2026-10-13).
+    built = (granted / "graphify-out" / "graph.json").stat().st_mtime
+    os.utime(changed, (built + 10, built + 10))
     out = reach(str(granted), "pay/money.py")
     assert out["graph"]["behind"] is True
     assert "pay/money.py" in out["graph"]["changed_since"]

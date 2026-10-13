@@ -1,3 +1,40 @@
+# 0.2.22
+
+- **The test commands enterprise stacks type are recognised.** Probing what a Java bank, a Django shop
+  or a monorepo team runs every day found `./mvnw test`, `./gradlew check`, `bazel test`, `npm run
+  test:unit`, `python manage.py test`, `nx run-many -t test` and the security scanners all unclassified,
+  so on those stacks every notice ended in "could not classify". Maven, Gradle, sbt, Bazel, nx, turbo,
+  lerna, make and just are read for their goals, tasks and targets wherever they sit among the flags
+  (`mvn -DskipTests package` compiled and tested nothing: a check; `./gradlew build -x test` the same);
+  Django, Rails, Laravel, Elixir, Flutter, Xcode, Playwright, Cypress and nextest are tests; compilers
+  are checks; and security and infrastructure scanners (semgrep, bandit, trivy, grype, `pip-audit`,
+  `npm audit`, gitleaks, checkov, tfsec, hadolint, `terraform validate` and `plan`, `helm lint`,
+  `kubectl diff`) are scans: one that fails is said like a failed check, and one that passes checked
+  something other than the code, so it leaves an edit untested. A dry run (`make -n`, `--dry-run`) is a
+  read, a checker told to fix (`eslint --fix`, `rubocop -a`) is a write, and a target or goal that ships
+  (`make ci-deploy`, `mvn deploy`, `gradle publish`) is never read as a test. A command that runs a
+  check and then ships (`terraform validate && terraform apply`, `go build && git push`) is still a ship.
+- **A project's own scripts are read from its own files.** `package.json` scripts, `Makefile` targets
+  (with their plain variables and prerequisites), `justfile` recipes, `composer.json` scripts and
+  `deno.json` tasks say what `npm run verify` or `make qa` runs, followed through scripts that run
+  scripts. A manifest the session changed teaches nothing for that session, as
+  `.assurance/config.toml` does not.
+- **A run of no tests is not a pass.** `ctest` with nothing to run, `jest --passWithNoTests`, a filter
+  that matches nothing, go packages with no test files: the run *ran no tests*. The hook says so at
+  every level, the report labels it, `--fail-on-unverified` counts it as nothing verified,
+  `--fail-on-claim` holds "the tests pass" against it, and a `must_run` or prompt-named command that ran
+  no tests answers `ran no tests` in `outcome`. Counts over parts (cargo's binaries, go's packages)
+  are read only from output that is all there.
+- **A failure is shown as the runner printed it.** A suggested review or a stop over a failed run quotes
+  the test that failed and its count line: `failed: pytest -q (tests/test_tax.py::test_eur;
+  1 failed, 11 passed in 0.33s)`. pytest, go, cargo, jest, vitest, Maven, Gradle, unittest, dotnet and
+  PHPUnit; nothing is shown when the runner printed neither.
+- **Sub-agents' work is the session's.** A test a sub-agent ran, or a file it edited, is read from its
+  own transcript beside the session's, placed where it happened: right after the call that started it,
+  or by time for one in the background. The report says how many calls were sub-agents'.
+- **The hook is faster on long sessions.** Each call's result is looked for after the call rather than
+  from the start of the transcript: 1.1 s down to 0.5 s on a 65 MB session.
+
 # 0.2.21
 
 - **The Stop hook speaks at three levels, and the lowest is a note.** Claude Code opens every hook

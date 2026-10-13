@@ -186,3 +186,17 @@ def test_a_finding_said_under_its_old_name_is_not_said_again(tmp_path: Path, cap
     old = told.replace("assurance · suggested review: ", "assurance · review suggested: ")
     again = first + [("notice", old), ("prompt", "and the docs?"), ("say", "Docs updated; the tests pass.")]
     assert _said(_transcript(tmp_path, again), capsys) == ""
+
+
+def test_on_a_long_session_a_note_never_said_is_said(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The other side of the one above: the stretch began before the lines read, and no note was said
+    # anywhere, so this one is.
+    from assurance_budget import session_cli
+
+    monkeypatch.setattr(session_cli, "HOOK_WINDOW", 4_000)
+    long_output = _bash("cat build.log", output="x" * 6_000)
+    steps = [("prompt", "fix it"), _edit(tmp_path), ("prompt", "look at the log"), long_output,
+             ("prompt", "and c"), _edit(tmp_path, "c.py")]
+    assert _said(_transcript(tmp_path, steps), capsys).startswith("assurance · note: no test or check has passed since")

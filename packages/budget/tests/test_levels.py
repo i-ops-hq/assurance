@@ -282,7 +282,7 @@ def test_a_test_that_failed_this_turn_is_review_suggested(tmp_path: Path, capsys
     out = _hook(path, capsys)
     assert out is not None
     assert str(out["systemMessage"]).startswith("assurance · suggested review: the last test run after the last edit to app.py (")
-    assert str(out["systemMessage"]).endswith("failed: pytest -q.")
+    assert str(out["systemMessage"]).endswith("failed: pytest -q (1 failed, 2 passed in 0.10s).")  # the runner's own count
     assert "Fix what failed" in out["hookSpecificOutput"]["additionalContext"]
 
 
@@ -350,7 +350,7 @@ def test_a_claim_after_tests_that_failed_with_no_edit_is_review_suggested(tmp_pa
     out = _hook(_transcript(tmp_path, turn), capsys)
     assert out is not None
     told = str(out["systemMessage"])
-    assert told == "assurance · suggested review: Claude's last message says the tests pass, but the last test run failed: pytest -q."
+    assert told == "assurance · suggested review: Claude's last message says the tests pass, but the last test run failed: pytest -q (1 failed, 2 passed in 0.10s)."
     assert "Fix what failed and run it again, or correct what you said." in out["hookSpecificOutput"]["additionalContext"]
     # Said once: the next turn's "yes, they pass", over the same failure, is not a new finding.
     assert _hook(_transcript(tmp_path, turn + [("notice", told), ("prompt", "sure?"), ("say", "Yes, all tests pass.")]), capsys) is None

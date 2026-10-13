@@ -13,9 +13,27 @@ work does what you asked, which is yours to judge. `--json` carries it as `outco
 
 ## Your project's own tests, checks and rules
 
-The audit knows pytest, `npm test`, `cargo test`, mypy, ruff, eslint, tsc and the like. A project's own
-script is nothing it can recognise, so it says it couldn't classify it rather than guess. Declare it,
-and it counts:
+The audit knows the test runners and checks of the common stacks: pytest, jest, vitest, go, cargo,
+Maven and Gradle (wrappers and flags anywhere: `./mvnw -q -pl api verify`, `./gradlew build -x test`
+compiles and tests nothing), sbt, Bazel, nx, turbo, Django, Rails, Laravel, Elixir, Flutter, Xcode,
+Playwright and Cypress; linters and type checkers; and security and infrastructure scans such as
+semgrep, bandit, trivy, `pip-audit`, `npm audit`, gitleaks, checkov, `terraform validate` and
+`terraform plan`, `helm lint`. A scan that fails is said like a failed check; one that passes checked
+something other than your code, so it leaves an edit as untested as it was. A dry run (`make -n`,
+`--dry-run`) runs nothing, a checker told to fix (`eslint --fix`, `rubocop -a`) rewrites files rather
+than checks them, and a target named to ship (`make ci-deploy`, `mvn deploy`) is never read as a test.
+
+**It reads your project's own scripts.** `package.json` scripts, `Makefile` targets, `justfile`
+recipes, `composer.json` scripts and `deno.json` tasks say what `npm run verify` or `make qa` runs, so
+a script that runs a test is a test and one that runs a check is a check, followed through scripts
+that run scripts. A manifest the session changed teaches nothing for that session, so an agent cannot
+make `"verify": "echo ok"` its passing test.
+
+**A run of no tests is not a pass.** `ctest` with nothing to run, `jest --passWithNoTests`, a filter
+that matches nothing: the report says it *ran no tests*, the hook says so, and `--fail-on-unverified`
+counts it as nothing verified.
+
+Anything else it says it couldn't classify, rather than guess. Declare it, and it counts:
 
 ```toml
 # .assurance/config.toml   (commit it, and everyone's audit knows)

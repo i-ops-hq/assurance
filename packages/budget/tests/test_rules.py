@@ -176,7 +176,9 @@ def test_a_required_command_that_failed_is_review_suggested_even_after_another_c
 
 def test_a_required_command_counts_as_a_check() -> None:
     assert classify_bash("make lint", LINT) == "check"
-    assert classify_bash("make lint") == "unclassified"
+    verify = Declared(must_run=("make verify",))  # a name nothing recognises unless the project says so
+    assert classify_bash("make verify", verify) == "check"
+    assert classify_bash("make verify") == "unclassified"
     assert classify_bash("pytest -q", Declared(must_run=("pytest -q",))) == "test"  # a test stays a test
 
 
