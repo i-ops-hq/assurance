@@ -516,6 +516,9 @@ class Session:
     notices: tuple[int, ...] = ()
     """The line of each of this tool's earlier Stop-hook notices: what came before one was already
     there to be said."""
+    notes: tuple[int, ...] = ()
+    """The line of each of its earlier notes (`assurance · note: …`). A note is not a notice: it tells
+    you what is not yet verified and asks nothing, so a push after it is still news."""
     last_text: tuple[int, str] = (-1, "")
     """Claude's last message that was text only, and its line."""
     setup: Setup = field(default_factory=Setup)
@@ -665,6 +668,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     attached_reads: list[tuple[int, str]] = []
     prompts: list[int] = []
     notices: list[int] = []
+    notes: list[int] = []
     last_text: tuple[int, str] = (-1, "")
     last_prompt: Prompt | None = None
     stop_messages: list[str] = []
@@ -713,7 +717,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
             ):
                 attached_reads.append((len(order), attached["filename"]))
             elif kind == "attachment" and isinstance(attached, dict) and _own_stop_notice(attached):
-                notices.append(lines)
+                (notes if str(attached["content"]).startswith(NOTE_HEAD) else notices).append(lines)
             if kind == "attachment" and isinstance(attached, dict) and _own_stop_message(attached):
                 stop_messages.append(str(attached["content"]))
             if kind == "attachment" and isinstance(attached, dict):
@@ -884,6 +888,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
         attached_reads=tuple(attached_reads),
         prompts=tuple(prompts),
         notices=tuple(notices),
+        notes=tuple(notes),
         last_text=last_text,
         setup=setup.done(),
         last_prompt=last_prompt,
@@ -1000,6 +1005,10 @@ def _mcp_title(block: str, server: str) -> str:
         if colon and _TITLE.fullmatch(head.strip()):
             return head.strip()
     return server
+
+
+#: How a note opens: `notice.NOTE` as the hook writes it.
+NOTE_HEAD = "assurance · note:"
 
 
 def _own_stop_notice(attached: Mapping[str, Any]) -> bool:

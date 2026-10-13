@@ -75,7 +75,8 @@ def test_a_refused_test_after_an_edit_is_not_a_failed_test(tmp_path: Path, capsy
     ])
     after = after_last_edit(read_claude_code(path))
     assert after is not None and after["tests"] == 0 and after["tests_failed"] == 0
-    assert _hook_message(path, tmp_path, capsys) == ""  # not "the last test run … failed"
+    said = _hook_message(path, tmp_path, capsys)
+    assert said.startswith("assurance · note: no test or check has passed since") and "failed" not in said  # not "the last test run … failed"
     pushed = _transcript(tmp_path, [
         _edit(tmp_path),
         _step("Bash", {"command": "pytest -q"}, AUTO_MODE, error=True, denial="automode-blocked"),

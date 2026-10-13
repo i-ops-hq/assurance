@@ -136,7 +136,7 @@ def test_a_declared_check_that_failed_after_the_last_edit_is_said(tmp_path: Path
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("python scripts/check.py", failed=True)])
     out = _hook(path, capsys)
     assert out is not None
-    assert "review suggested: the last check after the last edit to app.py (" in str(out["systemMessage"])
+    assert "suggested review: the last check after the last edit to app.py (" in str(out["systemMessage"])
     assert str(out["systemMessage"]).endswith("failed: python scripts/check.py.")
 
 
@@ -154,7 +154,7 @@ def test_a_piped_check_is_unknown_not_passed(tmp_path: Path, capsys: pytest.Capt
     # Unknown is not passed: a push after it is a push of unverified code.
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("ruff check . | head -20"), _bash("git push")])
     out = _hook(path, capsys)
-    assert out is not None and "check before proceeding: pushed at " in str(out["systemMessage"])
+    assert out is not None and "stop and check: pushed at " in str(out["systemMessage"])
     assert "whether it passed is unknown" in str(out["systemMessage"])
 
 

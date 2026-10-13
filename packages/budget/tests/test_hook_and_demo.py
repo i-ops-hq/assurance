@@ -63,7 +63,7 @@ def test_hook_tells_you_and_claude_when_untested_edits_were_pushed(tmp_path: Pat
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), PUSH])
     out = _hook(path, nudge=True, capsys=capsys)
     assert out is not None
-    assert "check before proceeding: pushed at " in str(out["systemMessage"])
+    assert "stop and check: pushed at " in str(out["systemMessage"])
     assert "with no passing test or check after the last edit to app.py (" in str(out["systemMessage"])
     context = out["hookSpecificOutput"]
     assert isinstance(context, dict)
@@ -71,10 +71,12 @@ def test_hook_tells_you_and_claude_when_untested_edits_were_pushed(tmp_path: Pat
     assert "run the project's tests" in context["additionalContext"]
 
 
-def test_hook_is_silent_about_edits_nothing_was_done_with(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # Editing is what Claude does; the report has it, and the notice is for what is at stake.
+def test_hook_only_notes_edits_nothing_was_done_with(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Editing is what Claude does: an untested edit is a note to you, and nothing is asked of Claude,
+    # so the session is not kept going. The notice that asks is for what is at stake.
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path)])
-    assert _hook(path, nudge=True, capsys=capsys) is None
+    out = _hook(path, nudge=True, capsys=capsys)
+    assert out is not None and str(out["systemMessage"]).startswith("assurance · note: ") and "hookSpecificOutput" not in out
 
 
 def test_hook_without_nudge_only_tells_you(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -99,7 +101,7 @@ def test_hook_flags_a_last_test_run_that_failed(tmp_path: Path, capsys: pytest.C
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), ("Bash", {"command": "pytest -q"}, True)])
     out = _hook(path, nudge=True, capsys=capsys)
     assert out is not None
-    assert "review suggested: the last test run after the last edit to app.py (" in str(out["systemMessage"])
+    assert "suggested review: the last test run after the last edit to app.py (" in str(out["systemMessage"])
     assert str(out["systemMessage"]).endswith("failed: pytest -q.")
 
 

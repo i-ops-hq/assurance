@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from assurance_budget import session_cli
-from assurance_budget.notice import REVIEW_SUGGESTED, Notice
+from assurance_budget.notice import SUGGESTED_REVIEW, Notice
 from assurance_budget.session_cli import run_hook
 
 Step = tuple[Any, ...]
@@ -66,7 +66,7 @@ def _said(path: Path, capsys: pytest.CaptureFixture[str]) -> str:
 def test_a_finding_whose_evidence_has_not_changed_is_said_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     first = [("prompt", "fix the total"), _edit(tmp_path), PIPED, ("say", "Fixed, and the tests pass.")]
     told = _said(_transcript(tmp_path, first), capsys)
-    assert told.startswith("assurance · review suggested: Claude's last message says the tests pass")
+    assert told.startswith("assurance · suggested review: Claude's last message says the tests pass")
     # The next turn says it again, over the same edit and the same piped run: nothing under it changed.
     again = first + [("notice", told), ("prompt", "and the docs?"), ("say", "Docs updated; the tests pass.")]
     assert _said(_transcript(tmp_path, again), capsys) == ""
@@ -88,13 +88,13 @@ def test_more_commands_it_could_not_classify_are_not_a_new_finding(tmp_path: Pat
 
 def test_what_was_said_before_a_different_finding_does_not_quiet_this_one(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # Only the same sentence is quiet: a notice about something else is no reason to keep this back.
-    steps = [("notice", "assurance · review suggested: the last test run after the last edit failed."),
+    steps = [("notice", "assurance · suggested review: the last test run after the last edit failed."),
              ("prompt", "fix the total"), _edit(tmp_path), PIPED, ("say", "Fixed, and the tests pass.")]
-    assert _said(_transcript(tmp_path, steps), capsys).startswith("assurance · review suggested: Claude's last message says")
+    assert _said(_transcript(tmp_path, steps), capsys).startswith("assurance · suggested review: Claude's last message says")
 
 
 def _line(unclassified: dict[str, int]) -> str:
-    return session_cli._notice_line(Notice(REVIEW_SUGGESTED, "a finding", "an ask", unclassified), "")
+    return session_cli._notice_line(Notice(SUGGESTED_REVIEW, "a finding", "an ask", unclassified), "")
 
 
 def test_declaring_is_offered_only_for_what_a_declaration_can_name() -> None:

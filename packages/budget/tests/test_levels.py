@@ -71,6 +71,11 @@ def _hook(path: Path, capsys: pytest.CaptureFixture[str], *, active: bool = Fals
     return json.loads(out) if out else None
 
 
+def _noted(out: dict[str, Any] | None) -> bool:
+    """Whether the hook said only a note: told to you, with nothing asked of Claude."""
+    return out is not None and str(out["systemMessage"]).startswith("assurance · note: ") and "hookSpecificOutput" not in out
+
+
 def _said(path: Path, capsys: pytest.CaptureFixture[str]) -> str:
     out = _hook(path, capsys)
     assert out is not None
@@ -80,10 +85,11 @@ def _said(path: Path, capsys: pytest.CaptureFixture[str]) -> str:
 # --- silent: nothing at stake ----------------------------------------------------------------------
 
 
-def test_editing_code_and_saying_so_is_silent(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # The six notices in the screenshots: you know Claude is editing; the report still has it.
+def test_editing_code_and_saying_so_is_only_a_note(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # The six notices in the screenshots: you know Claude is editing. That nothing has tested it yet is
+    # a note to you, once, and asks nothing of Claude; the report still has the rest.
     path = _transcript(tmp_path, [("prompt", "fix it"), _edit(tmp_path), ("say", "Done: the parser now accepts tabs.")])
-    assert _hook(path, capsys) is None
+    assert _noted(_hook(path, capsys))
 
 
 @pytest.mark.parametrize("name", [
@@ -107,7 +113,7 @@ def test_a_push_after_a_passing_test_is_silent(tmp_path: Path, capsys: pytest.Ca
 ])
 def test_a_push_that_did_not_happen_is_not_one(tmp_path: Path, capsys: pytest.CaptureFixture[str], step: Step) -> None:
     path = _transcript(tmp_path, [("prompt", "ship it"), _edit(tmp_path), step])
-    assert _hook(path, capsys) is None
+    assert _noted(_hook(path, capsys))  # the untested edit, and nothing about a push
 
 
 def test_an_edit_outside_the_project_is_not_its_code(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -116,7 +122,7 @@ def test_an_edit_outside_the_project_is_not_its_code(tmp_path: Path, capsys: pyt
     assert _hook(path, capsys) is None
 
 
-# --- check before proceeding ------------------------------------------------------------------------
+# --- stop and check ------------------------------------------------------------------------
 
 
 def test_a_push_with_untested_code_is_check_before_proceeding(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -124,10 +130,10 @@ def test_a_push_with_untested_code_is_check_before_proceeding(tmp_path: Path, ca
     out = _hook(path, capsys)
     assert out is not None
     message = str(out["systemMessage"])
-    assert message.startswith("assurance · check before proceeding: pushed at ")
+    assert message.startswith("assurance · stop and check: pushed at ")
     assert "with no passing test or check after the last edit to app.py (" in message
     context = out["hookSpecificOutput"]["additionalContext"]
-    assert context.startswith("Assurance audit of this session (check before proceeding): pushed at ")
+    assert context.startswith("Assurance audit of this session (stop and check): pushed at ")
     assert "set -o pipefail" in context
 
 
@@ -141,7 +147,7 @@ def test_a_check_that_failed_after_a_passing_test_still_stops_a_push(tmp_path: P
     # A passing test says nothing about the type error mypy found.
     path = _transcript(tmp_path, [("prompt", "ship it"), _edit(tmp_path), PASS, _bash("mypy src", failed=True, output="error: 1"), PUSH])
     message = _said(path, capsys)
-    assert "check before proceeding: pushed at " in message
+    assert "stop and check: pushed at " in message
     assert "while the last check after the last edit to app.py (" in message and "had failed: mypy src" in message
 
 
@@ -159,12 +165,12 @@ def test_committing_on_main_counts_and_on_a_branch_does_not(
 ) -> None:
     path = _transcript(tmp_path, [("prompt", "commit"), _edit(tmp_path), _bash("git commit -am 'fix'", branch=branch)])
     out = _hook(path, capsys)
-    assert (out is None) if said is None else (out is not None and f"check before proceeding: {said} at " in str(out["systemMessage"]))
+    assert _noted(out) if said is None else (out is not None and f"stop and check: {said} at " in str(out["systemMessage"]))
 
 
 def test_one_command_that_does_several_things_names_each(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = _transcript(tmp_path, [("prompt", "ship"), _edit(tmp_path), _bash("git add -A && git commit -m x && git push", branch="main")])
-    assert "check before proceeding: committed on main and pushed at " in _said(path, capsys)
+    assert "stop and check: committed on main and pushed at " in _said(path, capsys)
 
 
 def test_a_shell_edit_is_code_too_and_names_its_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -175,7 +181,7 @@ def test_a_shell_edit_is_code_too_and_names_its_file(tmp_path: Path, capsys: pyt
 @pytest.mark.parametrize("command", ["cat > NOTES.md <<'EOF'\nhello\nEOF", "echo done >> docs/log.txt", "sed -i '' 's/a/b/' README.md"])
 def test_prose_written_by_a_shell_command_is_still_prose(tmp_path: Path, capsys: pytest.CaptureFixture[str], command: str) -> None:
     # Found replaying real sessions: shell-written notes and docs read as code, and every commit on
-    # main after them said "check before proceeding".
+    # main after them said "stop and check".
     path = _transcript(tmp_path, [("prompt", "note it"), _bash(command), _bash("git commit -am notes", branch="main")])
     assert _hook(path, capsys) is None
 
@@ -268,14 +274,14 @@ def test_it_nudges_once_and_still_tells_you(tmp_path: Path, capsys: pytest.Captu
     assert out is not None and "systemMessage" in out and "hookSpecificOutput" not in out
 
 
-# --- review suggested -------------------------------------------------------------------------------
+# --- suggested review -------------------------------------------------------------------------------
 
 
 def test_a_test_that_failed_this_turn_is_review_suggested(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = _transcript(tmp_path, [("prompt", "fix it"), _edit(tmp_path), FAIL])
     out = _hook(path, capsys)
     assert out is not None
-    assert str(out["systemMessage"]).startswith("assurance · review suggested: the last test run after the last edit to app.py (")
+    assert str(out["systemMessage"]).startswith("assurance · suggested review: the last test run after the last edit to app.py (")
     assert str(out["systemMessage"]).endswith("failed: pytest -q.")
     assert "Fix what failed" in out["hookSpecificOutput"]["additionalContext"]
 
@@ -286,7 +292,7 @@ def test_a_failure_from_an_earlier_turn_is_not_said_again(tmp_path: Path, capsys
 
 
 @pytest.mark.parametrize("earlier", [
-    "assurance · check before proceeding: pushed at 10:02 with no passing test or check after the last edit to app.py (10:01).",
+    "assurance · stop and check: pushed at 10:02 with no passing test or check after the last edit to app.py (10:01).",
     "assurance: files were edited and no test or check ran after the last edit (last edit 10:01).",  # before 0.1.13
 ])
 def test_what_a_notice_already_said_is_not_said_again(tmp_path: Path, capsys: pytest.CaptureFixture[str], earlier: str) -> None:
@@ -297,7 +303,7 @@ def test_what_a_notice_already_said_is_not_said_again(tmp_path: Path, capsys: py
 
 def test_a_second_commit_over_the_same_untested_code_is_not_news(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # Found replaying real sessions: one untested script was named at every commit on main for hours.
-    told = "assurance · check before proceeding: committed on main at 10:02 with no passing test or check after the last edit to app.py (10:01)."
+    told = "assurance · stop and check: committed on main at 10:02 with no passing test or check after the last edit to app.py (10:01)."
     commit = _bash("git commit -am more", branch="main")
     again = _transcript(tmp_path, [("prompt", "commit"), _edit(tmp_path), commit, ("notice", told), ("prompt", "commit the docs"), _edit(tmp_path, "README.md"), commit])
     assert _hook(again, capsys) is None
@@ -310,7 +316,7 @@ def test_a_claim_with_no_test_behind_it_is_review_suggested(tmp_path: Path, caps
     out = _hook(path, capsys)
     assert out is not None
     assert str(out["systemMessage"]).startswith(
-        "assurance · review suggested: Claude's last message says the tests pass, but no test or check ran after the last edit to app.py ("
+        "assurance · suggested review: Claude's last message says the tests pass, but no test or check ran after the last edit to app.py ("
     )
     assert "Your last message says the tests pass" in out["hookSpecificOutput"]["additionalContext"]
 
@@ -344,7 +350,7 @@ def test_a_claim_after_tests_that_failed_with_no_edit_is_review_suggested(tmp_pa
     out = _hook(_transcript(tmp_path, turn), capsys)
     assert out is not None
     told = str(out["systemMessage"])
-    assert told == "assurance · review suggested: Claude's last message says the tests pass, but the last test run failed: pytest -q."
+    assert told == "assurance · suggested review: Claude's last message says the tests pass, but the last test run failed: pytest -q."
     assert "Fix what failed and run it again, or correct what you said." in out["hookSpecificOutput"]["additionalContext"]
     # Said once: the next turn's "yes, they pass", over the same failure, is not a new finding.
     assert _hook(_transcript(tmp_path, turn + [("notice", told), ("prompt", "sure?"), ("say", "Yes, all tests pass.")]), capsys) is None
@@ -353,7 +359,7 @@ def test_a_claim_after_tests_that_failed_with_no_edit_is_review_suggested(tmp_pa
 def test_an_edit_made_through_a_heredoc_does_not_make_it_true(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     heredoc = _bash("python - <<'EOF'\nopen('invoice.py', 'w').write('x')\nEOF")
     path = _transcript(tmp_path, [("prompt", "fix the invoice"), heredoc, FAIL, ("say", "Fixed; the tests pass.")])
-    assert _said(path, capsys).startswith("assurance · review suggested: Claude's last message says the tests pass, but the last test run failed")
+    assert _said(path, capsys).startswith("assurance · suggested review: Claude's last message says the tests pass, but the last test run failed")
 
 
 def test_with_no_edit_a_claim_after_a_passing_run_is_silent(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -489,7 +495,7 @@ def test_the_branch_recorded_is_the_projects_wherever_the_shell_is(tmp_path: Pat
     path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
     said = _said(path, capsys)
     back_at = datetime(2026, 9, 29, 10, 3, tzinfo=timezone.utc).astimezone().strftime("%H:%M")  # the second commit
-    assert f"check before proceeding: committed on main at {back_at} " in said and said.count("committed") == 1
+    assert f"stop and check: committed on main at {back_at} " in said and said.count("committed") == 1
 
 
 def test_home_is_followed_like_any_other_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -512,7 +518,7 @@ def test_where_the_shell_was_is_read_from_the_transcript(tmp_path: Path, capsys:
         if line["type"] == "assistant" and line["message"]["content"][0].get("input", {}).get("command"):
             line["cwd"] = str(other)
     path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
-    assert _hook(path, capsys) is None
+    assert _noted(_hook(path, capsys))  # the edit here is untested; the commit and push were elsewhere
 
 
 def test_a_commit_in_another_clone_is_not_this_projects(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -522,10 +528,10 @@ def test_a_commit_in_another_clone_is_not_this_projects(tmp_path: Path, capsys: 
     release = f"cd {clone.as_posix()} && git checkout -q -b release origin/main && git commit -q -m release && git push -u origin release"
     path = _transcript(tmp_path, [("prompt", "release it"), _edit(tmp_path), FAIL, _bash(release, branch="main")])
     said = _said(path, capsys)  # what is true here is still said: a test failed after an edit
-    assert said.startswith("assurance · review suggested: the last test run after the last edit to app.py (")
+    assert said.startswith("assurance · suggested review: the last test run after the last edit to app.py (")
     assert "committed" not in said and "pushed" not in said
     here = _transcript(tmp_path, [("prompt", "release it"), _edit(tmp_path), FAIL, _bash("git commit -q -m release", branch="main")])
-    assert "check before proceeding: committed on main at " in _said(here, capsys)
+    assert "stop and check: committed on main at " in _said(here, capsys)
 
 
 @pytest.mark.parametrize("text", [

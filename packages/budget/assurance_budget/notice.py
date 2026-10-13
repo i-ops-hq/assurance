@@ -1,14 +1,19 @@
 """What the Stop hook says after a turn, and whether it says anything.
 
 Editing code is what Claude does all day, and being told so after every turn is noise; the report
-(`assurance audit`) still has all of it. The hook speaks when something is at stake:
+(`assurance audit`) still has all of it. The hook speaks in three levels, the least first, because
+Claude Code opens every hook message with "Stop says" and a reader must see at once how much it
+matters:
 
-- **check before proceeding**: this turn pushed, merged, published, deployed or migrated, or
-  committed on main, while code edited before it had no passing test or check after it.
-- **review suggested**: the last test or check after the last code edit failed in this turn, or
-  Claude's last message says the tests pass when nothing verified the last code edit, or when the
-  last test or check it ran failed and no code edit this reads came after it: an edit it cannot see,
-  as through a heredoc, does not make "the tests pass" true.
+- **note**: this turn edited code and no test or check has passed since, and nothing worse
+  happened. Told to you once per stretch of unverified edits, with the command to run, and never to
+  Claude: it asks nothing of the session, so it does not keep it going.
+- **suggested review**: the last test or check after the last code edit failed in this turn, a
+  protected path changed, or Claude's last message says the tests pass when nothing verified the
+  last code edit, or when the last test or check it ran failed and no code edit this reads came
+  after it: an edit it cannot see, as through a heredoc, does not make "the tests pass" true.
+- **stop and check**: this turn pushed, merged, published, deployed or migrated, or committed on
+  main, while code edited before it had no passing test or check after it.
 
 Edits to prose and assets (`.md`, `.txt`, `LICENSE`, images, fonts, …) are not code, so they neither
 need a test nor count against one. Every level is decided from the transcript's own records by code; no model is asked.
@@ -60,8 +65,12 @@ from assurance_budget.sessions import (
     tree_rewrites,
 )
 
-CHECK_BEFORE_PROCEEDING = "check before proceeding"
-REVIEW_SUGGESTED = "review suggested"
+NOTE = "note"
+SUGGESTED_REVIEW = "suggested review"
+STOP_AND_CHECK = "stop and check"
+#: What the two upper levels were called up to 0.1.28, so a finding said under the old name in a
+#: session that outlives an upgrade is not said again under the new one.
+LEGACY_LEVELS = {SUGGESTED_REVIEW: "review suggested", STOP_AND_CHECK: "check before proceeding"}
 
 #: Files that are read or shown, not run: editing one needs no test and does not make a test stale.
 NOT_CODE_SUFFIXES = frozenset({
@@ -109,8 +118,12 @@ class _Edits:
     last_at: float | None = None
     last_i: int = -1
     last_seq: int = -1
+    first_seq: int = -1
+    """The line of the first of them: where this stretch of unverified edits began."""
 
     def add(self, label: str, at: float | None, i: int, seq: int) -> None:
+        if not self.paths:
+            self.first_seq = seq
         self.paths.pop(label, None)
         self.paths[label] = at
         self.last_at, self.last_i, self.last_seq = at, i, seq
@@ -248,7 +261,7 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
             asks.append(_protected_ask(news))
         # What ran after the last code edit that could not be classified bears on any of these: one of
         # those commands may have been the project's own check.
-        return Notice(CHECK_BEFORE_PROCEEDING, f"{what}{_at(call.at)} {', and '.join(parts)}", " ".join(asks), between if fresh else {})
+        return Notice(STOP_AND_CHECK, f"{what}{_at(call.at)} {', and '.join(parts)}", " ".join(asks), between if fresh else {})
 
     findings: list[_Finding] = []
     now = [(seq, path) for seq, path in protected if seq > boundary]
@@ -273,16 +286,63 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
         if contradicted is not None:
             findings.append(contradicted)
     if not findings:
-        return None
+        return _note(session, boundary, pending, runs, every, rules, declared)
     unclassified: dict[str, int] = {}
     for finding in findings:
         unclassified.update(finding.unclassified)
     return Notice(
-        REVIEW_SUGGESTED,
+        SUGGESTED_REVIEW,
         "; ".join(finding.text for finding in findings),
         " ".join(dict.fromkeys(finding.ask for finding in findings)),
         unclassified,
     )
+
+
+def _note(
+    session: Session,
+    boundary: int,
+    pending: _Edits,
+    runs: list[_Run],
+    every: list[_Run],
+    rules: Declared,
+    declared: Declared | None,
+) -> Notice | None:
+    """This turn edited code and nothing since has passed: said once per stretch of unverified edits,
+    so a session that edits for five turns before it tests hears it after the first, and again only
+    after a passing run starts a new stretch. With the command to run: `_to_run`."""
+    if not pending.paths or pending.last_seq <= boundary or any(seq > pending.first_seq for seq in session.notes):
+        return None
+    if set(pending.paths) == {LIMITS_FILE}:
+        return None  # assurance's own settings: nothing a test of the project would check
+    edits = _edits(tuple(pending.paths), pending.last_at)
+    last = runs[-1] if runs else None
+    unclassified: dict[str, int] = {}
+    if last is not None and last.outcome == "unknown":
+        finding = f"{last.label}, the last {last.noun} after {edits}, was piped or followed by another command, so whether it passed is unknown"
+    else:
+        unclassified = dict(_unclassified_counts(session.tool_calls[pending.last_i + 1 :], declared))
+        recognised = " it recognises" if unclassified else ""
+        finding = f"no test or check{recognised} has passed since {edits}"
+    return Notice(NOTE, f"{finding}. Run {_to_run(rules, every)} before you commit or push", "", unclassified)
+
+
+#: What a test run prints when its command was never there to run: naming it again would not help.
+_NOT_THERE = ("command not found", "is not recognized as", "No module named")
+
+
+def _to_run(rules: Declared, every: list[_Run]) -> str:
+    """The command a note asks you to run: every command the project says must pass; else the last
+    test this session ran on the project that passed, which is known to run here; else the last one
+    it ran that was there to run; else the project's tests. Declared `tests` are not named: they say
+    what counts as a test, not what to run, and the user's own file may hold another language's."""
+    if rules.must_run:
+        named = list(dict.fromkeys(rules.must_run))
+        return named[0] if len(named) == 1 else ", ".join(named[:-1]) + f" and {named[-1]}"
+    tests = [run for run in every if run.noun == "test run"]
+    passed = [run for run in tests if run.outcome == "passed"]
+    there = [run for run in tests if not any(words in run.tail for words in _NOT_THERE)]
+    chosen = passed or there
+    return chosen[-1].label if chosen else "the project's tests"
 
 
 def _ship_reasons(
@@ -554,6 +614,32 @@ def _listed(items: list[str]) -> str:
     if len(items) <= 3:
         return ", ".join(items[:-1]) + f" and {items[-1]}"
     return ", ".join(items[:3]) + f" and {len(items) - 3} more"
+
+
+def stretch_may_predate(session: Session, declared: Declared | None) -> bool:
+    """Whether a note this turn could rest on a stretch of untested edits that began before the
+    lines read: this turn edited code, nothing in these lines passed before that stretch began, and
+    no note is in them. Whether it was already noted is then only in the lines before, so the hook
+    reads them before it says a note, and only then: a stretch that began before the window is common,
+    and the note it might repeat is the only thing here that needs it."""
+    if session.notes:
+        return False  # any note here is after a stretch that began before these lines
+    boundary = max(session.prompts[-1:] + session.notices[-1:], default=-1)
+    pending = started_here = passed = False
+    last_edit = -1
+    for call in session.tool_calls:
+        if call.refused:
+            continue
+        if not call.error and _code_edit(call, session.cwd) is not None:
+            if not pending:
+                started_here = passed
+            pending, last_edit = True, call.seq
+            continue
+        command = shell_command(call) if call.name in _SHELL_TOOLS else None
+        run = None if command is None else _verification(call, command, declared, session.cwd)
+        if run is not None and not run.elsewhere and run.outcome == "passed":
+            pending, passed = False, True
+    return pending and last_edit > boundary and not started_here
 
 
 def needs_earlier_lines(session: Session, declared: Declared | None = None, *, set_aside: bool = False) -> bool:

@@ -1,13 +1,15 @@
 # assurance, the Claude Code plugin
 
 After every turn, the Stop hook checks Claude's code changes against the tests and checks that ran,
-and against what you asked, and speaks when something is at stake, naming it first. *Check before
-proceeding*: untested code was pushed, merged, published, deployed or committed on main, or shipped
-before a command your project says must pass, or a test your last prompt names, passed. *Review
-suggested*: a test or check after the last code edit failed, a path your project protects changed
-without your prompt naming it, or Claude says the tests pass when nothing verified the edit, or right after a test that failed. Routine
-editing, and edits to prose and assets, pass quietly. Claude is asked to act too, at most once per
-turn, and a session is never blocked.
+and against what you asked, and says what is at stake at one of three levels, naming the level first.
+*Note*: this turn changed code and nothing has tested it yet; you are told once, with the command to
+run, and Claude is not asked anything. *Suggested review*: a test or check after the last code edit
+failed, a path your project protects changed without your prompt naming it, or Claude says the tests
+pass when nothing verified the edit, or right after a test that failed. *Stop and check*: untested code
+was pushed, merged, published, deployed or committed on main, or shipped before a command your project
+says must pass, or a test your last prompt names, passed. Edits to prose and assets pass quietly. On
+the two upper levels Claude is asked to act too, at most once per turn, and a session is never
+blocked.
 
 ```bash
 claude plugin marketplace add i-ops-hq/assurance
