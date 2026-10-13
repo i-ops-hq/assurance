@@ -36,20 +36,22 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 `assurance audit --demo` prints this from any folder, and `assurance audit --session <id>` audits one
 session by its id, opening that session's transcript and no other (the Claude Code plugin's
 `/assurance:audit` passes its own). As a Claude Code **Stop hook**, it runs after
-every turn and speaks when something is at stake: untested code pushed, merged, published, deployed or
-committed on main, or shipped while a command the project says must pass or a test the last prompt
-names had not passed after the edit (*check before proceeding*); a failed test or check after the last
-code edit, a change to a path the project protects, or Claude saying the tests pass with nothing
-behind it, or right after a test that failed (*review suggested*). It says a finding once, and not
-again while the edit, the command and the time it rests on are the same. `--nudge` also asks Claude
-to act (once per turn, and it never fails the session).
+every turn and says what is at stake at one of three levels: code changed this turn and nothing has
+tested it yet, with the command to run (*note*, told to you and asked of no one); a failed test or check
+after the last code edit, a change to a path the project protects, or Claude saying the tests pass with
+nothing behind it, or right after a test that failed (*suggested review*); untested code pushed, merged,
+published, deployed or committed on main, or shipped while a command the project says must pass or a
+test the last prompt names had not passed after the edit (*stop and check*). It says a finding once,
+and not again while the edit, the command and the time it rests on are the same; a note, once per
+stretch of untested edits. `--nudge` also asks Claude to act on the two upper levels (once per turn,
+and it never fails the session).
 `assurance hook install` adds it after showing you the change; `assurance hook remove` takes it out:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.28 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.29 audit --hook --nudge" } ] } ] } }
 ```
 
-By hand, run `uvx assurance@0.1.28 --version` once first: `--offline` runs the copy uv already has, so
+By hand, run `uvx assurance@0.1.29 --version` once first: `--offline` runs the copy uv already has, so
 the hook never waits on PyPI.
 
 **Run-log budget** (JSONL with a per-run id):

@@ -15,7 +15,7 @@ import pytest
 
 from assurance_budget import config
 from assurance_budget.config import ConfigError, load_declared
-from assurance_budget.notice import CHECK_BEFORE_PROCEEDING, REVIEW_SUGGESTED, needs_earlier_lines, stop_notice
+from assurance_budget.notice import NOTE, STOP_AND_CHECK, SUGGESTED_REVIEW, needs_earlier_lines, stop_notice
 from assurance_budget.session_cli import run_hook
 from assurance_budget.sessions import Declared, classify_bash, read_claude_code, read_claude_code_tail
 
@@ -70,6 +70,10 @@ def _notice(tmp_path: Path, steps: list[Step], declared: Declared | None = None,
     return None if notice is None else (notice.level, notice.finding, notice.ask)
 
 
+def _level(said: tuple[str, str, str] | None) -> str | None:
+    return None if said is None else said[0]
+
+
 # --- must_not_touch -------------------------------------------------------------------------------------
 
 
@@ -77,22 +81,22 @@ def test_a_change_to_a_protected_path_is_review_suggested(tmp_path: Path) -> Non
     said = _notice(tmp_path, [("prompt", "fix the report query"), _edit(tmp_path, "migrations/0042.sql"), _edit(tmp_path)], MIGRATIONS)
     assert said is not None
     level, finding, ask = said
-    assert level == REVIEW_SUGGESTED
+    assert level == SUGGESTED_REVIEW
     assert finding == f"this turn changed migrations/0042.sql, which {SRC} lists under must_not_touch"
     assert ask == "Say what you changed in migrations/0042.sql and why; if it was not needed for what was asked, put it back."
 
 
 def test_a_protected_path_the_prompt_names_was_asked_for(tmp_path: Path) -> None:
     steps = [("prompt", "add the index in migrations/0042.sql"), _edit(tmp_path, "migrations/0042.sql")]
-    assert _notice(tmp_path, steps, MIGRATIONS) is None
+    assert _level(_notice(tmp_path, steps, MIGRATIONS)) == NOTE  # untested, and not a protected-path finding
     steps = [("prompt", "clean up migrations/ while you are there"), _edit(tmp_path, "migrations/0042.sql")]
-    assert _notice(tmp_path, steps, MIGRATIONS) is None
+    assert _level(_notice(tmp_path, steps, MIGRATIONS)) == NOTE
 
 
 def test_a_protected_path_the_prompt_says_not_to_touch_was_not_asked_for(tmp_path: Path) -> None:
     steps = [("prompt", "fix the query, and don't touch migrations/0042.sql"), _edit(tmp_path, "migrations/0042.sql")]
     said = _notice(tmp_path, steps, MIGRATIONS)
-    assert said is not None and said[0] == REVIEW_SUGGESTED
+    assert said is not None and said[0] == SUGGESTED_REVIEW
 
 
 def test_a_protected_path_changed_by_a_shell_command_counts(tmp_path: Path) -> None:
@@ -102,14 +106,14 @@ def test_a_protected_path_changed_by_a_shell_command_counts(tmp_path: Path) -> N
 
 
 def test_a_protected_change_is_said_once(tmp_path: Path) -> None:
-    first = [("prompt", "fix it"), _edit(tmp_path, "migrations/0042.sql"), ("notice", "assurance · review suggested: …")]
+    first = [("prompt", "fix it"), _edit(tmp_path, "migrations/0042.sql"), ("notice", "assurance · suggested review: …")]
     assert _notice(tmp_path, [*first, ("prompt", "thanks, now the docs"), _edit(tmp_path, "README.md")], MIGRATIONS) is None
 
 
 def test_a_protected_change_told_once_is_not_told_again_in_a_turn_a_task_started(tmp_path: Path) -> None:
     # No new prompt from the person, so the change is still this prompt's; the notice already said it.
     steps = [
-        ("prompt", "fix it"), _edit(tmp_path, "migrations/0042.sql"), ("notice", "assurance · review suggested: …"),
+        ("prompt", "fix it"), _edit(tmp_path, "migrations/0042.sql"), ("notice", "assurance · suggested review: …"),
         ("task", "<task-notification>build finished</task-notification>"), _bash("ls"),
     ]
     assert _notice(tmp_path, steps, MIGRATIONS) is None
@@ -130,7 +134,7 @@ def test_a_protected_change_rides_along_when_the_turn_ships(tmp_path: Path) -> N
     said = _notice(tmp_path, steps, MIGRATIONS)
     assert said is not None
     level, finding, _ = said
-    assert level == CHECK_BEFORE_PROCEEDING
+    assert level == STOP_AND_CHECK
     assert finding.startswith("pushed at ") and finding.endswith(f" after changing migrations/0042.sql, which {SRC} lists under must_not_touch")
 
 
@@ -141,7 +145,7 @@ def test_changing_the_settings_that_hold_the_rules_is_told(tmp_path: Path) -> No
     write = ("Write", {"file_path": str(tmp_path / SRC), "content": "[audit]\n"}, False, "ok")
     said = _notice(tmp_path, [("prompt", "make the audit stop complaining"), write], set_aside=True)
     assert said is not None
-    assert said[:2] == (REVIEW_SUGGESTED, f"this turn changed {SRC}, so what it declares under [audit] is not used for this session")
+    assert said[:2] == (SUGGESTED_REVIEW, f"this turn changed {SRC}, so what it declares under [audit] is not used for this session")
     assert _notice(tmp_path, [("prompt", "make the audit stop complaining"), write], set_aside=False) is None  # nothing set aside
     assert _notice(tmp_path, [("prompt", f"add must_run to {SRC}"), write], set_aside=True) is None  # asked for
 
@@ -153,7 +157,7 @@ def test_a_push_while_a_required_command_did_not_run_after_the_edit(tmp_path: Pa
     said = _notice(tmp_path, [("prompt", "ship it"), _edit(tmp_path), PASS, PUSH], LINT)
     assert said is not None
     level, finding, ask = said
-    assert level == CHECK_BEFORE_PROCEEDING
+    assert level == STOP_AND_CHECK
     assert finding.startswith("pushed at ")
     assert f" while make lint, which {SRC} says must pass after an edit, did not run after the last edit to app.py (" in finding
     assert ask.startswith(f"Before you go further, run make lint, which {SRC} says must pass after an edit,")
@@ -167,7 +171,7 @@ def test_a_required_command_that_failed_is_review_suggested_even_after_another_c
     steps = [("prompt", "fix it"), _edit(tmp_path), LINT_FAIL, _bash("mypy src", output="Success: no issues found")]
     said = _notice(tmp_path, steps, LINT)
     assert said is not None
-    assert said[:2] == (REVIEW_SUGGESTED, f"make lint, which {SRC} says must pass after an edit, failed after the last edit to app.py ({said[1].split('(')[1]}")
+    assert said[:2] == (SUGGESTED_REVIEW, f"make lint, which {SRC} says must pass after an edit, failed after the last edit to app.py ({said[1].split('(')[1]}")
 
 
 def test_a_required_command_counts_as_a_check() -> None:
@@ -184,7 +188,7 @@ def test_a_push_while_the_test_the_prompt_names_did_not_run(tmp_path: Path) -> N
     said = _notice(tmp_path, steps)
     assert said is not None
     level, finding, ask = said
-    assert level == CHECK_BEFORE_PROCEEDING
+    assert level == STOP_AND_CHECK
     assert " while npm test, named in the last prompt, did not run after the last edit to app.py (" in finding
     assert ask.startswith("Before you go further, run npm test, which the last prompt names,")
 
@@ -270,7 +274,7 @@ def test_the_hook_holds_the_session_to_the_projects_rules(tmp_path: Path, no_use
     path = _transcript(tmp_path, [("prompt", "fix the report"), _edit(tmp_path, "migrations/0042.sql")])
     assert run_hook(json.dumps({"transcript_path": str(path)}), nudge=True) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["systemMessage"] == f"assurance · review suggested: this turn changed migrations/0042.sql, which {SRC} lists under must_not_touch."
+    assert out["systemMessage"] == f"assurance · suggested review: this turn changed migrations/0042.sql, which {SRC} lists under must_not_touch."
     assert "Say what you changed in migrations/0042.sql and why" in out["hookSpecificOutput"]["additionalContext"]
 
 
@@ -283,4 +287,4 @@ def test_a_session_that_rewrites_the_rules_is_told_and_not_held_to_them(tmp_path
     path = _transcript(tmp_path, [("prompt", "fix the report"), write, _edit(tmp_path, "migrations/0042.sql")])
     assert run_hook(json.dumps({"transcript_path": str(path)}), nudge=True) == 0
     message = json.loads(capsys.readouterr().out)["systemMessage"]
-    assert message == f"assurance · review suggested: this turn changed {SRC}, so what it declares under [audit] is not used for this session."
+    assert message == f"assurance · suggested review: this turn changed {SRC}, so what it declares under [audit] is not used for this session."

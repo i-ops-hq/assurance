@@ -1,3 +1,21 @@
+# 0.2.21
+
+- **The Stop hook speaks at three levels, and the lowest is a note.** Claude Code opens every hook
+  message with "Stop says", so both levels read as a stop, and the everyday case, code changed and not
+  yet tested, was not said at all. Now:
+  - `assurance · note:` this turn changed code and no test or check has passed since. It names the
+    command to run: every command the project says must pass (`must_run`), else the last test the
+    session ran on the project that passed, else the last one it ran. It is told to you and asks nothing of Claude, so the
+    session is not kept going, and it is said once per stretch of untested edits: five turns of
+    editing before a test hear it after the first, and again only after something passes.
+  - `assurance · suggested review:` (was *review suggested*): a failed test or check after the last
+    code edit, a protected path changed, or "the tests pass" with nothing behind it.
+  - `assurance · stop and check:` (was *check before proceeding*): untested code pushed, merged,
+    published, deployed, migrated or committed on main. A push after a note is still a stop.
+  A finding said under its old name in a session that outlives the upgrade is not said again.
+  Replayed over 92 turns of real sessions, the hook spoke four times: one note, one suggested review,
+  two stops.
+
 # 0.2.20
 
 - **`--json`, `--fail-on-claim` and the report hold a Claude Code session's "the tests pass" against

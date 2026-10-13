@@ -116,7 +116,7 @@ def test_the_piped_failing_run_from_the_desktop_report_is_caught(tmp_path: Path,
         ("Bash", {"command": "python3 -m pytest -q 2>&1 | tail -8"}, False, PYTEST_FAIL_TAIL),
     ])
     out = _hook(path, capsys)
-    assert out is not None and "review suggested: the last test run after the last edit to greet.py (" in str(out["systemMessage"])
+    assert out is not None and "suggested review: the last test run after the last edit to greet.py (" in str(out["systemMessage"])
     assert " failed: " in str(out["systemMessage"])
 
 

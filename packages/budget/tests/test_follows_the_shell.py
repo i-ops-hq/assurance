@@ -89,7 +89,7 @@ def test_a_file_written_from_another_repository_is_not_this_projects(repos: tupl
     assert _notice(_session(project, there), capsys) == ""  # its edit, its commit, its push: not this project's
     here = there + [_edit(project / "app.py", project), _bash("git commit -qam x", project)]
     said = _notice(_session(project, here), capsys)
-    assert "check before proceeding: committed on main at " in said and "the last edit to app.py" in said
+    assert "stop and check: committed on main at " in said and "the last edit to app.py" in said
     assert "live.js" not in said
 
 
@@ -132,7 +132,7 @@ def test_a_test_run_elsewhere_neither_clears_nor_fails_this_projects_code(
         steps = [("prompt", "ship"), _edit(project / "app.py", project), _bash(where.format(other=other.as_posix()), project, failed=failed, output=output), _bash("git push", project)]
         path = _session(project, steps)
         said = _notice(path, capsys)
-        assert said.startswith("assurance · check before proceeding: pushed at ")
+        assert said.startswith("assurance · stop and check: pushed at ")
         assert "no passing test or check after the last edit to app.py" in said and "pytest" not in said
         after = after_last_edit(read_claude_code(path))
         assert after is not None and after["tests"] == 0
@@ -187,9 +187,9 @@ def test_a_folder_that_is_no_repository_is_the_project_by_itself(tmp_path: Path,
     (folder / "api" / ".git").mkdir(parents=True)
     (outside / ".git").mkdir(parents=True)
     steps = [("prompt", "ship"), _edit(folder / "api" / "app.py", folder), _bash("cd api && git push", folder)]
-    assert _notice(_session(folder, steps), capsys).startswith("assurance · check before proceeding: pushed at ")
+    assert _notice(_session(folder, steps), capsys).startswith("assurance · stop and check: pushed at ")
     away = [("prompt", "ship"), _edit(folder / "api" / "app.py", folder), _bash(f"cd {outside.as_posix()} && git push", folder)]
-    assert _notice(_session(folder, away), capsys) == ""
+    assert _notice(_session(folder, away), capsys).startswith("assurance · note: ")  # untested, not pushed from here
 
 
 # --- subshells -----------------------------------------------------------------------------------------
@@ -222,7 +222,7 @@ def test_a_push_after_a_test_run_elsewhere_in_one_command_is_still_read(repos: t
     project, other = repos
     command = f"cd {other.as_posix()} && pytest -q; cd {project.as_posix()} && git push"
     steps = [("prompt", "ship"), _edit(project / "app.py", project), _bash(command, project, output=PASSED)]
-    assert _notice(_session(project, steps), capsys).startswith("assurance · check before proceeding: pushed at ")
+    assert _notice(_session(project, steps), capsys).startswith("assurance · stop and check: pushed at ")
 
 
 def test_a_test_the_prompt_names_counts_wherever_it_ran(repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]) -> None:

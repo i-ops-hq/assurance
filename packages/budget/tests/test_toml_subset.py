@@ -169,7 +169,7 @@ def test_saying_so_does_not_quiet_what_comes_after(tmp_path: Path, py310: Path, 
     ]
     told = _said(f"{SETTINGS_UNREAD}, so what they declare is not used: …")
     message = _hook(_session(tmp_path, edit + [told] + push), capsys)
-    assert message.startswith("assurance · check before proceeding: pushed")
+    assert message.startswith("assurance · stop and check: pushed")
 
 
 def test_the_reader_holds_on_this_interpreter() -> None:

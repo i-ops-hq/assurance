@@ -1,3 +1,12 @@
+# 0.1.29
+
+- **Requires `assurance-budget` 0.2.21, pinned exactly:** the Stop hook speaks at three levels, a
+  *note* when code changed and nothing has tested it yet (told to you once, with the command to run,
+  and asked of no one), a *suggested review*, and *stop and check*. The plugin and the README's hook
+  command are pinned to this version.
+- The README is a front page now: what it does, the three levels, use cases by industry, and the
+  commands. The detail moved to `docs/guide/`, and each use case has a page in `docs/use-cases/`.
+
 # 0.1.28
 
 - `assurance clearance` arrives with `assurance-cli` 0.6.6: whether the person who asked is cleared

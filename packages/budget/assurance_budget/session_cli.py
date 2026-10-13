@@ -25,7 +25,16 @@ from assurance_budget.config import (
 from assurance_budget.events import LogError
 from assurance_budget.decisions import decision_lines, decisions
 from assurance_budget.inventory import inventory, inventory_lines
-from assurance_budget.notice import Notice, claim_against, claims_tests_pass, needs_earlier_lines, stop_notice
+from assurance_budget.notice import (
+    LEGACY_LEVELS,
+    NOTE,
+    Notice,
+    claim_against,
+    claims_tests_pass,
+    needs_earlier_lines,
+    stop_notice,
+    stretch_may_predate,
+)
 from assurance_budget.otel import TRACE_SOURCE, is_trace, read_trace
 from assurance_budget.outcome import outcome, outcome_lines
 from assurance_budget.record import RunRecord, is_run_record, model_lines, model_summary, read_run_record
@@ -66,16 +75,17 @@ SAMPLE_SESSION = Path(__file__).resolve().parent / "data" / "sample-session.json
 def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     """Claude Code Stop hook. Reads the hook input, audits the transcript, and always exits 0.
 
-    Speaks only when something is at stake (`assurance_budget.notice`), and says a finding once: not
-    again in a later turn while the evidence under it is the same. Check before proceeding: code
-    was pushed, merged, published, deployed or committed on main while no passing test or check
-    followed it, or while a command the project says must pass, or one the last prompt names, had not
-    passed after it. Review suggested: a test or check after the last code edit failed, a path under
+    Speaks in proportion to what the turn did (`assurance_budget.notice`), and says a finding once:
+    not again in a later turn while the evidence under it is the same. Note: code was edited and no
+    test or check has passed since, said once per stretch of such edits with the command to run.
+    Suggested review: a test or check after the last code edit failed, a path under
     `must_not_touch` or the project's own settings file changed without the last prompt naming it, or
     Claude's last message says the tests pass when nothing verified the edit, or right after a test
-    that failed. The line you see names
-    the level first; with `nudge` Claude is also asked to act (`additionalContext`), never twice in
-    one turn (`stop_hook_active`). A hook that cannot read its input says so and lets the session
+    that failed. Stop and check: code was pushed, merged, published, deployed or committed on main
+    while no passing test or check followed it, or while a command the project says must pass, or one
+    the last prompt names, had not passed after it. The line you see names the level first; with
+    `nudge` Claude is also asked to act on a suggested review or a stop (`additionalContext`), never
+    on a note and never twice in one turn (`stop_hook_active`). A hook that cannot read its input says so and lets the session
     end; an audit tool must never be the reason a session breaks.
     """
     try:
@@ -92,6 +102,11 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         if not whole and needs_earlier_lines(session, declared, set_aside=set_aside):
             session, whole = read_claude_code(transcript), True
         notice = stop_notice(session, declared, set_aside=set_aside)
+        if notice is not None and notice.level == NOTE and not whole and stretch_may_predate(session, declared):
+            # A note is said once per stretch of untested edits, and this one may have been said
+            # before the lines read: read them all before saying it again.
+            session, whole = read_claude_code(transcript), True
+            notice = stop_notice(session, declared, set_aside=set_aside)
     except LogError as exc:
         _hook_print({"systemMessage": f"assurance: could not read this session ({exc}); nothing audited."})
         return EXIT_OK
@@ -105,15 +120,15 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
             # read is not something the turn did, and it must not quiet what later turns say.
             _hook_print({"systemMessage": _end_sentence(f"{SETTINGS_UNREAD}, so what they declare is not used: {unread}")})
         return EXIT_OK
-    head = _notice_head(notice)
-    if any(text.startswith(head) for text in session.said):
+    heads = (_notice_head(notice), _notice_head(notice, LEGACY_LEVELS.get(notice.level, notice.level)))
+    if any(text.startswith(heads) for text in session.said):
         # Said already, in an earlier turn. A finding carries its evidence (the edit, the command, the
         # time), so had anything under it changed, the sentence would have, and it would be said again.
         return EXIT_OK
     if "[audit]" in notice.finding:
         declared_note = ""  # the finding says it already
     out: dict[str, Any] = {"systemMessage": _notice_line(notice, declared_note)}
-    if nudge and not data.get("stop_hook_active"):
+    if nudge and notice.ask and not data.get("stop_hook_active"):  # a note asks nothing of Claude
         finding = notice.finding.replace("Claude's last message says", "Your last message says")
         context = f"Assurance audit of this session ({notice.level}): {_end_sentence(finding)}"
         if declared_note:
@@ -129,9 +144,9 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     return EXIT_OK
 
 
-def _notice_head(notice: Notice) -> str:
+def _notice_head(notice: Notice, level: str = "") -> str:
     """The level and the finding: what the line you see opens with, and what says whether it was said."""
-    return f"assurance · {notice.level}: {_end_sentence(notice.finding)}"
+    return f"assurance · {level or notice.level}: {_end_sentence(notice.finding)}"
 
 
 #: Kinds of unclassified command no `[audit]` entry can name: a declaration matches any run that begins
@@ -306,16 +321,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--hook",
         action="store_true",
         help=(
-            "Run as a Claude Code Stop hook: read the hook's JSON on stdin and tell you when something "
-            "is at stake: untested code pushed, merged, published or committed on main, a failed test "
-            "or check, a change to a path your settings protect, or a claim that the tests pass with "
-            "nothing behind it, or with a failure behind it. Never fails the session"
+            "Run as a Claude Code Stop hook: read the hook's JSON on stdin and say what is at stake, "
+            "at one of three levels. Note: code changed and nothing has tested it yet. Suggested "
+            "review: a failed test or check, a change to a path your settings protect, or a claim "
+            "that the tests pass with nothing behind it, or with a failure behind it. Stop and check: "
+            "untested code pushed, merged, published, deployed, migrated or committed on main. Never "
+            "fails the session"
         ),
     )
     parser.add_argument(
         "--nudge",
         action="store_true",
-        help="With --hook: also ask Claude to act on what it says (once per turn)",
+        help="With --hook: also ask Claude to act on a suggested review or a stop (once per turn; never on a note)",
     )
     return parser
 
