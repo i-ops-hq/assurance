@@ -217,3 +217,32 @@ def test_anything_else_is_not(before: str, after: str) -> None:
     from assurance_budget.world import _key_pairs, _version_only
 
     assert not _version_only(before, after, _key_pairs(before, after))
+
+
+def test_git_is_handed_only_what_it_needs_never_the_whole_environment() -> None:
+    """0.1.31 was held by Anthropic's plugin directory — "Update adds credential forward" — because
+    this ran git with `env={**os.environ, ...}`. A read-only `git log` has no use for a token, and a
+    child process that never receives one cannot leak it. Read by name, so a new variable in the
+    session is not silently forwarded tomorrow."""
+    import os as _os
+
+    from assurance_budget.world import _GIT_ENV_KEYS, _git_env
+
+    secrets = {"GITHUB_TOKEN": "ghp_x", "AWS_SECRET_ACCESS_KEY": "s", "OPENAI_API_KEY": "sk-x",
+               "ANTHROPIC_API_KEY": "sk-ant-x", "NPM_TOKEN": "npm_x"}
+    before = {k: _os.environ.get(k) for k in secrets}
+    try:
+        _os.environ.update(secrets)
+        env = _git_env()
+        assert not (set(env) & set(secrets)), sorted(set(env) & set(secrets))
+        assert set(env) <= set(_GIT_ENV_KEYS) | {"GIT_OPTIONAL_LOCKS", "GIT_TERMINAL_PROMPT"}
+        assert env["GIT_OPTIONAL_LOCKS"] == "0" and env["GIT_TERMINAL_PROMPT"] == "0"
+        # PATH has to survive or git cannot be found at all, which is how this started.
+        if "PATH" in _os.environ:
+            assert env.get("PATH") == _os.environ["PATH"]
+    finally:
+        for key, value in before.items():
+            if value is None:
+                _os.environ.pop(key, None)
+            else:
+                _os.environ[key] = value
