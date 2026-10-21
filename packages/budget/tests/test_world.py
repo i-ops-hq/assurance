@@ -74,7 +74,7 @@ class Session:
         self.lines.append(record)
 
     def bash(self, command: str, output: str = "ok",
-             edit: tuple[str, str, str] | None = None) -> None:
+             edit: tuple[str, str, str] | None = None, same_second: bool = False) -> None:
         """Runs it for real in the repository, then records it.
 
         `edit` is (file, before, after): the same substitution the command describes, applied in
@@ -88,10 +88,17 @@ class Session:
             assert before in text, f"{name} does not contain {before!r}"
             path.write_text(text.replace(before, after, 1), encoding="utf-8")
         elif command not in ("pytest -q", "git push origin feature"):
-            subprocess.run(command, shell=True, cwd=self.root, check=True, capture_output=True,
-                           env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
-                                "GIT_COMMITTER_EMAIL": "t@example.com", "PATH": os.environ.get("PATH", ""),
-                                "HOME": str(self.root)})
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@example.com", "PATH": os.environ.get("PATH", ""),
+                   "HOME": str(self.root)}
+            if same_second:
+                # Two commits have to share a clock second for the reflog to be unable to tell them
+                # apart. Left to the wall clock that is true almost always and false occasionally:
+                # it failed once on macOS 3.10 while passing on the other eleven CI jobs. Pinning
+                # both to one timestamp makes the case the test is named for happen every time.
+                stamp = f"{int(time.time())} +0000"
+                env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = stamp
+            subprocess.run(command, shell=True, cwd=self.root, check=True, capture_output=True, env=env)
         self.call("Bash", {"command": command}, output)
 
     def write(self, name: str, content: str) -> None:
@@ -177,7 +184,7 @@ def test_a_commit_it_cannot_identify_leaves_the_code_unknown(repo: Path, capsys:
     s.bash("pytest -q", PASS)
     s.bash("sed -i.bak 's/round(sum(xs), 1)/round(sum(xs), 2)/' app.py && rm app.py.bak",
            edit=("app.py", "round(sum(xs), 1)", "round(sum(xs), 2)"))
-    s.bash("git commit -q -am one && git commit -q --allow-empty -m two")
+    s.bash("git commit -q -am one && git commit -q --allow-empty -m two", same_second=True)
     s.bash("git push origin feature")
     assert s.said(capsys).startswith("assurance · stop and check: pushed at ")
 
