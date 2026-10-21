@@ -11,6 +11,7 @@ commit that printed nothing.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -28,7 +29,7 @@ CODE = "def total(xs):\n    return round(sum(xs), 1)\n"
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
                           env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
-                               "GIT_COMMITTER_EMAIL": "t@example.com", "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+                               "GIT_COMMITTER_EMAIL": "t@example.com", "PATH": os.environ.get("PATH", ""),
                                "HOME": str(repo)}).stdout
 
 
@@ -72,12 +73,24 @@ class Session:
             record["toolUseResult"] = result
         self.lines.append(record)
 
-    def bash(self, command: str, output: str = "ok") -> None:
-        """Runs it for real in the repository, then records it."""
-        if command not in ("pytest -q", "git push origin feature"):
+    def bash(self, command: str, output: str = "ok",
+             edit: tuple[str, str, str] | None = None) -> None:
+        """Runs it for real in the repository, then records it.
+
+        `edit` is (file, before, after): the same substitution the command describes, applied in
+        Python. The transcript still records the command verbatim, which is what the hook reads, and
+        the file still changes on disk — but `sed` and `rm` do not exist on Windows, where four of
+        these tests failed on every Python version while passing on macOS and Linux."""
+        if edit is not None:
+            name, before, after = edit
+            path = self.root / name
+            text = path.read_text(encoding="utf-8")
+            assert before in text, f"{name} does not contain {before!r}"
+            path.write_text(text.replace(before, after, 1), encoding="utf-8")
+        elif command not in ("pytest -q", "git push origin feature"):
             subprocess.run(command, shell=True, cwd=self.root, check=True, capture_output=True,
                            env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
-                                "GIT_COMMITTER_EMAIL": "t@example.com", "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+                                "GIT_COMMITTER_EMAIL": "t@example.com", "PATH": os.environ.get("PATH", ""),
                                 "HOME": str(self.root)})
         self.call("Bash", {"command": command}, output)
 
@@ -100,11 +113,11 @@ class Session:
 PASS = "3 passed in 0.10s"
 
 
-def _bump(repo: Path, sed: str, capsys: pytest.CaptureFixture[str]) -> str:
+def _bump(repo: Path, sed: str, edit: tuple[str, str, str], capsys: pytest.CaptureFixture[str]) -> str:
     """Tests pass, a command changes files, it is committed quietly, and pushed: what is said."""
     s = Session(repo)
     s.bash("pytest -q", PASS)
-    s.bash(sed)
+    s.bash(sed, edit=edit)
     s.bash("git commit -q -am release")
     s.bash("git push origin feature")
     return s.said(capsys)
@@ -112,17 +125,20 @@ def _bump(repo: Path, sed: str, capsys: pytest.CaptureFixture[str]) -> str:
 
 def test_a_release_version_bump_is_not_untested_code(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # The three version-bump messages of the review: `sed` on the version, `git commit -q`, a push.
-    assert _bump(repo, "sed -i.bak 's/\"version\": \"1.4.2\"/\"version\": \"1.4.3\"/' package.json && rm package.json.bak", capsys) == ""
+    assert _bump(repo, "sed -i.bak 's/\"version\": \"1.4.2\"/\"version\": \"1.4.3\"/' package.json && rm package.json.bak",
+                 ("package.json", '"version": "1.4.2"', '"version": "1.4.3"'), capsys) == ""
 
 
 def test_a_code_change_made_the_same_way_is_still_untested(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    said = _bump(repo, "sed -i.bak 's/round(sum(xs), 1)/round(sum(xs), 2)/' app.py && rm app.py.bak", capsys)
+    said = _bump(repo, "sed -i.bak 's/round(sum(xs), 1)/round(sum(xs), 2)/' app.py && rm app.py.bak",
+                 ("app.py", "round(sum(xs), 1)", "round(sum(xs), 2)"), capsys)
     assert said.startswith("assurance · stop and check: pushed at ")
 
 
 def test_a_dependency_bump_is_not_a_version_field(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # It changes what runs: a version number changed, and not the project's own.
-    said = _bump(repo, "sed -i.bak 's/4.17.20/4.17.21/' package.json && rm package.json.bak", capsys)
+    said = _bump(repo, "sed -i.bak 's/4.17.20/4.17.21/' package.json && rm package.json.bak",
+                 ("package.json", "4.17.20", "4.17.21"), capsys)
     assert said.startswith("assurance · stop and check: pushed at ")
 
 
@@ -159,7 +175,8 @@ def test_a_commit_it_cannot_identify_leaves_the_code_unknown(repo: Path, capsys:
     # session's, and falling back to the current commit compared the change with itself.
     s = Session(repo)
     s.bash("pytest -q", PASS)
-    s.bash("sed -i.bak 's/round(sum(xs), 1)/round(sum(xs), 2)/' app.py && rm app.py.bak")
+    s.bash("sed -i.bak 's/round(sum(xs), 1)/round(sum(xs), 2)/' app.py && rm app.py.bak",
+           edit=("app.py", "round(sum(xs), 1)", "round(sum(xs), 2)"))
     s.bash("git commit -q -am one && git commit -q --allow-empty -m two")
     s.bash("git push origin feature")
     assert s.said(capsys).startswith("assurance · stop and check: pushed at ")
@@ -170,7 +187,8 @@ def test_a_change_it_cannot_read_is_never_settled(repo: Path, capsys: pytest.Cap
     (repo / "app.py").write_text(CODE.replace(", 1)", ", 7)"), encoding="utf-8")
     s = Session(repo)
     s.bash("pytest -q", PASS)
-    s.bash("sed -i.bak 's/\"version\": \"1.4.2\"/\"version\": \"1.4.3\"/' package.json && rm package.json.bak")
+    s.bash("sed -i.bak 's/\"version\": \"1.4.2\"/\"version\": \"1.4.3\"/' package.json && rm package.json.bak",
+           edit=("package.json", '"version": "1.4.2"', '"version": "1.4.3"'))
     s.bash("git checkout -- .")
     s.bash("git push origin feature")
     assert s.said(capsys).startswith("assurance · stop and check: pushed at ")
