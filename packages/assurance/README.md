@@ -64,6 +64,7 @@ never waits on PyPI.
 |---|---|
 | `assurance audit` | what did a Claude Code session actually do, and what did it skip? |
 | `assurance hook` | install, remove or check the Stop hook that runs the audit after every turn |
+| `assurance notices` | after each thing the hook said, did the next turn do what it asked? |
 | `assurance serve` | a local endpoint any agent sends its traces or runs to, and any workflow asks for a run's audit |
 | `assurance reach` | what does a change to this file reach, by a code graph, and how far behind the code is that graph? |
 | `assurance diff` / `assurance check` | did the work cover what it was supposed to, and what did it miss? |

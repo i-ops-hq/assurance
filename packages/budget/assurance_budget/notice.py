@@ -67,6 +67,7 @@ from assurance_budget.sessions import (
     strip_heredoc_bodies,
     tree_rewrites,
 )
+from assurance_budget.world import settled
 
 NOTE = "note"
 SUGGESTED_REVIEW = "suggested review"
@@ -208,6 +209,14 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
     rules = declared if declared is not None else Declared()
     asked = _Asked(session, rules)
     pending = _Edits()  # code edited since the last passing test or check
+    passes: list[int] = []  # each passing test or check of the project, by index into `calls`
+
+    def tested(at: int) -> _Edits:
+        """`pending` at `calls[at]`, or none when the code then is code a check passed on: back to it,
+        or different only in version fields (`assurance_budget.world`). Read only when it matters."""
+        if not pending.paths or settled(calls, session.cwd, at, passes, lambda path: not _is_not_code(path)) is None:
+            return pending
+        return _Edits()
     last_edit: tuple[str, float | None, int, int] | None = None  # label, time, index, line
     runs: list[_Run] = []  # tests and checks of the project after the last code edit
     every: list[_Run] = []  # the project's tests and checks, edit or none
@@ -240,6 +249,7 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
                     runs.append(run)
             if run.outcome == "passed" and not run.elsewhere and run.noun != "scan":  # a scan checks something else
                 pending.paths.clear()
+                passes.append(i)
             # A run elsewhere is read on, as any other command, and so is one that also ships:
             # `terraform validate && terraform apply`, `go build ./... && git push`.
             if not run.elsewhere and (call.error or not ship_action(command, call.branch, session.cwd, call.cwd)):
@@ -251,7 +261,7 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
         between: dict[str, int] = {}
         if last_edit is not None:
             between = dict(_unclassified_counts(calls[last_edit[2] + 1 : i], declared))
-            reasons = _ship_reasons(pending, last_edit, runs, rules, asked, between, anywhere)
+            reasons = _ship_reasons(tested(i), last_edit, runs, rules, asked, between, anywhere)
         fresh = [reason for reason in reasons if reason.evidence > told][:1]
         news = [(seq, path) for seq, path in protected if seq > told]
         if fresh or news:  # the last notice already covered anything else this would say
@@ -283,7 +293,7 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
         failed = [run for run in _failures(runs, rules) if run.seq > boundary]
         findings.extend(_Finding(run.seq, _failure_phrase(run, last_edit, rules), _ASK_FIX) for run in failed)
         if not failed:
-            claim = _claim(session, boundary, pending, runs, last_edit, declared)
+            claim = _claim(session, boundary, tested(len(calls) - 1), runs, last_edit, declared)
             if claim is not None:
                 findings.append(claim)
     else:
@@ -291,7 +301,7 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
         if contradicted is not None:
             findings.append(contradicted)
     if not findings:
-        return _note(session, boundary, pending, runs, every, rules, declared)
+        return _note(session, boundary, tested(len(calls) - 1), runs, every, rules, declared)
     unclassified: dict[str, int] = {}
     for finding in findings:
         unclassified.update(finding.unclassified)

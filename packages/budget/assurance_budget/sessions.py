@@ -547,6 +547,11 @@ class ToolCall:
     differs from the session's once the shell has moved and stayed. `branch` is still the session
     folder's: Claude Code records the project's branch on every message, wherever the shell is."""
     seq: int = -1
+    before: str | None = None
+    """For an Edit or Write: the file as Claude Code found it on disk just before (`originalFile`, empty
+    for a file it created); None when the transcript does not say."""
+    after: str | None = None
+    """For an Edit or Write: the file as it was left; None when the transcript does not say."""
     """The line of the transcript that made the call, counted from the first line read."""
     exit_known: bool | None = None
     """Whether `error` is the command's exit status. None leaves it to the tool: Bash's is, the
@@ -670,6 +675,15 @@ def _typed_prompt(record: Mapping[str, Any], content: Any, seq: int, at: float |
 
 
 @dataclass(frozen=True)
+class Spoken:
+    """One finding this tool's Stop hook said: the transcript line it is on, when, and its words."""
+
+    seq: int
+    at: float | None
+    text: str
+
+
+@dataclass(frozen=True)
 class Session:
     """A Claude Code session transcript, reduced to what an audit can say about it."""
 
@@ -700,6 +714,9 @@ class Session:
     notes: tuple[int, ...] = ()
     """The line of each of its earlier notes (`assurance · note: …`). A note is not a notice: it tells
     you what is not yet verified and asks nothing, so a push after it is still news."""
+    spoken: tuple[Spoken, ...] = ()
+    """Each finding the Stop hook said in this session, notes and notices alike, with its line and time:
+    what `assurance notices` follows up."""
     last_text: tuple[int, str] = (-1, "")
     """Claude's last message that was text only, and its line."""
     setup: Setup = field(default_factory=Setup)
@@ -968,10 +985,44 @@ def _first_cwd(fh: Any, limit: int) -> str | None:
     return None
 
 
+#: Past this size a file's content is not kept from the transcript: its edits stay events, as before.
+_CONTENT_MAX = 1_000_000
+
+
+def _written(result: Any) -> tuple[str | None, str | None] | None:
+    """What an Edit, MultiEdit or Write left a file as, from Claude Code's record of the call
+    (`toolUseResult`): the file before (`originalFile`, read from disk by Claude Code, not said by the
+    model) and after. None when the record is not one of those, or too large to keep."""
+    if not isinstance(result, dict) or not isinstance(result.get("filePath"), str):
+        return None
+    original = result.get("originalFile")
+    if isinstance(result.get("content"), str) and result.get("type") in ("create", "update"):
+        before = original if isinstance(original, str) else ("" if result.get("type") == "create" else None)
+        after: str | None = result["content"]
+    elif isinstance(original, str) and isinstance(result.get("oldString"), str) and isinstance(result.get("newString"), str):
+        before, old, new = original, result["oldString"], result["newString"]
+        if old not in original:
+            return None
+        after = original.replace(old, new) if result.get("replaceAll") else original.replace(old, new, 1)
+    elif isinstance(original, str) and isinstance(result.get("edits"), list):
+        before, after = original, original
+        for edit in result["edits"]:
+            old, new = (edit.get("old_string"), edit.get("new_string")) if isinstance(edit, dict) else (None, None)
+            if not isinstance(old, str) or not isinstance(new, str) or old not in after:
+                return None
+            after = after.replace(old, new) if edit.get("replace_all") else after.replace(old, new, 1)
+    else:
+        return None
+    if before is not None and len(before) > _CONTENT_MAX or after is not None and len(after) > _CONTENT_MAX:
+        return None
+    return before, after
+
+
 def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     pending: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     results: dict[str, tuple[bool, str, bool]] = {}  # error, text, refused
+    contents: dict[str, tuple[str | None, str | None]] = {}  # before, after, for an Edit or Write
     session_id = ""
     started: float | None = None
     ended: float | None = None
@@ -987,6 +1038,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     prompts: list[int] = []
     notices: list[int] = []
     notes: list[int] = []
+    spoken: list[Spoken] = []
     last_text: tuple[int, str] = (-1, "")
     last_prompt: Prompt | None = None
     stop_messages: list[str] = []
@@ -1036,6 +1088,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 attached_reads.append((len(order), attached["filename"]))
             elif kind == "attachment" and isinstance(attached, dict) and _own_stop_notice(attached):
                 (notes if str(attached["content"]).startswith(NOTE_HEAD) else notices).append(lines)
+                spoken.append(Spoken(lines, at, str(attached["content"])))
             if kind == "attachment" and isinstance(attached, dict) and _own_stop_message(attached):
                 stop_messages.append(str(attached["content"]))
             if kind == "attachment" and isinstance(attached, dict):
@@ -1116,6 +1169,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 _mark(f"user content {ctype}")
                 continue
             saw_result = False
+            written = _written(record.get("toolUseResult"))
             for block in content:
                 if not isinstance(block, dict):
                     continue
@@ -1127,6 +1181,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                 is_error = bool(block.get("is_error", False))
                 if tool_id in pending:
                     results[tool_id] = (is_error, text, _refused(record, is_error, text))
+                    if written is not None and not is_error:
+                        contents[tool_id] = written
                 else:
                     unmatched_results += 1
             if saw_result:
@@ -1170,6 +1226,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
                     branch=str(meta.get("branch") or ""),
                     cwd=str(meta.get("cwd") or ""),
                     seq=int(meta.get("seq", -1)),
+                    before=contents.get(tool_id, (None, None))[0],
+                    after=contents.get(tool_id, (None, None))[1],
                 )
             )
         else:
@@ -1207,6 +1265,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
         prompts=tuple(prompts),
         notices=tuple(notices),
         notes=tuple(notes),
+        spoken=tuple(spoken),
         last_text=last_text,
         setup=setup.done(),
         last_prompt=last_prompt,

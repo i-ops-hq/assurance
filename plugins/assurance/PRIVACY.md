@@ -14,20 +14,27 @@ package the plugin runs.
 - **Its settings, if you have made any:** `.assurance/config.toml` in the project,
   `~/.config/assurance/config.toml` (on Windows, `%APPDATA%\assurance\config.toml`), and
   `ASSURANCE_MAX_*` environment variables.
+- **The project's own script files**, at its top: `package.json`, a `Makefile`, a `justfile`,
+  `composer.json`, `deno.json`, to learn which of its scripts run tests.
+- **A code file a shell command changed, and its earlier version in git**, only when the hook is
+  about to say something about it: the file on disk, and `git show` and `git reflog`, read-only, to
+  tell whether the change was a version number or code a test already passed on. An Edit or Write is
+  compared from the transcript, which already records the file before and after.
 
 A transcript holds whatever the session held, which can include personal data.
 
 ## What it uses it for
 
-To find the edits Claude made, the tests and checks that ran after them, and whether they passed;
+To find the edits Claude made, what each one changed, the tests and checks that ran after them, and
+whether they passed;
 to compare what the session did with the files, tests and commands your last prompt names, and with
 the rules in your settings; to list which tools, MCP servers, skills and hooks the session used, and
 which it had and never used; and to tell you and Claude what it found. Nothing else.
 
 ## How long it keeps it
 
-It keeps nothing. It works in memory, writes no files, and is done when the hook or the skill
-finishes. uv keeps the downloaded `assurance` package in its own cache, which holds no session data.
+It keeps nothing. It works in memory, writes no files, runs nothing that changes the repository,
+and is done when the hook or the skill finishes. uv keeps the downloaded `assurance` package in its own cache, which holds no session data.
 
 ## What it sends
 

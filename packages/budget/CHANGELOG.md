@@ -1,3 +1,26 @@
+# 0.2.23
+
+- **`assurance notices`: whether anything followed what the hook said.** After each finding the Stop
+  hook said, it looks at the next turn (the nudged continuation and the turn the person started) and
+  asks one question: for a failure, did a test or check of the project pass; for a protected path,
+  was it changed again; for anything else, did a test or check of the project run. A refused run did
+  not run, and a run of no tests verified nothing. It reports how many findings were followed, by
+  level, with the latest few and what came after each, from the transcripts on this machine over
+  `--since` (30 days by default); `--json` for a program. *Followed by*, never *caused by*. Nothing is
+  sent anywhere. On the seven messages of the 2026-10-21 hostile review it scores 2 of 7, as the
+  review judged by hand.
+- **The hook reads what changed, not only that something did.** Before it calls code untested, at a
+  push, merge, publish, deploy or commit, and at the end of a turn, it compares the code with each
+  moment a check of the project passed. When every code file changed since is back to its content
+  then, or differs only in version fields (a line whose key is a version, or the project's own version
+  number changed the same way elsewhere), the code is tested and nothing is said. A dependency bump is
+  new code. An Edit or Write is compared from the transcript, which records the file Claude Code found
+  on disk before it and what it left; a file a shell command changed is read from disk, and its
+  earlier version from git, at the commit the session made, found from what `git commit` printed or,
+  for `git commit -q`, from the reflog by time. A change it cannot read, or a commit it cannot
+  identify, leaves the code untested. A release version bump made with `sed` and pushed, and a file
+  rewritten to content that had already passed, are no longer called untested.
+
 # 0.2.22
 
 - **The test commands enterprise stacks type are recognised.** Probing what a Java bank, a Django shop
