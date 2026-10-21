@@ -14,6 +14,18 @@ A failure is shown as the runner printed it: the test that failed and its count 
 sub-agents counts as the session's: a test a sub-agent ran, or a file it edited, is read from the
 sub-agent's own transcript beside the session's.
 
+**It reads what changed, not only that something did.** Before it calls code untested, it compares
+the code with the last moment a test or check passed: a file put back to content that passed is
+tested, and a change confined to version fields (`"version": "1.4.3"`, `version = "0.1.31"`,
+`<version>`, and the same version number changed the same way elsewhere) is not new code. A
+dependency bump is new code. Edits and writes are compared from the transcript, which records each
+file before and after; a file changed by a shell command is read from disk, and its earlier version
+from git. Anything it cannot read stays untested.
+
+**`assurance notices` says whether any of it helped:** after each thing the hook said, did the next
+turn run the test, fix the failure or put the protected file back? Read from the transcripts on this
+machine, over the last 30 days by default; nothing is sent anywhere.
+
 Otherwise it stays quiet: edits to prose and assets (`.md`, images, `LICENSE`, …) need no test. It says
 each finding once. A test piped into `tail` or followed by `; echo` doesn't count as passed: its exit
 status is the other command's, so the result is read from the runner's summary line or reported as

@@ -19,9 +19,9 @@ requires-python = ">=3.10"
 # pinned version named a minimum rather than what ran. Exact, one version is one audit; a budget fix
 # then ships only with a release of this package beside it.
 dependencies = [
-  "assurance-cli>=0.6.6",
+  "assurance-cli>=0.6.7",
   "assurance-deps>=0.2.4",
-  "assurance-budget==0.2.22",
+  "assurance-budget==0.2.23",
   "assurance-authority>=0.1.4",
   "assurance-reach>=0.1.1",
 ]
