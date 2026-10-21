@@ -1,7 +1,6 @@
 # Privacy
 
-This covers the Assurance plugin for Claude Code: its Stop hook, its `/assurance:audit` skill, and
-its `/assurance:board` skill, which reads nothing, runs nothing and only tells you about Rooms.
+This covers the Assurance plugin for Claude Code: its Stop hook and its `/assurance:audit` skill.
 The code it describes is in this folder and in the [`assurance`](https://pypi.org/project/assurance/)
 package the plugin runs.
 
