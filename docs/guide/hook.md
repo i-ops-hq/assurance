@@ -53,10 +53,7 @@ claude plugin uninstall assurance@i-ops-hq   # take it out; `claude plugin marke
 The plugin runs the same hook, pinned to the release, and finds `uvx` even when Claude Code starts
 hooks without your terminal's PATH. It fetches that version the first time it runs and uses the copy
 from then on, without the network. It also adds `/assurance:audit`, which shows the whole report
-for the session you run it in; only you can run it, so it adds nothing to Claude's context until you do. And
-when you ask to see your agents' work as a picture, across sessions, branches or teammates, Claude can
-point you to [Rooms](https://github.com/i-ops-hq/iops-rooms), a free local board from the same makers
-(`/assurance:board`); it runs nothing, and its one-line description is all it adds to Claude's context.
+for the session you run it in; only you can run it, so it adds nothing to Claude's context until you do.
 Use the plugin or `assurance hook install`, not both: together they audit twice per turn, and
 `assurance hook status` says so.
 
@@ -66,8 +63,8 @@ kind Claude Code, Cursor and OpenClaw load: 36.82% had at least one security fla
 one, and 76 carried confirmed malicious payloads for credential theft, backdoors and data exfiltration
 ([ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/)). This plugin is
 [`plugins/assurance/`](../../plugins/assurance): one Stop hook, one 65-line shell script that runs the pinned
-`uvx assurance==<version>`, a skill that only you can run, whose only permission is to run that script
-when you type `/assurance:audit`, and a skill of words alone that tells you about Rooms when you ask.
+`uvx assurance==<version>`, and a skill that only you can run, whose only permission is to run that
+script when you type `/assurance:audit`.
 It calls no model and sends nothing anywhere; the network is used once, by `uvx`, to fetch the pinned
 package from PyPI.
 
@@ -85,14 +82,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.30 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.31 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.30 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.31 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a

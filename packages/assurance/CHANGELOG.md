@@ -1,3 +1,10 @@
+# 0.1.31
+
+- **The plugin offers one skill, `/assurance:audit`.** The `board` skill ran nothing and existed to
+  point to Rooms, a different product, so half of what a new user saw in the plugin's menu was an
+  advertisement. It is removed, and the plugin's README, privacy note and the hook guide no longer
+  mention it. Nothing else changes: `assurance-budget` stays at 0.2.22, pinned exactly.
+
 # 0.1.30
 
 - **Requires `assurance-budget` 0.2.22, pinned exactly:** Maven, Gradle, Bazel, Django, Rails, monorepo
