@@ -1,3 +1,9 @@
+# 0.1.32
+
+- **No credential reaches the git subprocess.** `assurance-budget` 0.2.24 hands git an explicit list
+  of variables instead of the whole environment. Nothing else changes; 0.1.31 was held in review and
+  never went live, so this is what 0.1.31's work ships as.
+
 # 0.1.31
 
 - **The plugin offers one skill, `/assurance:audit`.** The `board` skill ran nothing and existed to

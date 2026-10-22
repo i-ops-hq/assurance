@@ -204,13 +204,31 @@ def _committed_at(cwd: str, at: float) -> str | None:
     return found[0] if len(set(found)) == 1 else None
 
 
+# What git needs to run, and nothing else. Read by name, never copied wholesale.
+_GIT_ENV_KEYS = ("PATH", "HOME", "USERPROFILE", "SystemRoot", "SYSTEMROOT", "LOCALAPPDATA", "APPDATA",
+                 "TEMP", "TMP", "LANG", "LC_ALL")
+
+
+def _git_env() -> dict[str, str]:
+    """Only the variables git needs, copied one key at a time.
+
+    This used to be `{**os.environ, ...}`, which hands every variable in the session — tokens, API
+    keys, cloud credentials — to a child process that has no use for any of them. Anthropic's plugin
+    directory held 0.1.31 for it, reason "Update adds credential forward", and the hold was right.
+    The Windows keys are here because git and the C runtime fail without them, which is how the
+    previous shortcut got written in the first place."""
+    env = {key: os.environ[key] for key in _GIT_ENV_KEYS if key in os.environ}
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
 def _git(cwd: str, *args: str) -> str | None:
     """What a read-only git command printed in `cwd`, or None. It never takes a lock, never waits more
     than a few seconds, and never fails the hook."""
     try:
         done = subprocess.run(
-            ["git", "-C", cwd, *args], capture_output=True, timeout=3, check=False,
-            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"},
+            ["git", "-C", cwd, *args], capture_output=True, timeout=3, check=False, env=_git_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

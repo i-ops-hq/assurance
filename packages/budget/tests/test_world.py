@@ -61,10 +61,11 @@ class Session:
     def prompt(self, text: str) -> None:
         self.lines.append({**self._at(), "type": "user", "message": {"role": "user", "content": text}})
 
-    def call(self, name: str, tool_input: dict[str, Any], output: str = "ok", result: dict[str, Any] | None = None) -> None:
+    def call(self, name: str, tool_input: dict[str, Any], output: str = "ok", result: dict[str, Any] | None = None,
+             at: dict[str, Any] | None = None) -> None:
         self.n += 1
         tid = f"t{self.n}"
-        at = self._at()
+        at = at or self._at()
         self.lines.append({**at, "type": "assistant", "gitBranch": "feature", "message": {"role": "assistant", "content": [
             {"type": "tool_use", "id": tid, "name": name, "input": tool_input}]}})
         record: dict[str, Any] = {**at, "type": "user", "message": {"role": "user", "content": [
@@ -74,13 +75,21 @@ class Session:
         self.lines.append(record)
 
     def bash(self, command: str, output: str = "ok",
-             edit: tuple[str, str, str] | None = None) -> None:
+             edit: tuple[str, str, str] | None = None, same_second: bool = False) -> None:
         """Runs it for real in the repository, then records it.
 
         `edit` is (file, before, after): the same substitution the command describes, applied in
         Python. The transcript still records the command verbatim, which is what the hook reads, and
         the file still changes on disk — but `sed` and `rm` do not exist on Windows, where four of
-        these tests failed on every Python version while passing on macOS and Linux."""
+        these tests failed on every Python version while passing on macOS and Linux.
+
+        The stamp is taken BEFORE the command runs. That is what Claude Code does — the tool_use
+        record is written when the call is made, not when it returns — and it is the only way these
+        tests are not a race: `_committed_at` looks for commits in [at, at+120], so a commit made
+        before the stamp falls outside the window. With the stamp taken afterwards that held only
+        while both landed in the same clock second, and two different tests lost that coin toss on
+        two different CI runners, each on one job of twelve."""
+        at = self._at()
         if edit is not None:
             name, before, after = edit
             path = self.root / name
@@ -88,11 +97,18 @@ class Session:
             assert before in text, f"{name} does not contain {before!r}"
             path.write_text(text.replace(before, after, 1), encoding="utf-8")
         elif command not in ("pytest -q", "git push origin feature"):
-            subprocess.run(command, shell=True, cwd=self.root, check=True, capture_output=True,
-                           env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
-                                "GIT_COMMITTER_EMAIL": "t@example.com", "PATH": os.environ.get("PATH", ""),
-                                "HOME": str(self.root)})
-        self.call("Bash", {"command": command}, output)
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@example.com", "PATH": os.environ.get("PATH", ""),
+                   "HOME": str(self.root)}
+            if same_second:
+                # Two commits have to share a clock second for the reflog to be unable to tell them
+                # apart. Left to the wall clock that is true almost always and false occasionally:
+                # it failed once on macOS 3.10 while passing on the other eleven CI jobs. Pinning
+                # both to one timestamp makes the case the test is named for happen every time.
+                stamp = f"{int(time.time())} +0000"
+                env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = stamp
+            subprocess.run(command, shell=True, cwd=self.root, check=True, capture_output=True, env=env)
+        self.call("Bash", {"command": command}, output, at=at)
 
     def write(self, name: str, content: str) -> None:
         """A Write, done for real, recorded with what Claude Code records: the file before and after."""
@@ -177,7 +193,7 @@ def test_a_commit_it_cannot_identify_leaves_the_code_unknown(repo: Path, capsys:
     s.bash("pytest -q", PASS)
     s.bash("sed -i.bak 's/round(sum(xs), 1)/round(sum(xs), 2)/' app.py && rm app.py.bak",
            edit=("app.py", "round(sum(xs), 1)", "round(sum(xs), 2)"))
-    s.bash("git commit -q -am one && git commit -q --allow-empty -m two")
+    s.bash("git commit -q -am one && git commit -q --allow-empty -m two", same_second=True)
     s.bash("git push origin feature")
     assert s.said(capsys).startswith("assurance · stop and check: pushed at ")
 
@@ -217,3 +233,32 @@ def test_anything_else_is_not(before: str, after: str) -> None:
     from assurance_budget.world import _key_pairs, _version_only
 
     assert not _version_only(before, after, _key_pairs(before, after))
+
+
+def test_git_is_handed_only_what_it_needs_never_the_whole_environment() -> None:
+    """0.1.31 was held by Anthropic's plugin directory — "Update adds credential forward" — because
+    this ran git with `env={**os.environ, ...}`. A read-only `git log` has no use for a token, and a
+    child process that never receives one cannot leak it. Read by name, so a new variable in the
+    session is not silently forwarded tomorrow."""
+    import os as _os
+
+    from assurance_budget.world import _GIT_ENV_KEYS, _git_env
+
+    secrets = {"GITHUB_TOKEN": "ghp_x", "AWS_SECRET_ACCESS_KEY": "s", "OPENAI_API_KEY": "sk-x",
+               "ANTHROPIC_API_KEY": "sk-ant-x", "NPM_TOKEN": "npm_x"}
+    before = {k: _os.environ.get(k) for k in secrets}
+    try:
+        _os.environ.update(secrets)
+        env = _git_env()
+        assert not (set(env) & set(secrets)), sorted(set(env) & set(secrets))
+        assert set(env) <= set(_GIT_ENV_KEYS) | {"GIT_OPTIONAL_LOCKS", "GIT_TERMINAL_PROMPT"}
+        assert env["GIT_OPTIONAL_LOCKS"] == "0" and env["GIT_TERMINAL_PROMPT"] == "0"
+        # PATH has to survive or git cannot be found at all, which is how this started.
+        if "PATH" in _os.environ:
+            assert env.get("PATH") == _os.environ["PATH"]
+    finally:
+        for key, value in before.items():
+            if value is None:
+                _os.environ.pop(key, None)
+            else:
+                _os.environ[key] = value
