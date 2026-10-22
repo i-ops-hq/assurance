@@ -1,3 +1,9 @@
+# 0.5.8
+
+- **Requires `assurance-cli` 0.6.7.** The floor said 0.6.6 while the tree it is tested against held
+  0.6.7, so the version this package declares and the version it was verified with had drifted
+  apart. No behaviour changes.
+
 # 0.5.7
 
 - A `reach_tool`, so an agent can ask what a change would touch *before* it makes it. The answer is
