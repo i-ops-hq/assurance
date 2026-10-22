@@ -9,14 +9,20 @@ An agent edits a service, runs nothing, and pushes, or runs `kubectl apply` or a
 a module three teams depend on. It installs a package whose install script runs on your build machine.
 Each step succeeded, so the agent reports success.
 
-## Where Assurance sits
+## The workflow, with Assurance in it
 
+```mermaid
+flowchart LR
+    s0(["Change"])
+    s1["Agent edits code<br/>and infrastructure"]
+    A["🛡️ Assurance<br/>tests and scans passed?<br/>infra config untouched?"]
+    s3["Push, apply,<br/>migrate"]
+    s4(["Running"])
+    s0 --> s1 --> A --> s3 --> s4
+    style A stroke:#dc2626,stroke-width:3px
 ```
-agent session ─▶ git push / deploy / migrate over untested code ─▶ stop and check
-              ─▶ a change to infra or CI config not asked for     ─▶ suggested review
-before merge  ─▶ assurance reach: what does this change reach, by the code graph
-before install ─▶ assurance deps: what will this install run
-```
+
+The red box is Assurance. Everything around it is your workflow as it is today.
 
 ## Set it up
 
