@@ -61,10 +61,11 @@ class Session:
     def prompt(self, text: str) -> None:
         self.lines.append({**self._at(), "type": "user", "message": {"role": "user", "content": text}})
 
-    def call(self, name: str, tool_input: dict[str, Any], output: str = "ok", result: dict[str, Any] | None = None) -> None:
+    def call(self, name: str, tool_input: dict[str, Any], output: str = "ok", result: dict[str, Any] | None = None,
+             at: dict[str, Any] | None = None) -> None:
         self.n += 1
         tid = f"t{self.n}"
-        at = self._at()
+        at = at or self._at()
         self.lines.append({**at, "type": "assistant", "gitBranch": "feature", "message": {"role": "assistant", "content": [
             {"type": "tool_use", "id": tid, "name": name, "input": tool_input}]}})
         record: dict[str, Any] = {**at, "type": "user", "message": {"role": "user", "content": [
@@ -80,7 +81,15 @@ class Session:
         `edit` is (file, before, after): the same substitution the command describes, applied in
         Python. The transcript still records the command verbatim, which is what the hook reads, and
         the file still changes on disk — but `sed` and `rm` do not exist on Windows, where four of
-        these tests failed on every Python version while passing on macOS and Linux."""
+        these tests failed on every Python version while passing on macOS and Linux.
+
+        The stamp is taken BEFORE the command runs. That is what Claude Code does — the tool_use
+        record is written when the call is made, not when it returns — and it is the only way these
+        tests are not a race: `_committed_at` looks for commits in [at, at+120], so a commit made
+        before the stamp falls outside the window. With the stamp taken afterwards that held only
+        while both landed in the same clock second, and two different tests lost that coin toss on
+        two different CI runners, each on one job of twelve."""
+        at = self._at()
         if edit is not None:
             name, before, after = edit
             path = self.root / name
@@ -99,7 +108,7 @@ class Session:
                 stamp = f"{int(time.time())} +0000"
                 env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = stamp
             subprocess.run(command, shell=True, cwd=self.root, check=True, capture_output=True, env=env)
-        self.call("Bash", {"command": command}, output)
+        self.call("Bash", {"command": command}, output, at=at)
 
     def write(self, name: str, content: str) -> None:
         """A Write, done for real, recorded with what Claude Code records: the file before and after."""
