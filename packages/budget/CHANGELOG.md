@@ -1,3 +1,12 @@
+# 0.2.24
+
+- **Git is handed only the variables it needs, never the whole environment.** Reading what changed
+  in a file runs a read-only `git`, and 0.2.23 gave that child process `{**os.environ}` — every
+  token, API key and cloud credential in the session, to a command with no use for any of them.
+  Anthropic's plugin directory held the release for it ("Update adds credential forward") and the
+  hold was correct. The variables are now read by name, so a new secret in the session tomorrow is
+  not forwarded either.
+
 # 0.2.23
 
 - **`assurance notices`: whether anything followed what the hook said.** After each finding the Stop
