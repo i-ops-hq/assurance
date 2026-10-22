@@ -42,7 +42,7 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 python -m pip install --upgrade pip                 # see the note below — this one matters
 python -m pip install -e packages/core -e "packages/cli[dev]" -e "packages/mcp[dev]" \
                       -e packages/budget -e packages/authority -e "packages/deps[dev]" \
-                      -e packages/reach
+                      -e packages/reach -e packages/assurance
 
 python -m pytest                                    # every package's tests
 ```
