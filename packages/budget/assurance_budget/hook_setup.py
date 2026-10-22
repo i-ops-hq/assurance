@@ -283,7 +283,13 @@ def _backup_dir(env: Mapping[str, str]) -> Path:
 
 def _write(path: Path, text: str, *, scope: str, env: Mapping[str, str]) -> Path | None:
     """Write atomically. The file as it was is copied outside the repository first, so a backup
-    never shows up in `git status`; returns where that copy is."""
+    never shows up in `git status`; returns where that copy is.
+
+    A settings file that is a link is written where the link points, and the file keeps its mode.
+    Reported as #130: `~/.claude/settings.json` linked into a dotfiles repository was replaced by a
+    plain 644 file beside the link, so the repository never saw the hook and a 600 file was widened.
+    """
+    path = _target(path)
     backup = None
     crlf = False
     if path.exists():
@@ -298,8 +304,16 @@ def _write(path: Path, text: str, *, scope: str, env: Mapping[str, str]) -> Path
     # The file keeps the line endings it had. Written in text mode on Windows, every `\n` would
     # become `\r\n`, and a committed `.claude/settings.json` would change on every line.
     tmp.write_text(text.replace("\n", "\r\n") if crlf else text, encoding="utf-8", newline="")
+    if path.exists():
+        shutil.copymode(path, tmp)
     os.replace(tmp, path)
     return backup
+
+
+def _target(path: Path) -> Path:
+    """The file a settings path names: itself, or where its links lead. A link whose file is gone
+    still names that file, so writing through it puts the file back where the link expects it."""
+    return path.resolve() if path.is_symlink() else path
 
 
 # --- the command -----------------------------------------------------------------------------------
@@ -409,6 +423,8 @@ def main(
         )
     for scope, path, before_text, after_text, relaid in plans:
         print(f"{scope} settings: {_show(path)}")
+        if path.is_symlink():
+            print(f"  (a link: the file changed is {_show(_target(path))})")
         if relaid and after_text:
             print("  (this file is laid out by hand, so saving it re-indents lines whose settings do not change)")
         print(_diff(path, before_text, after_text), end="")
@@ -466,6 +482,9 @@ def _is_tty() -> bool:
 
 
 def _backup_then_delete(path: Path, *, scope: str, env: Mapping[str, str]) -> Path | None:
+    # Through a link, the file it points at is the one that held the hook: unlinking the link would
+    # leave the hook there for every machine that shares it. The link stays, for the next install.
+    path = _target(path)
     folder = _backup_dir(env)
     folder.mkdir(parents=True, exist_ok=True)
     backup = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{scope}-{path.name}"

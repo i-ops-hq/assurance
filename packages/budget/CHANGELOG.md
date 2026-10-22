@@ -1,3 +1,12 @@
+# Unreleased
+
+- **`hook install` and `hook remove` write through a linked settings file, and keep its mode.** A
+  `~/.claude/settings.json` linked into a dotfiles repository was replaced by a plain file beside the
+  link, so the repository, and every machine sharing it, never saw the hook; and a 600 settings file,
+  linked or not, came back 644. The file the link points at is now the one written, with the mode it
+  had, and the change shown names it. When removing the hook would leave nothing, that file is deleted
+  and the link kept, so the next install writes through it again (#130).
+
 # 0.2.24
 
 - **Git is handed only the variables it needs, never the whole environment.** Reading what changed

@@ -520,3 +520,65 @@ def test_a_file_keeps_its_line_endings(tmp_path: Path) -> None:
         assert _run(tmp_path, ["remove", "--yes"]) == 0
         assert path.read_bytes() == b'{' + ending + b'  "model": "opus"' + ending + b'}' + ending
         path.unlink()
+
+
+def _link_user_file(tmp_path: Path, data: object | None) -> Path:
+    """Make the user settings file a link into a dotfiles folder, as many people keep it; returns the
+    file the link points at."""
+    target = tmp_path / "dotfiles" / "settings.json"
+    if data is not None:
+        _write(target, data)
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    link = _user_file(tmp_path)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(target)
+    except OSError:  # Windows without the privilege to make links
+        pytest.skip("cannot make a symbolic link here")
+    return target
+
+
+def test_install_and_remove_go_through_a_linked_settings_file(tmp_path: Path) -> None:
+    # Reported as #130: the link was replaced by a plain file, so the dotfiles copy never had the hook.
+    target = _link_user_file(tmp_path, OTHER_TOOLS)
+    assert _run(tmp_path, ["install", "--yes"]) == 0
+    assert _user_file(tmp_path).is_symlink()
+    assert any(is_ours(h) for e in json.loads(target.read_text())["hooks"]["Stop"] for h in e["hooks"])
+    assert _run(tmp_path, ["remove", "--yes"]) == 0
+    assert _user_file(tmp_path).is_symlink()
+    assert json.loads(target.read_text(encoding="utf-8")) == OTHER_TOOLS
+    assert sorted(p.name for p in _user_file(tmp_path).parent.iterdir()) == ["settings.json"]
+
+
+def test_removing_the_only_setting_deletes_the_linked_file_and_keeps_the_link(tmp_path: Path) -> None:
+    # Unlinking the link instead would leave the hook in the file every machine shares.
+    target = _link_user_file(tmp_path, None)
+    assert _run(tmp_path, ["install", "--yes"]) == 0
+    assert target.is_file()
+    assert _run(tmp_path, ["remove", "--yes"]) == 0
+    assert not target.exists()
+    assert _user_file(tmp_path).is_symlink()
+    assert _run(tmp_path, ["install", "--yes"]) == 0  # the kept link leads the next install to the same file
+    assert target.is_file() and _user_file(tmp_path).is_symlink()
+
+
+def test_a_linked_file_is_named_in_the_change_it_shows(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    target = _link_user_file(tmp_path, OTHER_TOOLS)
+    assert _run(tmp_path, ["install", "--dry-run"]) == 0
+    # Through `_show`, as the command prints it: on Windows the temp directory sits under the home
+    # directory, so the path is abbreviated to `~\...` there and left absolute on macOS and Linux.
+    assert f"a link: the file changed is {hook_setup._show(target.resolve())}" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows keeps no POSIX mode bits to compare")
+@pytest.mark.parametrize("linked", [False, True])
+def test_a_file_keeps_its_mode(tmp_path: Path, linked: bool) -> None:
+    # A 600 settings file came back 644: the new file was made with the umask's mode, not the old one's.
+    path = _link_user_file(tmp_path, OTHER_TOOLS) if linked else _user_file(tmp_path)
+    if not linked:
+        _write(path, OTHER_TOOLS)
+    path.chmod(0o600)
+    assert _run(tmp_path, ["install", "--yes"]) == 0
+    # Read through the settings path, as Claude Code does: a link replaced by a new file fails here too.
+    assert _user_file(tmp_path).stat().st_mode & 0o777 == 0o600
