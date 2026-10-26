@@ -110,7 +110,7 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         if not whole and needs_earlier_lines(session, declared, set_aside=set_aside):
             session, whole = read_claude_code(transcript), True
         notice = stop_notice(session, declared, set_aside=set_aside)
-        if notice is not None and notice.level == NOTE and not whole and stretch_may_predate(session, declared):
+        if notice is not None and (notice.level == NOTE or notice.once_per_stretch) and not whole and stretch_may_predate(session, declared):
             # A note is said once per stretch of untested edits, and this stretch began before the
             # lines read. Whether a note was said before them is looked for, not parsed for: reading a
             # long session whole on every turn costs seconds, and a note kept back is the cheaper
@@ -141,6 +141,8 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     if nudge and notice.ask and not data.get("stop_hook_active"):  # a note asks nothing of Claude
         finding = notice.finding.replace("Claude's last message says", "Your last message says")
         context = f"Assurance audit of this session ({notice.level}): {_end_sentence(finding)}"
+        if notice.consequence:
+            context += f" {_end_sentence(notice.consequence)}"
         if declared_note:
             context += f" {declared_note}"
         context += f" {notice.ask}"
@@ -168,6 +170,8 @@ _UNDECLARABLE = frozenset({"python -", "python -c", "(inside $( ))", "(no comman
 def _notice_line(notice: Notice, declared_note: str) -> str:
     """The one line you see: the level first, then what happened."""
     line = _notice_head(notice)
+    if notice.consequence:
+        line += f" {_end_sentence(notice.consequence)}"
     if declared_note:
         return f"{line} {declared_note}"
     if notice.unclassified:

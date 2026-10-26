@@ -16,6 +16,12 @@ package the plugin runs.
   `ASSURANCE_MAX_*` environment variables.
 - **The project's own script files**, at its top: `package.json`, a `Makefile`, a `justfile`,
   `composer.json`, `deno.json`, to learn which of its scripts run tests.
+- **The project's code graph and CODEOWNERS**, only when the hook is about to say something: a
+  `graphify-out/graph.json` another tool wrote, if there is one, and `CODEOWNERS`, to say what the
+  change reaches and who owns it.
+- **The names of the files changed in the last 400 commits** (`git log --name-only`, read-only), only
+  when the hook is about to say something, to say what has changed together with the changed file.
+  No commit message, author or content is read.
 - **A code file a shell command changed, and its earlier version in git**, only when the hook is
   about to say something about it: the file on disk, and `git show` and `git reflog`, read-only, to
   tell whether the change was a version number or code a test already passed on. An Edit or Write is

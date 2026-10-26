@@ -22,6 +22,21 @@ dependency bump is new code. Edits and writes are compared from the transcript, 
 file before and after; a file changed by a shell command is read from disk, and its earlier version
 from git. Anything it cannot read stays untested.
 
+**It says what the untested change reaches.** With a code graph in the project
+(Graphify writes one to `graphify-out/graph.json`), the finding names how many files the change reaches, who owns them
+by CODEOWNERS, and which tests reach it, and asks for those tests rather than "the project's tests". A
+change nothing else depends on is not said at all; one that reaches a protected path or another
+owner's code is raised to a suggested review.
+
+**Without a graph, it says what has changed with it in git history.** Files that keep changing in the
+same commits are coupled, so the finding says, for example, *"in git history, formula.rb has changed
+together with test/formula_spec.rb in 18 of the 24 commits that changed it in the last 400"*, and,
+when no test command is known to run here, asks for those tests. It is history, not structure, and it
+is worded as history; it never raises a finding's level. It reads the last 400 commits, leaves out of
+the scoring any commit that touched more than 40 files, and names a file only when the two changed
+together at least 3 times and at least twice as often as chance would have them. A file that changes
+with everything is coupled to nothing. A repository with fewer than 30 commits says nothing about it.
+
 **`assurance notices` says whether any of it helped:** after each thing the hook said, did the next
 turn run the test, fix the failure or put the protected file back? Read from the transcripts on this
 machine, over the last 30 days by default; nothing is sent anywhere.
@@ -94,14 +109,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.32 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.33 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.32 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.33 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a

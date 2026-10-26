@@ -885,7 +885,11 @@ def transcript_has_note(path: Path) -> bool:
     for marker in (NOTE_HEAD.encode(), json.dumps(NOTE_HEAD)[1:-1].encode()):
         if any(b'"hook_system_message"' in line for line in _lines_containing(data, marker).values()):
             return True
-    return False
+    raised = (RAISED_HEAD.encode(), json.dumps(RAISED_HEAD)[1:-1].encode())
+    return any(
+        b'"hook_system_message"' in line and any(head in line for head in raised)
+        for line in _lines_containing(data, f"{NOTE_TAIL}.".encode()).values()
+    )
 
 
 def transcript_changes(path: Path, cwd: str) -> tuple[bool, frozenset[str]]:
@@ -1087,7 +1091,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
             ):
                 attached_reads.append((len(order), attached["filename"]))
             elif kind == "attachment" and isinstance(attached, dict) and _own_stop_notice(attached):
-                (notes if str(attached["content"]).startswith(NOTE_HEAD) else notices).append(lines)
+                (notes if _is_note(str(attached["content"])) else notices).append(lines)
                 spoken.append(Spoken(lines, at, str(attached["content"])))
             if kind == "attachment" and isinstance(attached, dict) and _own_stop_message(attached):
                 stop_messages.append(str(attached["content"]))
@@ -1386,6 +1390,17 @@ def _mcp_title(block: str, server: str) -> str:
 
 #: How a note opens: `notice.NOTE` as the hook writes it.
 NOTE_HEAD = "assurance · note:"
+
+
+#: How every note ends, raised or not (`notice._note`): a note raised to a suggested review by what the
+#: change reaches is still a note about untested code, so a push after it is still news
+#: (`Session.notes`), and it is said once per stretch.
+NOTE_TAIL = " before you commit or push"
+RAISED_HEAD = "assurance · suggested review:"
+
+
+def _is_note(content: str) -> bool:
+    return content.startswith(NOTE_HEAD) or (content.startswith(RAISED_HEAD) and f"{NOTE_TAIL}." in content)
 
 
 def _own_stop_notice(attached: Mapping[str, Any]) -> bool:

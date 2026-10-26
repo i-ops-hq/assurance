@@ -30,7 +30,7 @@ import re
 import shlex
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Sequence
 
 from assurance_budget.asked import NamedCommand, includes, names_cover, names_in, pattern_covers
@@ -40,6 +40,7 @@ from assurance_budget.sessions import (
     _git_subcommand,
     _SHELL_TOOLS,
     _WINDOWS_PATH,
+    NOTE_TAIL,
     Declared,
     Session,
     ToolCall,
@@ -67,6 +68,7 @@ from assurance_budget.sessions import (
     strip_heredoc_bodies,
     tree_rewrites,
 )
+from assurance_budget.consequence import Consequence, consequence
 from assurance_budget.world import settled
 
 NOTE = "note"
@@ -112,6 +114,12 @@ class Notice:
     unclassified: dict[str, int] = field(default_factory=dict)
     """Commands between the last code edit and the finding that could not be classified: one of
     them may be the project's own check, which only the person can declare."""
+    consequence: str = ""
+    """What the change reaches and who owns it (`assurance_budget.consequence`), said after the finding
+    and kept out of what says whether it was said before: a graph rebuilt is not a new finding."""
+    once_per_stretch: bool = False
+    """A note raised to a suggested review by what the change reaches: still said once per stretch of
+    untested edits, as a note is."""
 
 
 @dataclass
@@ -223,7 +231,7 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
     anywhere: list[_Run] = []  # the same wherever they ran: a test the prompt names counts where it ran
     protected: list[tuple[int, str]] = []  # (line, path): changed since the last prompt, protected, not asked for
     since_prompt = asked.prompt.seq if asked.prompt is not None else -1
-    shipped: tuple[ToolCall, str, list[_Finding], list[tuple[int, str]], dict[str, int]] | None = None
+    shipped: tuple[ToolCall, str, list[_Finding], list[tuple[int, str]], dict[str, int], list[str]] | None = None
     for i, call in enumerate(calls):
         if call.refused:
             continue
@@ -265,10 +273,13 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
         fresh = [reason for reason in reasons if reason.evidence > told][:1]
         news = [(seq, path) for seq, path in protected if seq > told]
         if fresh or news:  # the last notice already covered anything else this would say
-            shipped = (call, what, fresh, news, between)
+            # What the stop is about: the edits nothing has tested, else the edit its finding names. A
+            # protected path alone is said as itself, and a change already tested is not this one.
+            about = list(pending.paths) or ([last_edit[0]] if fresh and last_edit else [])
+            shipped = (call, what, fresh, news, between, about)
 
     if shipped is not None:
-        call, what, fresh, news, between = shipped
+        call, what, fresh, news, between, shipped_files = shipped
         parts = [reason.text for reason in fresh]
         asks = [reason.ask for reason in fresh]
         if news:
@@ -276,7 +287,10 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
             asks.append(_protected_ask(news))
         # What ran after the last code edit that could not be classified bears on any of these: one of
         # those commands may have been the project's own check.
-        return Notice(STOP_AND_CHECK, f"{what}{_at(call.at)} {', and '.join(parts)}", " ".join(asks), between if fresh else {})
+        stop = f"{what}{_at(call.at)} {', and '.join(parts)}"
+        reached = None if _said_before(session, STOP_AND_CHECK, stop) else _reaches(session, rules, shipped_files)
+        return Notice(STOP_AND_CHECK, stop, " ".join(asks) + _test_ask(reached, untested=bool(pending.paths)),
+                      between if fresh else {}, reached.phrase("The change") if reached else "")
 
     findings: list[_Finding] = []
     now = [(seq, path) for seq, path in protected if seq > boundary]
@@ -289,13 +303,16 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
             f"this turn changed {LIMITS_FILE}, so what it declares under [audit] is not used for this session",
             _ASK_CONFIG,
         ))
+    about_code = False  # whether a finding is about the last edit, rather than a path or a setting
     if last_edit is not None:
         failed = [run for run in _failures(runs, rules) if run.seq > boundary]
         findings.extend(_Finding(run.seq, _failure_phrase(run, last_edit, rules), _ASK_FIX) for run in failed)
+        about_code = bool(failed)
         if not failed:
             claim = _claim(session, boundary, tested(len(calls) - 1), runs, last_edit, declared)
             if claim is not None:
                 findings.append(claim)
+                about_code = True
     else:
         contradicted = _claim_over_a_failure(session, boundary, every)
         if contradicted is not None:
@@ -305,12 +322,65 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
     unclassified: dict[str, int] = {}
     for finding in findings:
         unclassified.update(finding.unclassified)
+    said = "; ".join(finding.text for finding in findings)
+    reached = None
+    if about_code and last_edit is not None and not _said_before(session, SUGGESTED_REVIEW, said):
+        reached = _reaches(session, rules, list(pending.paths) or [last_edit[0]])
     return Notice(
         SUGGESTED_REVIEW,
-        "; ".join(finding.text for finding in findings),
-        " ".join(dict.fromkeys(finding.ask for finding in findings)),
+        said,
+        " ".join(dict.fromkeys(finding.ask for finding in findings)) + _test_ask(reached, untested=bool(pending.paths)),
         unclassified,
+        reached.phrase("The change") if reached else "",
     )
+
+
+def _said_before(session: Session, level: str, finding: str) -> bool:
+    """Whether this finding was said in an earlier turn, as the hook decides it (`run_hook`): then it
+    is not said again, and what it reaches need not be read."""
+    heads = tuple(f"assurance · {name}: {finding}" for name in (level, LEGACY_LEVELS.get(level, level)))
+    return any(text.startswith(heads) for text in session.said)
+
+
+def _reaches(session: Session, rules: Declared, labels: Sequence[str]) -> Consequence | None:
+    """What the code these labels name reaches, read only now that something will be said."""
+    paths = [label if Path(label).is_absolute() else str(Path(session.cwd, label))
+             for label in labels if label and not label.startswith("files changed by")]
+    unnamed = next((label for label in labels if label.startswith("files changed by")), "")
+    if not paths or not session.cwd:
+        return None
+    windows = bool(_WINDOWS_PATH.match(session.cwd))
+    return consequence(session.cwd, paths, lambda file: any(pattern_covers(p, file, windows) for p in rules.must_not_touch),
+                       unnamed=unnamed, counts=lambda file: not _is_not_code(file))
+
+
+def _test_ask(reached: Consequence | None, untested: bool) -> str:
+    """For Claude: the tests the graph says reach the change, or else the ones git history says change
+    with it, and, while nothing has tested it, that they are the next thing to run."""
+    if reached is None:
+        return ""
+    if reached.tests:
+        tests = list(reached.tests[:5])
+        said = f" The code graph says {'this test reaches' if len(tests) == 1 else 'these tests reach'} it: {_listed(tests)}."
+    elif reached.history_tests:
+        tests = list(reached.history_tests[:5])
+        said = f" In git history, {'this test has' if len(tests) == 1 else 'these tests have'} changed together with it: {_listed(tests)}."
+    else:
+        return ""
+    return said + (f" Run {'it' if len(tests) == 1 else 'them'} first." if untested else "")
+
+
+def _tests_to_run(reached: Consequence | None) -> str:
+    """The tests a note asks for by name, and where that comes from: "" when it names none."""
+    if reached is None:
+        return ""
+    if reached.tests:
+        tests = list(reached.tests[:3])
+        return f"{_listed(tests)}, {'the test that reaches' if len(tests) == 1 else 'the tests that reach'} it in the code graph,"
+    if reached.history_tests:
+        tests = list(reached.history_tests[:3])
+        return f"{_listed(tests)}, {'the test that has' if len(tests) == 1 else 'the tests that have'} changed with it in git history,"
+    return ""
 
 
 def _note(
@@ -340,7 +410,22 @@ def _note(
         unclassified = dict(_unclassified_counts(session.tool_calls[pending.last_i + 1 :], declared))
         recognised = " it recognises" if unclassified else ""
         finding = f"no test or check{recognised} has passed since {edits}"
-    return Notice(NOTE, f"{finding}. Run {_to_run(rules, every)} before you commit or push", "", unclassified)
+    reached = _reaches(session, rules, list(pending.paths))
+    if reached is not None and reached.reaches_only_itself():
+        return None  # nothing else depends on it, by the graph: not worth a sentence
+    run = _to_run(rules, every)
+    if run == _ANY_TESTS:
+        # Only when no command is known to run here: a file name is not a command in every language, and
+        # a command that has passed in this session is the better thing to ask for.
+        run = _tests_to_run(reached) or run
+    said = reached.phrase("the change") if reached is not None else ""
+    if said:
+        finding += f"; {said}"
+    if reached is not None and reached.raises():
+        # It reaches a protected path, or code someone else owns: worth asking Claude, not only you.
+        ask = f"Run {run} for what you changed, or say plainly why they cannot run here."
+        return Notice(SUGGESTED_REVIEW, f"{finding}. Run {run}{NOTE_TAIL}", ask, unclassified, once_per_stretch=True)
+    return Notice(NOTE, f"{finding}. Run {run}{NOTE_TAIL}", "", unclassified)
 
 
 #: What a test run prints when its command was never there to run: naming it again would not help.
@@ -359,7 +444,10 @@ def _to_run(rules: Declared, every: list[_Run]) -> str:
     passed = [run for run in tests if run.outcome == "passed"]
     there = [run for run in tests if not any(words in run.tail for words in _NOT_THERE)]
     chosen = passed or there
-    return chosen[-1].label if chosen else "the project's tests"
+    return chosen[-1].label if chosen else _ANY_TESTS
+
+
+_ANY_TESTS = "the project's tests"
 
 
 def _ship_reasons(
