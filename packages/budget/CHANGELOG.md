@@ -1,4 +1,35 @@
-# Unreleased
+# 0.2.25
+
+- **A warning says what the untested change reaches.** "No test or check has passed since the last
+  edit to invoice.py" was a true sentence with no second half (inbound ledger row 58, heard three
+  times). When the project has a code graph (Graphify's `graphify-out/graph.json`), the finding now
+  says how many other files the change reaches within three hops and names two, who owns them by
+  CODEOWNERS, and which test files reach it; the note names those tests instead of "the project's
+  tests", and Claude is told to run them. A change that reaches nothing else is not worth a sentence,
+  and is not said. One that reaches a protected path, or code someone else owns, is raised from a
+  note to a suggested review. Without a graph the finding is what it was, with the changed file's
+  owners when CODEOWNERS names them. No edge is made: a dependency the graph does not hold is one this
+  does not claim, and one the graph only infers is counted as inferred, never named and never raises a
+  finding. What cannot be said is said: a file the graph does not hold, files a command changed
+  without naming them, a CODEOWNERS that cannot be read or cannot say who owns a file. The graph is
+  read only when something new will be said, under a 1.5-second budget, and a graph over 32 MB is not
+  begun, because a JSON read cannot be cut short; either way the finding says so and is still said.
+  A raised note is still a note: said once per stretch of untested edits, and a push after it is
+  still a stop. CODEOWNERS is read from the repository when Claude Code runs in a folder of it.
+  `assurance-budget` now depends on `assurance-reach`, which has no dependencies of its own.
+
+- **Without a graph, a warning says what has changed with the file in git history.** Almost no
+  repository has a code graph, and every one has its history: "in git history, formula.rb has
+  changed together with test/formula_spec.rb in 18 of the 24 commits that changed it in the last 400",
+  and, when no test command is known to run here, the note asks for those tests. A pair is coupled
+  only when it changed together at least 3 times and at least twice as often as chance (lift), so a
+  file that changes with everything is coupled to nothing; pairs are ranked by count times the
+  logarithm of lift, so neither the most frequent nor the rarest leads. A commit touching more than
+  40 files is left out of the scoring, and a repository with fewer than 30 commits says nothing. It is
+  said as history, never as "reaches" or "depends on", it never raises a finding's level, and where a
+  graph says something the graph's finding is the one said. `git log -z` is read alongside the graph,
+  under the same budget, and stopped past it: 18 to 35 ms on the six repositories it was tuned on,
+  the largest with 52,916 commits.
 
 - **`hook install` and `hook remove` write through a linked settings file, and keep its mode.** A
   `~/.claude/settings.json` linked into a dotfiles repository was replaced by a plain file beside the

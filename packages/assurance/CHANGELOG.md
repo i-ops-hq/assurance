@@ -1,3 +1,13 @@
+# 0.1.33
+
+- **A warning says what the untested change reaches.** With a code graph in the project, a finding
+  names how many files the change reaches, who owns them by CODEOWNERS, and which tests reach it, and
+  asks for those tests. A change nothing depends on is not said; one reaching a protected path or
+  another owner's code is raised to a suggested review. Without a graph, it says what has changed
+  together with the file in git history, as history, and asks for those tests. Also `hook
+  install` and `hook remove` now write through a linked settings file and keep its mode.
+  `assurance-budget` 0.2.25, pinned exactly.
+
 # 0.1.32
 
 - **No credential reaches the git subprocess.** `assurance-budget` 0.2.24 hands git an explicit list
