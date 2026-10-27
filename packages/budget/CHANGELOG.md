@@ -1,3 +1,30 @@
+# 0.2.27
+
+- **`assurance coupling` stops printing a file against its whole repository.** On a repository that
+  keeps a session log or a journal, 0.2.26 gave that file ten partners between 2.1x and 4.3x chance
+  — a runtime module, an API client, a publishing runbook. All true, none actionable. Lift was meant
+  to prevent exactly that and cannot, because lift is not null-invariant: its ceiling for a pair is
+  bounded by how often the more frequent file changes, so a file in 116 of 398 commits cannot reach
+  3.5x however perfectly a partner nests inside it, and a floor of 2.0 is most of its ceiling. That
+  is why a `CHANGELOG.md` does drop out and a journal does not — the guard holds at the extreme,
+  where a file is in *every* commit, and fails in the middle. A pair must now also have changed
+  together in at least 10% of the commits that changed either of them, which no frequency can
+  inflate. It is a floor per pair, not a verdict on a file: a journal is silenced against the
+  repository without being silenced against the one file it genuinely travels with. Measured, not
+  chosen — of the rows a reader could reach on two repositories, 241 of 693 and 84 of 800 go, and
+  the twelve among them that are source pairs are all the weak tail, three commits of a module's
+  thirty. Raising the lift floor could not have done this: in this repository's own history a
+  workflow file beside a test configuration *three* times outranks, by lift, a script beside its own
+  manifest thirty-one times.
+
+- **The same repository now gives the same report every time.** Five runs of `--all` on one
+  unchanged commit gave four different reports, two of them printing one cluster of six release
+  files three times over. Equal change-counts were left in set order and Python salts string hashing
+  per process, so the subjects were chosen differently on each run; the duplicate check could only
+  skip a subject whose strongest partner had already been taken, which collapses a pair but not a
+  clique of six. Ties now break by name. A report that ends with the command to check it cannot be a
+  different report each time it is asked.
+
 # 0.2.26
 
 - **`assurance coupling`: what usually changes with what you just changed, and did not this time.**
