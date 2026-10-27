@@ -1,3 +1,8 @@
+# 0.5.10
+
+- **Requires `assurance-cli` 0.6.9**, the version this tree is tested against, which describes
+  `assurance audit` as reading Claude Code or Codex. No behaviour changes here.
+
 # 0.5.9
 
 - **Requires `assurance-cli` 0.6.8**, the version this tree is tested against, which added the

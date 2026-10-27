@@ -58,13 +58,20 @@ def test_the_readme_lists_every_forwarded_subcommand() -> None:
         assert f"`assurance {name}`" in readme, name
 
 
-@pytest.mark.skipif(tomllib is None, reason="tomllib is Python 3.11+")
 def test_every_pinned_command_in_the_readmes_is_this_release() -> None:
     """The hook runs after every turn, so the READMEs pin it (`uvx assurance@X.Y.Z …`). A pin that
-    lags the release would have everyone who copies it run old code; one ahead would fail to install."""
+    lags the release would have everyone who copies it run old code; one ahead would fail to install.
+
+    The version is read with a regex rather than through `tomllib`, so this runs on 3.10 as well.
+    It used to skip there — which is the oldest Python this repo supports and the one the releases
+    are cut on, so the one gate that catches a half-moved pin only ever fired after the push, in CI.
+    A gate the author cannot run is a gate the author does not see.
+    """
     import re
 
-    version = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    found_version = re.search(r'^version = "([^"]+)"', (PACKAGE / "pyproject.toml").read_text(encoding="utf-8"), re.M)
+    assert found_version, "no version in the front door's pyproject.toml"
+    version = found_version.group(1)
     root = PACKAGE.parents[1]
     found = 0
     for readme in (root / "README.md", root / "docs" / "guide" / "hook.md", PACKAGE / "README.md", root / "packages" / "budget" / "README.md"):

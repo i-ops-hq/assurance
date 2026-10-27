@@ -36,6 +36,7 @@ from assurance_budget.notice import (
     stop_notice,
     stretch_may_predate,
 )
+from assurance_budget.codex import CODEX_SOURCE, find_latest_codex_session, is_codex, read_codex
 from assurance_budget.otel import TRACE_SOURCE, is_trace, read_trace
 from assurance_budget.outcome import outcome, outcome_lines
 from assurance_budget.record import RunRecord, is_run_record, model_lines, model_summary, read_run_record
@@ -69,6 +70,16 @@ EXIT_UNREADABLE = 2
 
 #: Transcript sources whose harness refuses an edit to a file the model has not read.
 _READ_BEFORE_EDIT_ENFORCED = frozenset({"claude-code"})
+#: What to call the agent whose session this is, in the report's first line. A source with no entry
+#: is named by its own `Session.source`, so a reader added later says what it read without this
+#: having to be edited — and never says "Claude Code" over somebody else's transcript.
+_AGENT_NAMES = {"claude-code": "Claude Code", CODEX_SOURCE: "Codex"}
+
+
+def _agent_name(source: str) -> str:
+    return _AGENT_NAMES.get(source, source or "Agent")
+
+
 #: How a run record's edits and commands are named in the report, rather than the tool each is read as.
 _RECORD_NAMES = {"Bash": "command", "Write": "edit", "Read": "read"}
 
@@ -238,18 +249,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="assurance audit",
         description=(
-            "Read a Claude Code session transcript, a run record any agent's own code can write "
-            "(assurance.run/1), or an OpenTelemetry trace of any agent, and say what it did — and, at "
-            "the same weight, what could not be classified or checked."
+            "Read a Claude Code transcript, a Codex rollout, a run record any agent's own code can "
+            "write (assurance.run/1), or an OpenTelemetry trace of any agent, and say what it did — "
+            "and, at the same weight, what could not be classified or checked."
         ),
     )
     parser.add_argument(
         "transcript",
         nargs="?",
         help=(
-            "Path to a Claude Code .jsonl transcript, a run record (assurance.run/1), or an OpenTelemetry "
-            "trace (OTLP JSON, or what the Python SDK's console exporter prints). Omit to use the latest "
-            "Claude Code session for cwd"
+            "Path to a Claude Code transcript, a Codex rollout, a run record (assurance.run/1), or an "
+            "OpenTelemetry trace (OTLP JSON, or what the Python SDK's console exporter prints) — which "
+            "it is, is read from the file. Omit to use the newest session either agent recorded for cwd"
         ),
     )
     parser.add_argument(
@@ -373,13 +384,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return EXIT_UNREADABLE
     else:
         cwd = Path.cwd()
-        path = find_latest_session(cwd)
+        path = _newest_session(cwd)
         if path is None:
-            looked = _looked_in()
             print(
-                f"assurance audit: no Claude Code session recorded for {cwd}. "
-                f"Looked in {looked}. Run it inside a project where you have used Claude Code, "
-                "pass a transcript path, or see a sample report with: assurance audit --demo",
+                f"assurance audit: no Claude Code or Codex session recorded for {cwd}. "
+                f"Looked in {_looked_in()} and {_codex_looked_in()}. Run it inside a project where "
+                "you have used one of them, pass a transcript path, or see a sample report with: "
+                "assurance audit --demo",
                 file=sys.stderr,
             )
             return EXIT_UNREADABLE
@@ -395,7 +406,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             if args.run is not None:
                 parser.error("--run picks a run in a run record (assurance.run/1) or a trace; this is neither")
-            session = read_claude_code(path)
+            # Both agents write `.jsonl`, and the search below may have found either, so which reader
+            # to use is decided from the file's first record and never from its name or its folder.
+            session = read_codex(path) if is_codex(path) else read_claude_code(path)
     except LogError as exc:
         print(f"assurance audit: {exc}", file=sys.stderr)
         return EXIT_UNREADABLE
@@ -806,7 +819,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     sid = session.session_id[:8] if session.session_id else "?"
     duration = _duration_phrase(report.get("duration_seconds"))
     where = session.cwd or str(session.path)
-    header = f"Agent run {session.session_id}" if run else f"Claude Code session {sid}"
+    header = f"Agent run {session.session_id}" if run else f"{_agent_name(session.source)} session {sid}"
     if duration:
         header += f" — {duration}"
     if where:
@@ -1120,6 +1133,21 @@ def _clock(at: float | None) -> str:
     return datetime.fromtimestamp(at).strftime("%H:%M")
 
 
+def _newest_session(cwd: Path) -> Path | None:
+    """The most recent session recorded for `cwd` by either agent.
+
+    Both are searched, and the newer file wins. Looking only where Claude Code writes would have
+    `assurance audit` say "no session recorded for this folder" to somebody who had just finished a
+    Codex run in it — true about one agent, and read as true about the folder.
+    """
+    found = [
+        path
+        for path in (find_latest_session(cwd), find_latest_codex_session(cwd))
+        if path is not None and path.is_file()
+    ]
+    return max(found, key=lambda path: path.stat().st_mtime) if found else None
+
+
 def _looked_in() -> Path:
     import os
 
@@ -1127,6 +1155,13 @@ def _looked_in() -> Path:
     if configured:
         return Path(configured).expanduser() / "projects"
     return Path.home() / ".claude" / "projects"
+
+
+def _codex_looked_in() -> Path:
+    import os
+
+    configured = os.environ.get("CODEX_HOME", "").strip()
+    return (Path(configured).expanduser() if configured else Path.home() / ".codex") / "sessions"
 
 
 if __name__ == "__main__":

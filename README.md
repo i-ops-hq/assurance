@@ -20,14 +20,16 @@ you, in plain sentences, what was done, what was skipped, and what it **could no
 
 ## Quick start
 
-Run this in any project where you've used Claude Code:
+Run this in any project where you've used **Claude Code** or **Codex**:
 
 ```bash
 uvx assurance audit                        # with uv: runs it without installing anything
 pip install assurance && assurance audit   # without uv
 ```
 
-Not using Claude Code yet? `uvx assurance audit --demo` shows the report on a bundled sample session.
+It reads the newest session either agent left for this folder — nothing to configure, and no flag
+saying which one you used. Used neither yet? `uvx assurance audit --demo` shows the report on a
+bundled sample session.
 
 <details>
 <summary><b>Don't have <code>uvx</code>?</b> It comes with <a href="https://github.com/astral-sh/uv">uv</a>. One line to install it:</summary>
@@ -127,7 +129,7 @@ One install, one `assurance` command.
 
 | Command | What it answers |
 |---|---|
-| `assurance audit` | What did the coding-agent session in this folder, or your own agent's run or trace, do, and what did it skip? |
+| `assurance audit` | What did the Claude Code or Codex session in this folder, or your own agent's run or trace, do, and what did it skip? |
 | `assurance hook` | Run that audit after every Claude Code turn, or stop running it: `install`, `remove`, `status`. |
 | `assurance notices` | After each thing the hook said, did the next turn run the test, fix the failure or put the file back? Read from this machine's transcripts; nothing is sent. |
 | `assurance serve` | A local endpoint any agent sends its traces or runs to, and any workflow asks for a run's audit. |
@@ -160,8 +162,9 @@ Every command works as a CI gate as it is:
 
 - **Guess.** If it can't establish a number, it says so instead of making one up.
 - **Call a model or the network.** Every result is arithmetic you can check yourself.
-- **Claim more than it saw.** `audit` reads Claude Code transcripts, and the run records your own
-  agent writes. Other agents' own logs are next:
+- **Claim more than it saw.** `audit` reads Claude Code transcripts, Codex rollouts, and the run
+  records your own agent writes. A record shape it does not know is counted as unread, never guessed
+  into a tool call — the report prints that count. Other agents' own logs are next:
   [tell us which one you use](https://github.com/i-ops-hq/assurance/issues/new?template=feature.yml).
 
 ## Tell us where it's wrong

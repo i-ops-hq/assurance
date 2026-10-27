@@ -1,3 +1,50 @@
+# 0.2.28
+
+- **`assurance audit` reads Codex sessions.** `assurance_budget.codex` turns a Codex CLI rollout
+  into the same `Session` the Claude Code reader produces, so every check built on top of it —
+  what ran after the last edit, loops, the outcome against the task, what could not be classified —
+  works on a second agent without a line of it being rewritten. `audit` with no arguments now takes
+  the newest session *either* agent recorded for the folder, and which reader to use is decided
+  from the file's first record, never from its name: all four formats it reads are `.jsonl`.
+
+  It reads Codex's `item_completed` event stream rather than the `response_item` stream the model
+  was sent. That is the whole design decision. A modern Codex turn is a single `exec` tool call
+  whose input is a **TypeScript program** calling `tools.exec_command({cmd: …})`, so the first
+  stream only holds the shell command inside a program, and reading it would mean parsing
+  JavaScript with a regex and believing the answer. The event stream is Codex's own decoding of
+  that program: one `CommandExecution` per command with its argv, its folder and its exit code, one
+  `FileChange` per patch with a diff per path. Checked against 206 rollouts spanning April to
+  October 2026: the two streams agree (950 `exec_command` calls against 941 `CommandExecution`
+  items in April, 1630 against 1633 in October), the envelope is unchanged across that window, and
+  reading the event stream meant not noticing Codex's move from the `shell` function call to `exec`
+  at all. On every rollout on the machine it was built on — 14,888 records — it read 2,552 calls
+  and left 0 lines unread.
+
+  Two things it refuses to get wrong. The session is named by the rollout's own `id`, not the
+  `session_id` beside it, which is the *conversation* and is shared by every rollout resumed from
+  it. And only a `UserMessage` carrying a `client_id` counts as a prompt: Codex composes user-role
+  messages of its own, above all the transcript deltas it feeds its review sub-agent, and on one
+  machine that is 107 of 162 messages — check the run's outcome against those and you are checking
+  it against a machine-written summary of the run itself.
+
+- **An edit is no longer called unread because the agent has no Read tool.** Codex reads a file by
+  running `cat`, `sed -n` or `head` on it, so `edited_without_read` saw every file it changed as a
+  file it never looked at: on a real session the finding listed **36 files**, which is a wall, not a
+  finding. `bash_read_targets` now recognises a shell command that printed a file, and a file the
+  shell created counts as known the way a `Write` does. The same session now lists **three**.
+
+  Deliberately tight in one direction: missing a read costs a line in a report that prints the
+  unclassified commands beside it, while inventing one silently excuses an edit nobody checked. So
+  `grep`, `rg` and `awk` do not count — they print the lines that matched, not the file — and
+  neither do `wc`, `stat`, `ls` or anything whose argument came from a variable or a glob. Unlike
+  the edit scan it does not stop at the session's folder, because the question is whether the agent
+  saw the file and the edit finding reports an edit wherever it lands; restricting one and not the
+  other reported every edit outside the recorded folder as unread, which is every edit of a Codex
+  Desktop session, whose folder is the app's project container rather than the checkout.
+
+- **The report says which agent it read.** It opened every report with "Claude Code session", over
+  anybody's transcript.
+
 # 0.2.27
 
 - **`assurance coupling` stops printing a file against its whole repository.** On a repository that

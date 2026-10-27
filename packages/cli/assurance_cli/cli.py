@@ -35,7 +35,7 @@ FORWARDED: dict[str, tuple[str, str]] = {
 _START_HERE = """\
 assurance — your AI agent says it's done. This tells you what it didn't check.
 
-  assurance audit                         what the Claude Code session in this folder did, and skipped
+  assurance audit                         what the Claude Code or Codex session here did, and skipped
   assurance audit --demo                  the same report on a bundled sample session
   assurance hook install                  run the audit after every Claude Code turn (remove undoes it)
   assurance notices                       after each thing the hook said, did the next turn act on it?
@@ -50,7 +50,7 @@ assurance — your AI agent says it's done. This tells you what it didn't check.
   assurance authority --example           may a task proceed for the person who asked?
   assurance check [FOLDER]                a folder of dated or numbered files: what is absent
 
-Run it after every Claude Code session: https://github.com/i-ops-hq/assurance#run-it-after-every-session
+Run it after every session: https://github.com/i-ops-hq/assurance#run-it-after-every-session
 assurance <command> --help for more.
 """
 
@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     # argparse runs; it is listed here so `assurance --help` shows it.
     sub.add_parser(
         "audit", add_help=False,
-        help="What the Claude Code session in this folder did, and what it skipped (--demo for a sample)",
+        help="What the Claude Code or Codex session in this folder did, and what it skipped (--demo for a sample)",
     )
 
     sub.add_parser(
