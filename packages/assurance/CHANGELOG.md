@@ -1,3 +1,12 @@
+# 0.1.34
+
+- **`assurance coupling`: what usually changes with what you just changed, and did not this time.**
+  Run it in any git repository — no code graph, no configuration, nothing sent anywhere. It names
+  what history says travels with the files you have changed, marks the ones you have not touched,
+  and says how many of those are tests. With a clean tree it answers about the repository instead.
+  It is history, never structure: no row claims a dependency, and every report ends with the `git
+  log` command that checks it. `assurance-budget` 0.2.26, pinned exactly; `assurance-cli` 0.6.8.
+
 # 0.1.33
 
 - **A warning says what the untested change reaches.** With a code graph in the project, a finding

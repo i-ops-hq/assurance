@@ -52,10 +52,10 @@ claude plugin install assurance@i-ops-hq
 Or add it to `~/.claude/settings.json` yourself:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.33 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.34 audit --hook --nudge" } ] } ] } }
 ```
 
-Run `uvx assurance@0.1.33 --version` once first: `--offline` runs the copy uv already has, so the hook
+Run `uvx assurance@0.1.34 --version` once first: `--offline` runs the copy uv already has, so the hook
 never waits on PyPI.
 
 ## Every command
@@ -66,6 +66,7 @@ never waits on PyPI.
 | `assurance hook` | install, remove or check the Stop hook that runs the audit after every turn |
 | `assurance notices` | after each thing the hook said, did the next turn do what it asked? |
 | `assurance serve` | a local endpoint any agent sends its traces or runs to, and any workflow asks for a run's audit |
+| `assurance coupling` | what usually changes with what you just changed, from git history — and what has not this time |
 | `assurance reach` | what does a change to this file reach, by a code graph, and how far behind the code is that graph? |
 | `assurance diff` / `assurance check` | did the work cover what it was supposed to, and what did it miss? |
 | `assurance pin` | did an MCP server change a tool definition after you approved it? |

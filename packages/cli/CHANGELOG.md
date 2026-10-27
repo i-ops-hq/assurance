@@ -1,3 +1,8 @@
+# 0.6.8
+
+- **`assurance coupling` is forwarded**, to `assurance_budget.coupling`, and listed in `assurance`
+  with no arguments. Needs `assurance-budget` 0.2.26.
+
 # 0.6.7
 
 - `assurance notices` is forwarded to `assurance-budget` 0.2.23: after each thing the Stop hook said,

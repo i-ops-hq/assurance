@@ -131,6 +131,7 @@ One install, one `assurance` command.
 | `assurance hook` | Run that audit after every Claude Code turn, or stop running it: `install`, `remove`, `status`. |
 | `assurance notices` | After each thing the hook said, did the next turn run the test, fix the failure or put the file back? Read from this machine's transcripts; nothing is sent. |
 | `assurance serve` | A local endpoint any agent sends its traces or runs to, and any workflow asks for a run's audit. |
+| `assurance coupling` | What usually changes with what you just changed, from git history — and which of those you have not touched. No graph, no configuration. |
 | `assurance reach` | What does a change to this file reach, by a code graph such as Graphify's, and how far behind the code is that graph? |
 | `assurance clearance` | Is the person who asked cleared for every owner their change reaches? |
 | `assurance diff` | Did the work cover everything it should have? For example, retrieved docs vs. required docs. |

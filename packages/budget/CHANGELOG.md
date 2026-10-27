@@ -1,3 +1,20 @@
+# 0.2.26
+
+- **`assurance coupling`: what usually changes with what you just changed, and did not this time.**
+  The hook already read co-change out of git history to say what an untested change travels with,
+  and only a person who had already installed the hook could ever see it. This is the same reading
+  as a command anyone can run in any git repository, with no graph, no configuration and no Claude
+  Code. Co-change analysis is not new — Code Maat and CodeScene have done it for a decade, and this
+  claims nothing there. What is different is the subject: not "these files are coupled", a fact
+  about a repository, but "you have changed invoice.py, history says test_invoice.py goes with it in
+  18 of its 24 commits, and you have not touched it" — a fact about a change that is not finished.
+  With nothing changed it answers about the repository instead of turning you away, and says that is
+  the question it answered. `--all` asks that on purpose, a path asks about one file, `--json` is the
+  same answer for a script. It is history and is said as history: no row says "depends on",
+  "reaches" or "breaks", the lift is printed beside every count because the order is not the order
+  of the count, and the report ends with the `git log` command that checks its own first line. Only
+  file names are read; no commit message, author or content.
+
 # 0.2.25
 
 - **A warning says what the untested change reaches.** "No test or check has passed since the last
