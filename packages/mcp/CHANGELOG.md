@@ -1,3 +1,8 @@
+# 0.5.9
+
+- **Requires `assurance-cli` 0.6.8**, the version this tree is tested against, which added the
+  `coupling` subcommand to the commands the front door forwards. No behaviour changes here.
+
 # 0.5.8
 
 - **Requires `assurance-cli` 0.6.7.** The floor said 0.6.6 while the tree it is tested against held

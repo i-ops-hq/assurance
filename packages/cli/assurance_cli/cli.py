@@ -29,6 +29,7 @@ FORWARDED: dict[str, tuple[str, str]] = {
     "notices": ("assurance_budget.notices", "pip install assurance-budget"),
     "serve": ("assurance_budget.serve", "pip install assurance-budget"),
     "reach": ("assurance_reach.cli", "pip install assurance-reach"),
+    "coupling": ("assurance_budget.coupling", "pip install assurance-budget"),
 }
 
 _START_HERE = """\
@@ -39,6 +40,7 @@ assurance — your AI agent says it's done. This tells you what it didn't check.
   assurance hook install                  run the audit after every Claude Code turn (remove undoes it)
   assurance notices                       after each thing the hook said, did the next turn act on it?
   assurance serve                         a local endpoint any agent sends its traces or runs to
+  assurance coupling                      what usually changes with what you changed, and did not
   assurance reach src/money.py            what a change to a file reaches, by a code graph
   assurance clearance src/money.py        ...and whether the asker is cleared for every owner it reaches
   assurance diff --expected A --found B   was everything that should have been read, read?
@@ -134,6 +136,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "serve", add_help=False,
         help="A local endpoint any agent sends its traces or run records to, and any workflow asks for an audit",
+    )
+
+    sub.add_parser(
+        "coupling", add_help=False,
+        help="What usually changes with what you changed, from git history — no graph, no configuration",
     )
 
     sub.add_parser(
