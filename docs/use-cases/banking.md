@@ -11,14 +11,20 @@ answers none of that by itself. It ends with a summary written by the same model
 and a reviewer has to trust it or reread the transcript. Many regulated teams stop there and keep
 agents out entirely, because nothing they have can show what an agent did and nothing else.
 
-## Where Assurance sits
+## The workflow, with Assurance in it
 
+```mermaid
+flowchart LR
+    s0(["Change<br/>request"])
+    s1["Agent<br/>session"]
+    A["🛡️ Assurance<br/>evidence recorded?<br/>owners cleared?"]
+    s3["Reviewer<br/>approves"]
+    s4(["Change<br/>record"])
+    s0 --> s1 --> A --> s3 --> s4
+    style A stroke:#dc2626,stroke-width:3px
 ```
-change request ─▶ agent session ─▶ hook: note / suggested review / stop and check, as it happens
-               ─▶ before merge: assurance clearance (is the asker cleared for every owner the change reaches?)
-               ─▶ evidence: assurance audit --json, kept with the change record
-               ─▶ CI gate: exit 1 on a claim the record contradicts
-```
+
+The red box is Assurance. Everything around it is your workflow as it is today.
 
 ## Set it up
 
