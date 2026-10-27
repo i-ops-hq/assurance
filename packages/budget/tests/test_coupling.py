@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from assurance_budget import coupling
+from assurance_budget import cochange, coupling
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -239,6 +241,159 @@ def test_a_pair_below_the_floor_is_not_named(tmp_path: Path, capsys: pytest.Capt
     root = _history(tmp_path, history)
     _touch(root, "a.py")
     assert "rare.py" not in _said(root, capsys)
+
+
+# --- a journal: above chance, and still nothing ----------------------------------------------------
+
+#: A session log, and the hole lift leaves for it. It changed in 33 of these 73 commits beside eleven
+#: different files, three commits each — the shape of a journal, which keeps whatever company was
+#: being worked on that week. Lift does not neutralise it, because lift's ceiling for a pair is
+#: `read / max(commits)`: a file in 33 of 73 cannot exceed 2.2x however perfectly a partner nests
+#: inside it, so each of its eleven companions clears a floor of 2.0 at 2.2x while meaning nothing.
+#: That is the middle of the distribution, where `CHANGELOG.md` and `pyproject.toml` are not — they
+#: are in *every* commit, their ceiling falls under the floor, and
+#: `test_a_file_that_changes_with_everything_is_coupled_to_nothing` is the half of this that already
+#: worked. The overlap floor closes the other half: 3 of the 33 commits that changed either is 0.09.
+#:
+#: Eleven companions and 73 commits on purpose, which is larger than anything else here. A journal
+#: needs more than ten partners before its share of each falls under a tenth, three commits each
+#: because fewer is not evidence at all, and twice its own count in commits before its lift clears
+#: 2.0 — so this defect cannot be reproduced small. The pair that must come through it unharmed is
+#: in the same history, together in all 20 of its own commits.
+JOURNAL = ([[f"src/w{i:02d}.py", "SESSION_LOG.md"] for i in range(11) for _ in range(3)]
+           + [["src/pay/charge.py", "tests/test_charge.py"]] * 20
+           + [["noise.py"]] * 20)
+
+
+def test_a_file_whose_company_is_different_every_time_is_coupled_to_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _history(tmp_path, JOURNAL)
+    _touch(root, "SESSION_LOG.md")
+    said = _said(root, capsys)
+    assert "changed with SESSION_LOG.md often enough to be worth saying" in said
+    assert not _rows(said)
+    for i in range(11):
+        assert f"src/w{i:02d}.py" not in said, f"w{i:02d} is 3 of the journal's 33 commits, not a finding"
+    # And it says which floor it was, so the silence is readable rather than a shrug.
+    assert "10% of the commits that changed either of them" in said
+
+
+def test_a_journal_is_never_the_partner_you_forgot(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # The other half, and the half a filter on the *subject* would miss: a pair is symmetric, so a
+    # journal left in the running is named against whatever you did change. From w00's side the same
+    # pair reads "3 of its 3 commits" and looks overwhelming, which is exactly how it gets printed.
+    root = _history(tmp_path, JOURNAL)
+    _touch(root, "src/w00.py")
+    assert "SESSION_LOG.md" not in _said(root, capsys)
+
+
+def test_the_journal_is_not_even_a_subject_of_the_repository_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # `--all` picks the files that change most, which is what a journal does best, so this is where
+    # the four-block report on a real repository came back half noise.
+    said = _said(_history(tmp_path, JOURNAL), capsys, "--all")
+    assert "SESSION_LOG.md" not in said
+    assert "src/pay/charge.py" in said and "tests/test_charge.py" in said
+
+
+def test_no_floor_on_lift_could_have_done_this(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The floor is not a stricter `MIN_LIFT` wearing a different name.
+
+    Read straight from `cochange.partners`, with the counts chosen so the ordering is unambiguous:
+    every row the journal is given is *further* above chance than the row that survives. A floor on
+    lift high enough to silence the journal would take the real pair with it, whatever it was set to.
+    """
+    commits = ([frozenset({f"src/w{i:02d}.py", "SESSION_LOG.md"}) for i in range(12) for _ in range(3)]
+               + [frozenset({"src/pay/charge.py", "tests/test_charge.py"})] * 10
+               + [frozenset({"src/pay/charge.py"})] * 10
+               + [frozenset({"tests/test_charge.py"})] * 10
+               + [frozenset({"noise.py"})] * 134)
+
+    def here(other: str) -> bool:
+        return True  # every name in this history is a file that is still there
+
+    assert cochange.partners(commits, ["SESSION_LOG.md"], here) == []
+    pair = cochange.partners(commits, ["src/pay/charge.py"], here)
+    assert pair is not None
+    assert [p.other for p in pair] == ["tests/test_charge.py"]
+
+    monkeypatch.setattr(cochange, "MIN_OVERLAP", 0.0)
+    noise = cochange.partners(commits, ["SESSION_LOG.md"], here)
+    assert noise is not None and len(noise) == cochange.MOST
+    assert min(p.lift for p in noise) > pair[0].lift, (
+        "the fixture no longer shows what it is here to show: the dropped rows must be further above "
+        "chance than the kept one"
+    )
+
+
+# --- the same answer twice --------------------------------------------------------------------------
+
+#: The command, in a process of its own, so a `PYTHONHASHSEED` can be given to it. Nothing else here
+#: needs a subprocess, and this does: the order being checked comes from `str` hashing, which is
+#: fixed for the life of a process and salted differently in the next one.
+_RUN = "from assurance_budget import coupling; raise SystemExit(coupling.main())"
+
+
+def _on_its_own(root: Path, hash_seed: str, *args: str) -> str:
+    # PYTHONIOENCODING, because the child writes to a pipe: on Windows that is encoded in the
+    # locale's code page, not UTF-8, and the report's `·` separator comes back as a lone 0xb7 that
+    # `decode("utf-8")` refuses. The product's own answer to a narrow console is to replace what it
+    # cannot encode; here the two ends are both ours, so they are told to agree on UTF-8 instead.
+    env = {**os.environ, "PYTHONHASHSEED": hash_seed, "PYTHONIOENCODING": "utf-8"}
+    done = subprocess.run([sys.executable, "-c", _RUN, "--folder", str(root), *args],
+                          capture_output=True, check=True, env=env)
+    # How long the read took is the one number in the report that is meant to differ between runs.
+    return re.sub(r"in \d+ ms", "in N ms", done.stdout.decode("utf-8"))
+
+
+def test_the_same_repository_gives_the_same_report_every_time(tmp_path: Path) -> None:
+    """A report that ends with "check it for yourself" may not be a different report each time.
+
+    Which files change most is counted out of `frozenset`s, and equal counts came back in whatever
+    order the set gave them — which is `str` hash order, salted per process. Five runs of `--all` on
+    the repository this was written in gave four different reports of the same commit. The seeds here
+    stand in for those runs; what the differing order then *did* to a report is the next test.
+    """
+    root = _history(tmp_path, COUPLED)
+    said = {_on_its_own(root, seed, "--all") for seed in ("0", "1", "2", "3", "4", "5")}
+    assert len(said) == 1, f"one repository, {len(said)} different reports"
+
+
+#: Six files that always move together — the shape of a release: a version, a manifest, a lockfile.
+#: This is the fixture the duplicate blocks need, and `COUPLED` is not it. `_each_on_its_own` skips a
+#: subject whose strongest partner is *already a subject*, which collapses a pair and a triple but
+#: not a clique of six: whichever member is read first takes one name, and the rest still point at a
+#: seventh that nobody has claimed, so they each head a block of the same six rows.
+CLIQUE = ([["a/version.py", "a/pyproject.toml", "b/package.json", "b/Cargo.toml", "b/Cargo.lock",
+            "b/tauri.conf.json"]] * 15
+          + [["src/pay/charge.py", "tests/test_charge.py"]] * 12
+          + [["noise.py"]] * 13)
+
+
+def _subjects(said: str) -> list[str]:
+    """The files each block is about: indented two spaces, where a partner row is indented four."""
+    return [row.strip() for row in said.splitlines()
+            if row.startswith("  ") and not row.startswith("    ") and row.strip()
+            and "of its" not in row and not row.strip().startswith("git log")]
+
+
+def test_no_subject_block_is_printed_twice_with_the_names_swapped(tmp_path: Path) -> None:
+    # The half of this a reader actually sees. Every seed, because which member of the clique is read
+    # first is the thing that was unfixed, and only some of those orders duplicate.
+    root = _history(tmp_path, CLIQUE)
+    for seed in ("0", "1", "2", "3", "4", "5"):
+        said = _on_its_own(root, seed, "--all")
+        subjects = _subjects(said)
+        assert subjects, said
+        assert len(subjects) == len(set(subjects)), f"seed {seed}: {subjects}"
+        for subject in subjects:
+            named_inside = [row for row in said.splitlines() if "of its" in row and subject in row]
+            assert not named_inside, (
+                f"seed {seed}: {subject} heads a block and is a row of another one — the same pair "
+                f"said twice with the names swapped:\n{said}"
+            )
 
 
 # --- for a script ----------------------------------------------------------------------------------

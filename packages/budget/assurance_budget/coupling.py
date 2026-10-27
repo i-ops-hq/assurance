@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from assurance_budget import cochange
+from assurance_budget.console import survive_narrow_consoles
 from assurance_budget.consequence import _TEST_FILE
 from assurance_budget.world import _git_env
 
@@ -51,6 +52,7 @@ REPOSITORY_PARTNERS = 6
 
 def main(argv: Sequence[str] | None = None) -> int:
     """`assurance coupling`. 0 whether or not it found anything to say; 2 when it could not run."""
+    survive_narrow_consoles()
     args = _parser().parse_args(list(argv) if argv is not None else None)
     folder = Path(args.folder).resolve()
     repo = _repository(folder)
@@ -133,7 +135,7 @@ def _each_on_its_own(
     # A pair is symmetric, so the subject whose strongest partner is already a subject would print the
     # same block again with the two names swapped. One of them says it.
     best: list[str] = []
-    for subject in sorted(by_subject, key=lambda s: -by_subject[s][0].score):
+    for subject in sorted(by_subject, key=lambda s: (-by_subject[s][0].score, s)):
         if by_subject[subject][0].other in best:
             continue
         best.append(subject)
@@ -176,11 +178,21 @@ def _changed(repo: Path) -> set[str] | None:
 def _most_changed(commits: Sequence[frozenset[str]], there: Callable[[str], bool]) -> list[str]:
     """The files that changed most often in the window: what `--all` asks about when no working-tree
     change picks the subject. Sweeping commits are left out here too, so a vendored update does not
-    choose the subject of the report."""
+    choose the subject of the report.
+
+    Ties are broken by name, and that is not tidiness. `Counter.most_common` leaves equal counts in
+    insertion order, which here is the order files come out of a `frozenset` — and `str` hashing is
+    salted per process, so the same repository at the same commit chose different subjects on
+    different runs. Five runs of `--all` on the repository this was written in gave four different
+    reports, and two of them printed one cluster of six release files three times over, because the
+    duplicate check below can only skip a subject whose strongest partner was *already* picked. A
+    report that ends with "check it for yourself" cannot be a different report each time it is asked.
+    """
     seen: Counter[str] = Counter(
         file for files in commits if 0 < len(files) <= cochange.MAX_FILES for file in files
     )
-    return [file for file, _ in seen.most_common() if there(file)][: cochange.MOST]
+    ranked = sorted(seen.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [file for file, _ in ranked if there(file)][: cochange.MOST]
 
 
 def _read_log(repo: Path) -> list[frozenset[str]] | None:
@@ -271,9 +283,11 @@ def _report(
 def _nothing_coupled(asked: Sequence[str], read: int, elapsed: float) -> str:
     return (
         f"Nothing in the last {read} commits changed with {_listed(list(asked))} often enough to be worth "
-        f"saying.\n\nA pair has to change together at least {cochange.MIN_TOGETHER} times and at least "
-        f"{cochange.MIN_LIFT:g}x more often than\nchance, so a file that changes with everything is "
-        f"coupled to nothing. Read in {elapsed:.0f} ms."
+        f"saying.\n\nA pair has to change together at least {cochange.MIN_TOGETHER} times, at least "
+        f"{cochange.MIN_LIFT:g}x more often than chance, and in\nat least "
+        f"{cochange.MIN_OVERLAP * 100:.0f}% of the commits that changed either of them — so a file that "
+        f"changes with\neverything, and one whose company is different every time, are both coupled to "
+        f"nothing.\nRead in {elapsed:.0f} ms."
     )
 
 
@@ -315,6 +329,7 @@ def _payload(
                 "together": p.together,
                 "of_commits": p.commits,
                 "lift": round(p.lift, 2),
+                "overlap": round(p.overlap, 3),
                 "is_test": bool(_TEST_FILE.search(p.other)),
                 "changed_here": p.other in changed,
             }

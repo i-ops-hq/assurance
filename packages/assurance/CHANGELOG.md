@@ -1,3 +1,16 @@
+# 0.1.35
+
+- **`assurance coupling` says less, and says the same thing twice running.** 0.1.34 printed a
+  session log or journal against half the repository — ten true rows nobody can act on — because
+  changing together *above chance* is not the same as changing together *usually*. A pair must now
+  also have changed together in at least 10% of the commits that changed either of them, which
+  silences a journal against the repository without silencing the one file it really travels with.
+  And the report is deterministic: 0.1.34 chose its subjects from an order Python salts per process,
+  so five runs on an unchanged repository gave three different answers. Nothing else changes, and
+  every genuine finding — a generated file beside its generator, a module beside its test, a
+  Python/TypeScript mirror pair — is untouched. On Windows, `coupling` also no longer ends its report mid-line on a console whose code page
+  has no byte for a character in a file name. `assurance-budget` 0.2.27, pinned exactly.
+
 # 0.1.34
 
 - **`assurance coupling`: what usually changes with what you just changed, and did not this time.**

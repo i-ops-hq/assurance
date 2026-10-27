@@ -16,6 +16,17 @@ commits, always beside this one, outscores a test seen in 10 of its 14. So pairs
 `together × ln(lift)`, how often times how far above chance, and a pair is coupled at all only when
 it changed together at least `MIN_TOGETHER` times with a lift of at least `MIN_LIFT`.
 
+**Above chance is not the same as usual.** Lift is not *null-invariant*: its ceiling for a pair is
+`read / max(commits)`, so one absolute floor means quite different things at different frequencies. A
+file in 116 of 398 commits cannot reach 3.5x however perfectly a partner nests inside it, and a floor
+of 2.0 is well over half of that ceiling — so a session log, whose company is whatever was being
+worked on that week, clears it against half the repository. That is why lift neutralises a changelog
+and not a journal: it works at the extreme, where a file is in *every* commit and the ceiling falls
+under the floor, and fails in the middle of the distribution. So a pair must also have changed
+together in at least `MIN_OVERLAP` of the commits that changed either of them — `together / (its
+commits + the other's - together)`, which no frequency can inflate. That is the word this command
+uses: *usually*, and 8 of 118 is not it.
+
 **What is not evidence says nothing.** A commit touching more than `MAX_FILES` files (a rename, a
 formatting sweep, a vendored update) couples nothing and is left out of the scoring; a repository with
 fewer than `MIN_COMMITS` commits left, or a file in fewer than `MIN_TOGETHER` of them, is not read as
@@ -47,6 +58,26 @@ MIN_COMMITS = 30
 MIN_TOGETHER = 3
 #: How much more often than chance two files must change together to be called coupled.
 MIN_LIFT = 2.0
+#: And the share of the commits that changed either of them in which both changed — the Jaccard
+#: overlap, which is what "usually" means and what lift cannot say.
+#:
+#: A tenth, and the number was measured rather than chosen. The repository this was written against
+#: keeps a session log and a handoff note, and every row those two were given sits between 0.025 and
+#: 0.088 — except one, the two of them together at 0.42, which is a real pair and the reason this is
+#: a floor per pair and not a verdict on a file: it silences a journal against the whole repository
+#: without silencing the one thing it does travel with.
+#:
+#: The price, counted rather than assumed, on that repository and on this one: 693 rows and 800 rows
+#: a reader could reach, of which 241 and 84 go. Nine of the first and three of the second are pairs
+#: of source files rather than a doc, a lockfile or a version bump, and all twelve are the weak tail
+#: — three commits of a module's thirty. A floor of 0.2 would have been tidier and cost 91 and 31 of
+#: them, counted the same way, including a core module beside its own router at 0.167.
+#:
+#: It is a floor on the *weaker* side of a pair, so what it still costs is the lopsided pair that is
+#: real: a test in 7 commits, 6 of them with a module that has 31, is 0.19 — kept here, but it would
+#: go under a higher floor. A row nobody can act on costs more than a row nobody sees, because it
+#: teaches the reader to skip the next one.
+MIN_OVERLAP = 0.1
 #: The most partners kept for each changed file, and the most changed files asked about.
 MOST = 10
 #: The most a read of the log may print before it is not read at all.
@@ -68,6 +99,8 @@ class Partner:
     read: int
     """How many commits were read."""
     lift: float
+    overlap: float
+    """The share of the commits that changed either file in which both changed."""
     score: float
 
 
@@ -164,18 +197,20 @@ def partners(
             if count < MIN_TOGETHER or other in asked or other == file:
                 continue
             lift = count * n / (seen[file] * seen[other])
-            if lift >= MIN_LIFT:
-                coupled.append(Partner(file, other, count, seen[file], len(commits), lift, count * math.log(lift)))
+            overlap = count / (seen[file] + seen[other] - count)
+            if lift >= MIN_LIFT and overlap >= MIN_OVERLAP:
+                coupled.append(Partner(file, other, count, seen[file], len(commits), lift, overlap,
+                                       count * math.log(lift)))
         coupled.sort(key=lambda p: (-p.score, p.other))
         named = [p for p in coupled if exists(p.other)][:MOST]
         # What is said is what `git log` shows over every commit read, sweeping ones included.
         for p in named:
             both = sum(1 for files in commits if file in files and p.other in files)
             alone = sum(1 for files in commits if file in files)
-            found.append(Partner(file, p.other, both, alone, len(commits), p.lift, p.score))
+            found.append(Partner(file, p.other, both, alone, len(commits), p.lift, p.overlap, p.score))
     found.sort(key=lambda p: (-p.score, p.changed, p.other))
     return found
 
 
-__all__ = ["MAX_FILES", "MIN_COMMITS", "MIN_LIFT", "MIN_TOGETHER", "MOST", "WINDOW", "Log", "Partner", "TooSlow",
-           "finish", "partners", "start", "stop"]
+__all__ = ["MAX_FILES", "MIN_COMMITS", "MIN_LIFT", "MIN_OVERLAP", "MIN_TOGETHER", "MOST", "WINDOW",
+           "Log", "Partner", "TooSlow", "finish", "partners", "start", "stop"]

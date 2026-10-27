@@ -15,6 +15,7 @@ from typing import Any, Sequence
 
 from assurance_core.run_budget import Ceilings, Progress, ProgressWatch, Stalled
 
+from assurance_budget.console import survive_narrow_consoles
 from assurance_budget.config import (
     ConfigError,
     limits_for_json,
@@ -228,19 +229,6 @@ def _project_dir(session: Session) -> Path:
     return Path(session.cwd).expanduser() if session.cwd else Path.cwd()
 
 
-def _survive_narrow_consoles() -> None:
-    """Replace, rather than crash on, a character the console's encoding has no byte for.
-
-    Paths and commands in a transcript can hold any text, and on Windows output sent to a pipe is
-    encoded in the locale's code page, not UTF-8, so the report could stop halfway through.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
-        if reconfigure is not None and encoding != "utf8":
-            reconfigure(errors="replace")
-
-
 def _hook_print(payload: dict[str, Any]) -> None:
     print(json.dumps(payload))
 
@@ -355,7 +343,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_hook(sys.stdin.read(), nudge=args.nudge)
     if args.nudge:
         parser.error("--nudge only applies with --hook")
-    _survive_narrow_consoles()
+    survive_narrow_consoles()
     if args.demo and args.transcript:
         parser.error("--demo audits the bundled sample; leave out the transcript path")
     if args.session is not None and (args.demo or args.transcript):
