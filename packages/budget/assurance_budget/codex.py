@@ -490,6 +490,13 @@ def _message_text(content: Any, block_type: str) -> str:
     return "\n".join(parts)
 
 
+#: The leading slash a `file://` URL puts before a Windows drive: `file:///C:/x` parses to `/C:/x`,
+#: which is a path on no machine. Not seen in a rollout from a Windows Codex — there is none to
+#: hand — but it is how the URL form works, and the alternative is reading every Windows folder
+#: wrong, which would quietly put every path outside the session's folder.
+_URL_DRIVE = re.compile(r"^/([A-Za-z]:[/\\])")
+
+
 def _folder(value: Any) -> str:
     """A `CommandExecution`'s folder. Codex writes it as a `file://` URL; the audit compares plain
     paths, and a path with a space in it arrives percent-encoded."""
@@ -497,8 +504,8 @@ def _folder(value: Any) -> str:
         return ""
     if not value.startswith("file://"):
         return value
-    parsed = urlparse(value)
-    return unquote(parsed.path) or value
+    path = unquote(urlparse(value).path)
+    return _URL_DRIVE.sub(r"\1", path) or value
 
 
 def _sessions_root(sessions_dir: Path | None) -> Path:

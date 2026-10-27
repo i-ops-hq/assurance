@@ -129,6 +129,21 @@ def test_a_command_keeps_its_exit_status_and_its_folder(tmp_path: Path) -> None:
     assert passed.cwd == "/p/sub dir"  # the scheme is dropped, the space is not percent-encoded
 
 
+def test_a_windows_folder_does_not_keep_the_urls_leading_slash(tmp_path: Path) -> None:
+    """`file:///C:/work` parses to `/C:/work`, which is a path on no machine, and every path under
+    it would then read as outside the session's folder. Reasoned from the URL form rather than seen
+    in a rollout from a Windows Codex, which is why it is pinned here.
+
+    The URL is written out rather than built by `_command`, because a Windows folder makes three
+    slashes where a POSIX one makes three from two — and a fixture that gets that wrong tests the
+    URL parser's handling of a netloc instead of this.
+    """
+    item = {**_command("pytest", "/ignored", ident="w"), "cwd": "file:///C:/work%20dir"}
+    path = _rollout(tmp_path, _meta("C:/work dir"), _item(item))
+    (call,) = read_codex(path).tool_calls
+    assert call.cwd == "C:/work dir"
+
+
 def test_a_patch_becomes_one_call_per_file_and_a_delete_needs_no_read(tmp_path: Path) -> None:
     """Codex applies one patch to several files; the audit asks its questions per file. A delete is
     read as a write: it is a change the next test must cover, and nobody reads a file to remove it."""
