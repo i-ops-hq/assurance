@@ -337,7 +337,11 @@ _RUN = "from assurance_budget import coupling; raise SystemExit(coupling.main())
 
 
 def _on_its_own(root: Path, hash_seed: str, *args: str) -> str:
-    env = {**os.environ, "PYTHONHASHSEED": hash_seed}
+    # PYTHONIOENCODING, because the child writes to a pipe: on Windows that is encoded in the
+    # locale's code page, not UTF-8, and the report's `·` separator comes back as a lone 0xb7 that
+    # `decode("utf-8")` refuses. The product's own answer to a narrow console is to replace what it
+    # cannot encode; here the two ends are both ours, so they are told to agree on UTF-8 instead.
+    env = {**os.environ, "PYTHONHASHSEED": hash_seed, "PYTHONIOENCODING": "utf-8"}
     done = subprocess.run([sys.executable, "-c", _RUN, "--folder", str(root), *args],
                           capture_output=True, check=True, env=env)
     # How long the read took is the one number in the report that is meant to differ between runs.

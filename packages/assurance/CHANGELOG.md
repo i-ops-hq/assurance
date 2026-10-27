@@ -8,7 +8,8 @@
   And the report is deterministic: 0.1.34 chose its subjects from an order Python salts per process,
   so five runs on an unchanged repository gave three different answers. Nothing else changes, and
   every genuine finding — a generated file beside its generator, a module beside its test, a
-  Python/TypeScript mirror pair — is untouched. `assurance-budget` 0.2.27, pinned exactly.
+  Python/TypeScript mirror pair — is untouched. On Windows, `coupling` also no longer ends its report mid-line on a console whose code page
+  has no byte for a character in a file name. `assurance-budget` 0.2.27, pinned exactly.
 
 # 0.1.34
 

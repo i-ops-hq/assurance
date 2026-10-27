@@ -6,6 +6,7 @@ Windows session is read the same way on a Mac, in Linux CI and on Windows.
 
 from __future__ import annotations
 
+import inspect
 import io
 import json
 from collections.abc import Callable
@@ -13,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from assurance_budget import hook_setup, session_cli
+from assurance_budget import console, coupling, hook_setup, session_cli
 from assurance_budget.hook_setup import hook_command, is_ours
 from assurance_budget.sessions import (
     _POSIX,
@@ -219,9 +220,18 @@ def test_status_reads_a_quoted_path_as_one_path(tmp_path: Path) -> None:
 def test_a_character_the_console_cannot_encode_is_replaced_not_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
     narrow = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
     monkeypatch.setattr("sys.stdout", narrow)
-    session_cli._survive_narrow_consoles()
+    console.survive_narrow_consoles()
     print("✖ ℹ 名前")  # none of these are in cp1252
     narrow.flush()
+
+
+def test_every_command_that_prints_free_text_survives_one(tmp_path: Path) -> None:
+    """`coupling` shipped in 0.2.26 without the guard its two siblings had, and it prints the least
+    controllable text of the three: paths straight out of someone's git log, and a `·` separator
+    that cp932 has no byte for. A guard that two of three entry points call is not a guard."""
+    for module in (session_cli, hook_setup, coupling):
+        source = inspect.getsource(module)
+        assert "survive_narrow_consoles()" in source, module.__name__
 
 
 def test_a_backslash_in_a_posix_command_is_not_a_path_separator() -> None:

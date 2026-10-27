@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from assurance_budget.console import survive_narrow_consoles
 from assurance_budget.config import state_dir
 
 EXIT_OK = 0
@@ -370,7 +371,7 @@ def main(
 ) -> int:
     """Run `assurance hook`. 0 done (or nothing to do), 1 not written or not installed, 2 refused."""
     args = build_parser().parse_args(list(argv) if argv is not None else None)
-    _survive_narrow_consoles()
+    survive_narrow_consoles()
     here = (cwd or Path.cwd()).resolve()
     environ = os.environ if env is None else env
     tty = interactive if interactive is not None else _is_tty
@@ -462,19 +463,6 @@ def main(
     else:
         print("Removed. No other setting in those files changed.")
     return EXIT_OK
-
-
-def _survive_narrow_consoles() -> None:
-    """Replace, rather than crash on, a character the console's encoding has no byte for.
-
-    A settings file can hold any text, and on Windows output sent to a pipe is encoded in the
-    locale's code page, not UTF-8, so printing its diff could stop the command halfway.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
-        if reconfigure is not None and encoding != "utf8":
-            reconfigure(errors="replace")
 
 
 def _is_tty() -> bool:

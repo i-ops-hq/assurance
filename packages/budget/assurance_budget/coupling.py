@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from assurance_budget import cochange
+from assurance_budget.console import survive_narrow_consoles
 from assurance_budget.consequence import _TEST_FILE
 from assurance_budget.world import _git_env
 
@@ -51,6 +52,7 @@ REPOSITORY_PARTNERS = 6
 
 def main(argv: Sequence[str] | None = None) -> int:
     """`assurance coupling`. 0 whether or not it found anything to say; 2 when it could not run."""
+    survive_narrow_consoles()
     args = _parser().parse_args(list(argv) if argv is not None else None)
     folder = Path(args.folder).resolve()
     repo = _repository(folder)

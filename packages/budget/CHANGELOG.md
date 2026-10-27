@@ -17,6 +17,14 @@
   workflow file beside a test configuration *three* times outranks, by lift, a script beside its own
   manifest thirty-one times.
 
+- **`coupling` no longer stops halfway on a narrow console.** It prints paths read straight out of
+  a git log, and a `·` separator, while output sent to a pipe on Windows is encoded in the locale's
+  code page rather than UTF-8 — so a repository with a non-ASCII filename, or any code page without
+  a byte for `·`, could end the report mid-line. `audit` and `hook` have replaced what they cannot
+  encode since 0.2.4; `coupling` shipped in 0.2.26 without it, because the guard was a private copy
+  in each of those two modules rather than something a third command could reach. It is one shared
+  helper now, and a test asserts all three entry points call it.
+
 - **The same repository now gives the same report every time.** Five runs of `--all` on one
   unchanged commit gave four different reports, two of them printing one cluster of six release
   files three times over. Equal change-counts were left in set order and Python salts string hashing
