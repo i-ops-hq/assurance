@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import gzip
 import http.client
+import io
 import json
 import os
 import socket
@@ -25,7 +26,7 @@ import pytest
 from assurance_budget import config, otlp_protobuf
 from assurance_budget.otel import read_spans
 from assurance_budget.otlp_protobuf import ProtobufError, decode_traces
-from assurance_budget.serve import Server, Store, _loopback, build_parser, main
+from assurance_budget.serve import Server, Store, _Handler, _loopback, build_parser, main
 from assurance_budget.session_cli import GATES
 from assurance_budget.session_cli import main as audit_main
 
@@ -128,8 +129,8 @@ def test_json_gzip_and_chunked_bodies_are_the_same_spans(server: Server) -> None
 
 
 def test_what_cannot_be_read_is_refused_and_said(server: Server) -> None:
-    def refused(path: str, body: bytes, headers: dict[str, str], status: int, said: str, method: str = "POST") -> None:
-        code, _, answer = _call(server, method, path, body if method == "POST" else None, headers)
+    def refused(path: str, body: bytes | None, headers: dict[str, str], status: int, said: str, method: str = "POST") -> None:
+        code, _, answer = _call(server, method, path, body, headers)
         assert code == status, answer
         assert said in json.loads(answer)["error"], answer
 
@@ -139,19 +140,97 @@ def test_what_cannot_be_read_is_refused_and_said(server: Server) -> None:
     refused("/v1/traces", b"x", {"Content-Type": "text/plain"}, 415, "Content-Type text/plain")
     refused("/v1/traces", b"x", {"Content-Type": "application/json", "Content-Encoding": "br"}, 415, "Content-Encoding 'br'")
     refused("/v1/traces", b"not gzip", {"Content-Type": "application/json", "Content-Encoding": "gzip"}, 400, "not gzip")
-    refused("/v1/logs", b"{}", {"Content-Type": "application/json"}, 404, "no such endpoint: POST /v1/logs")
-    refused("/v1/runs/nope", b"", {}, 404, "no run 'nope' here; it holds none yet", method="GET")
-    refused("/v1/runs/nope?fail_on=vibes", b"", {}, 400, "no gate vibes: fail_on takes unverified, loop, outcome, claim", method="GET")
+    # A path the server does not have is refused from the path alone, before a body is read, so this
+    # one sends none: a body left unread when the server closes aborts the client's send on Windows,
+    # the same way it did to the limit test below. Nothing here is waiting on who wins that.
+    refused("/v1/logs", None, {"Content-Type": "application/json"}, 404, "no such endpoint: POST /v1/logs")
+    refused("/v1/runs/nope", None, {}, 404, "no run 'nope' here; it holds none yet", method="GET")
+    refused("/v1/runs/nope?fail_on=vibes", None, {}, 400, "no gate vibes: fail_on takes unverified, loop, outcome, claim", method="GET")
     assert _call(server, "GET", "/healthz")[2] == b"ok\n"
     status, _, _ = _call(server, "POST", "/v1/traces", b'{"resourceSpans": []}', {"Content-Type": "application/json"})
     assert status == 200  # taken, and with no span in it, nothing to keep
     assert not server.store.traces.exists()  # nothing refused was kept
 
 
+class _HeadAndNoBody(io.BytesIO):
+    """A request's head, and behind it nothing. Every `read` is recorded; the head is taken by
+    `readline`, which does not come through here, so what is recorded is the body and only the body."""
+
+    def __init__(self, head: bytes) -> None:
+        super().__init__(head)
+        self.body_reads: list[int] = []
+
+    def read(self, size: int = -1, /) -> bytes:
+        self.body_reads.append(size)
+        return super().read(size)
+
+
+class _OneRequest:
+    """A connection for a handler driven without a socket: it hands over one request and keeps what the
+    handler writes back. A read of the body returns empty here rather than blocking, so a handler that
+    reads one is caught by the record instead of hanging the test."""
+
+    def __init__(self, head: bytes) -> None:
+        self.wire = _HeadAndNoBody(head)
+        self.sent = bytearray()
+
+    def makefile(self, mode: str, size: int = -1) -> _HeadAndNoBody:
+        assert mode == "rb"  # a handler writes with sendall: its wbufsize is 0
+        return self.wire
+
+    def sendall(self, data: bytes) -> None:
+        self.sent.extend(data)
+
+
 def test_a_body_past_the_limit_is_refused_before_it_is_read(server: Server) -> None:
+    """Content-Length says it is too big, so the body is never read — and that is checked here rather
+    than inferred from a 413, which a server that read the whole body first would also send.
+
+    Driven without a socket on purpose. The refusal means the server closes while a real client is
+    still sending, and on Windows that aborts the client's send (WinError 10053) before it reads the
+    answer, so a round trip asserts a race it also has to win: it failed that way on 2026-10-27, in CI
+    run 40580312490. Here the body is simply not there, and every read past the head is recorded.
+    """
     server.max_body = 1000
-    status, _, answer = _call(server, "POST", "/v1/traces", b"x" * 1001, {"Content-Type": "application/json"})
-    assert status == 413 and "at most 1000" in json.loads(answer)["error"]
+    connection = _OneRequest(
+        b"POST /v1/traces HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+        b"Content-Type: application/json\r\nContent-Length: 1001\r\n\r\n"
+    )
+    handler = _Handler(connection, ("127.0.0.1", 0), server)
+    head, _, answer = bytes(connection.sent).partition(b"\r\n\r\n")
+    assert head.startswith(b"HTTP/1.1 413 "), head
+    assert "at most 1000" in json.loads(answer)["error"]
+    assert connection.wire.body_reads == []  # not one of the 1001 bytes
+    assert handler.close_connection  # and a body not read is not left to be taken for the next request
+    assert not server.store.traces.exists()
+
+
+def test_the_refusal_reaches_a_client_that_has_sent_only_the_head(server: Server) -> None:
+    """The same 413 over a real socket, which is only possible because the refusal precedes the body:
+    the client stops after its head, and a server that read before refusing would still be waiting for
+    the 1001 bytes it was promised. Nothing is in flight for the close to abort, so this one does not
+    race. A client that sends the body anyway has that send aborted on Windows, and that abort is the
+    refusal arriving rather than a fault — on POSIX the same send lands in a buffer nobody reads and
+    the answer comes back regardless, which is why only one of the two platforms ever saw this.
+    """
+    server.max_body = 1000
+    connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+    try:
+        connection.putrequest("POST", "/v1/traces", skip_accept_encoding=True)
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", "1001")
+        connection.endheaders()  # the head, and not one byte of the 1001 it promises
+        answer = connection.getresponse()
+        assert answer.status == 413 and "at most 1000" in json.loads(answer.read())["error"]
+        assert connection.sock.recv(1) == b""  # closed, rather than left waiting for a body
+    finally:
+        connection.close()
+
+
+def test_a_body_that_unzips_past_the_limit_is_refused_once_it_is_unzipped(server: Server) -> None:
+    """The other half of the limit, and the half no header can answer: what a gzipped body comes to is
+    known only after it is read. So this one is an ordinary round trip, with nothing left unread."""
+    server.max_body = 1000
     bomb = gzip.compress(b'{"resourceSpans": [' + b" " * 5000 + b"]}")
     status, _, answer = _call(server, "POST", "/v1/traces", bomb, {"Content-Type": "application/json", "Content-Encoding": "gzip"})
     assert status == 413 and "unzips past 1000 bytes" in json.loads(answer)["error"]
