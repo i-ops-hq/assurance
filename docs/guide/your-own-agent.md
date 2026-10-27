@@ -1,10 +1,25 @@
 # Your own agent
 
-Claude Code keeps a transcript. For any other agent, the audit reads a run record your code writes, an OpenTelemetry trace it already sends, or what it posts to a local endpoint.
+Claude Code and Codex each keep their own log, and `assurance audit` reads both with no setup. For any other agent, it reads a run record your code writes, an OpenTelemetry trace it already sends, or what it posts to a local endpoint.
+
+## Claude Code and Codex: nothing to do
+
+Run `assurance audit` in a folder where you have used either. It takes the newest session of the two, and which log it is reading is decided from the file's first record rather than from a flag, because both agents write `.jsonl`.
+
+Codex is read from its `item_completed` event stream — one command with its argv, folder and exit code, one entry per file a patch touched — and not from the tool calls the model was sent, where a whole turn is a single `exec` call whose input is a TypeScript program. The two say the same thing; only one of them says it without a parser guessing.
+
+What differs in the report, and why:
+
+| | Claude Code | Codex |
+|---|---|---|
+| exit status of a command | the tool's error flag | the process's own `exit_code`, recorded |
+| reading a file | a `Read` call | `cat`, `sed -n`, `head` — recognised as reads |
+| "edited without reading it first" | not reported: the harness refuses such an edit, so its absence is our blind spot, not the agent's fault | reported, with the shell commands that could hold the read named beside it |
+| the Stop hook's own findings | read back by `assurance notices` | none: the hook is a Claude Code hook |
 
 ## Your own agent, or code that calls a model
 
-Claude Code keeps a transcript. An agent you wrote, or a script that calls a model's API, keeps nothing
+An agent you wrote, or a script that calls a model's API, keeps nothing
 unless you tell it to. Have it add one line of JSON to a file for each thing it does, and `assurance
 audit` reads that file the way it reads a Claude Code session:
 

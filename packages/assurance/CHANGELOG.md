@@ -1,3 +1,22 @@
+# 0.1.36
+
+- **`assurance audit` reads Codex sessions as well as Claude Code ones.** Run it in a folder where
+  you have used either and it takes the newest session of the two, with nothing to configure and no
+  flag saying which agent you used. Everything the audit says is said the same way about both: what
+  ran after the last edit, where it looped, whether the outcome matches what you asked for, and
+  what could not be classified. The guarantee was always computed by code rather than by a model,
+  which is why a second agent took a reader and not a rewrite.
+
+- **An edit is no longer reported as unread just because the agent reads with the shell.** Codex has
+  no Read tool — it runs `cat` or `sed -n` — and the finding was listing every file a session
+  touched. On one real session it went from 36 files to three. Claude Code sessions get the same
+  improvement in `--json`, where a file the shell created or printed now counts as known.
+
+- The report's first line names the agent whose session it read. It used to say "Claude Code
+  session" over any transcript.
+
+Needs `assurance-budget` 0.2.28 and `assurance-cli` 0.6.9, both pulled in by this release.
+
 # 0.1.35
 
 - **`assurance coupling` says less, and says the same thing twice running.** 0.1.34 printed a

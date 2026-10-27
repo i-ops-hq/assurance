@@ -1552,12 +1552,15 @@ def _is_session_limits_file(path: str, cwd: str) -> bool:
 
 
 def edited_without_read(session: Session) -> list[str]:
-    """Paths changed by Edit/MultiEdit/NotebookEdit with no earlier Read, successful Write, or
-    attached copy of the file (an @-mention, a file carried across a compaction).
+    """Paths changed by Edit/MultiEdit/NotebookEdit with no earlier Read, successful Write, shell
+    command that printed or wrote the file, or attached copy of it (an @-mention, a file carried
+    across a compaction).
 
-    `Write` creates or replaces whole files — the agent already knows the content. Failed edits
-    change nothing. Paths are compared after `os.path.normpath`, with relative paths resolved
-    against the session `cwd`. Returned paths are relative to `cwd` when they fall inside it.
+    `Write` creates or replaces whole files — the agent already knows the content. A shell command
+    counts both ways: `cat x.py` is how an agent with no Read tool reads one (`bash_read_targets`),
+    and `echo … > x.py` is how it creates one (`bash_edit_targets`). Failed edits change nothing,
+    and neither does a failed read. Paths are compared after `os.path.normpath`, with relative paths
+    resolved against the session `cwd`. Returned paths are relative to `cwd` when they fall inside it.
     """
     known_paths: set[str] = set()
     missing: list[str] = []
@@ -1572,6 +1575,15 @@ def edited_without_read(session: Session) -> list[str]:
             path = _call_path(call)
             if path is not None and not call.refused:
                 known_paths.add(_norm_path(path, session.cwd))
+            continue
+        command = shell_command(call)
+        if command is not None:
+            if not call.error and not call.refused:
+                known_paths.update(bash_read_targets(command, session.cwd, call.cwd))
+                # `bash_edit_targets` gives `""` for a command that rewrote the tree without naming
+                # the files (`patch`, `git checkout -- .`). That is "something changed, we cannot
+                # say what", which makes no file known, so it is dropped rather than added.
+                known_paths.update(p for p in bash_edit_targets(command, session.cwd, call.cwd) or () if p)
             continue
         if call.name in _WRITE_TOOLS:
             if call.error:
@@ -2140,6 +2152,82 @@ _EDIT_HINTS = (">", "tee", "sed", "perl", "cp", "mv", "install", "curl", "wget",
 
 #: git subcommands that rewrite files in the working tree.
 _GIT_TREE_WRITES = frozenset({"apply", "restore", "pull", "merge", "rebase", "cherry-pick", "am", "revert"})
+
+
+#: Commands that print a file's contents, every plain word after them naming one. `sed` is handled
+#: apart, because its first bare word is the script (`sed -n 1,50p file`) unless `-e`/`-f` carried
+#: it instead. Deliberately short: `grep`, `rg` and `awk` print the lines that matched, `wc` and
+#: `stat` print about the file rather than the file, and `ls` and `find` print neither — none of
+#: them is evidence that the agent saw what it went on to change, and excusing an edit is the
+#: expensive mistake here.
+_PRINTS_A_FILE = frozenset({"cat", "bat", "head", "tail", "less", "more", "nl", "od", "xxd", "diff"})
+#: Flags of `sed` that take the script as their value, so no bare word is one.
+_SED_SCRIPT_FLAGS = frozenset({"-e", "-f", "--expression", "--file"})
+
+
+def bash_read_targets(command: str, cwd: str, start: str = "") -> tuple[str, ...]:
+    """The files a shell command printed, each resolved from where the command was.
+
+    What `edited_without_read` needs from an agent that has no Read tool: Codex reads a file by
+    running `cat`, `sed -n` or `head` on it, so without this every edit it makes looks like an edit
+    to a file it never looked at, and the finding is 36 files long and says nothing.
+
+    Tight on purpose, in the one direction that matters. Missing a read costs a line in a report
+    that names the shell commands beside it; inventing one silently excuses an edit nobody checked.
+    So only the commands in `_PRINTS_A_FILE` count, only their plain word arguments, and nothing
+    that came from a variable or a glob — the shell expands those and the transcript does not say
+    to what. A failed command read nothing, and the caller drops it before asking.
+
+    Unlike `bash_edit_targets` this does not stop at the session's folder, because the question is
+    not whether the project changed but whether the agent saw the file, and `edited_without_read`
+    reports an edit wherever it lands. Restricting the reads and not the edits reported every edit
+    a session made outside its recorded folder as unread — which is every edit of a Codex Desktop
+    session, whose folder is the app's project container and not the checkout it works in.
+    """
+    if not any(head in command for head in _PRINTS_A_FILE | {"sed"}):
+        return ()
+    try:
+        segments = split_shell_segments(strip_heredoc_bodies(command))
+    except ValueError:
+        return ()
+    found: list[str] = []
+    place = Place(cwd, "", start)
+    for _, argv in place.walk(segments):
+        if not argv:
+            continue
+        for word in _printed_files(argv):
+            if not word or word[0] in "-<>&=" or any(ch in word for ch in "*?$\n") or _URL.match(word):
+                continue
+            where = place.resolve(word)
+            if where is not None:
+                found.append(where)
+    return tuple(found)
+
+
+def _printed_files(argv: list[str]) -> list[str]:
+    """The words of `argv` that name a file it printed, or none when the command prints no file."""
+    head = argv[0]
+    if head in _PRINTS_A_FILE:
+        return [word for word in argv[1:] if not word.startswith("-")]
+    if head != "sed" or "-i" in argv or any(word.startswith("-i") and not word.startswith("--") for word in argv):
+        return []  # `sed -i` edits; `bash_edit_targets` already has it
+    words: list[str] = []
+    script_given = False
+    skip = False
+    for word in argv[1:]:
+        if skip:
+            skip = False
+            continue
+        if word in _SED_SCRIPT_FLAGS:
+            script_given, skip = True, True
+            continue
+        if word.startswith("-"):
+            continue
+        if not script_given:
+            script_given = True  # the first bare word is the script itself
+            continue
+        words.append(word)
+    return words
 
 
 def bash_edits_project(command: str, cwd: str, start: str = "") -> bool:

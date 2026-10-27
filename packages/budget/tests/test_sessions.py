@@ -347,10 +347,13 @@ def test_find_latest_session_matches_cwd_not_folder_name(tmp_path: Path) -> None
 def test_main_no_session_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "empty-config"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "empty-codex"))
     (tmp_path / "empty-config" / "projects").mkdir(parents=True)
     assert main([]) == 2
     err = capsys.readouterr().err
-    assert "no Claude Code session recorded" in err
+    # Both agents are named: looking only where one writes and saying "no session recorded for this
+    # folder" is true about that agent and read as true about the folder.
+    assert "no Claude Code or Codex session recorded" in err
     assert str(tmp_path) in err
 
 

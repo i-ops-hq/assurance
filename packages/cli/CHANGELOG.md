@@ -1,3 +1,8 @@
+# 0.6.9
+
+- `assurance audit` is described as reading Claude Code **or Codex**, in the command list and in
+  its own `--help`. Needs `assurance-budget` 0.2.28, which does the reading.
+
 # 0.6.8
 
 - **`assurance coupling` is forwarded**, to `assurance_budget.coupling`, and listed in `assurance`
