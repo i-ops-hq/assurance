@@ -199,6 +199,7 @@ def test_a_body_past_the_limit_is_refused_before_it_is_read(server: Server) -> N
     handler = _Handler(connection, ("127.0.0.1", 0), server)
     head, _, answer = bytes(connection.sent).partition(b"\r\n\r\n")
     assert head.startswith(b"HTTP/1.1 413 "), head
+    assert b"\r\nConnection: close\r\n" in head, head  # the client is told, rather than left to find out
     assert "at most 1000" in json.loads(answer)["error"]
     assert connection.wire.body_reads == []  # not one of the 1001 bytes
     assert handler.close_connection  # and a body not read is not left to be taken for the next request
@@ -214,17 +215,49 @@ def test_the_refusal_reaches_a_client_that_has_sent_only_the_head(server: Server
     the answer comes back regardless, which is why only one of the two platforms ever saw this.
     """
     server.max_body = 1000
-    connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
-    try:
-        connection.putrequest("POST", "/v1/traces", skip_accept_encoding=True)
-        connection.putheader("Content-Type", "application/json")
-        connection.putheader("Content-Length", "1001")
-        connection.endheaders()  # the head, and not one byte of the 1001 it promises
-        answer = connection.getresponse()
+    # A raw socket, read with http.client's parser: an HTTPConnection hands its socket to a response
+    # that says `Connection: close` and closes it there, so there would be none left here to watch shut.
+    with socket.create_connection(("127.0.0.1", server.server_address[1]), timeout=10) as client:
+        client.sendall(
+            b"POST /v1/traces HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            b"Content-Type: application/json\r\nContent-Length: 1001\r\n\r\n"
+        )  # the head, and not one byte of the 1001 it promises
+        answer = http.client.HTTPResponse(client)
+        answer.begin()
         assert answer.status == 413 and "at most 1000" in json.loads(answer.read())["error"]
-        assert connection.sock.recv(1) == b""  # closed, rather than left waiting for a body
+        assert answer.getheader("Connection") == "close"
+        assert client.recv(1) == b""  # and it closes, as it said: not left waiting for a body
+
+
+def test_a_refusal_that_drops_the_connection_says_so_and_nothing_else_does(server: Server) -> None:
+    """An exporter holds one connection open across batches, so a refusal that drops it has to say
+    `Connection: close` — otherwise the next batch goes into a socket that is already gone. Only a
+    refused POST drops it: that is the one that can leave a body unread. A batch taken and a GET
+    refused leave nothing behind, and the request after each, down the same socket, is what says so.
+    """
+    server.max_body = 1000
+    kept = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+    try:
+        def answer(method: str, path: str, body: bytes | None = None, headers: dict[str, str] | None = None) -> tuple[int, str | None]:
+            kept.request(method, path, body=body, headers=headers or {})
+            got = kept.getresponse()
+            got.read()
+            return got.status, got.getheader("Connection")
+
+        assert answer("POST", "/v1/traces", b'{"resourceSpans": []}', {"Content-Type": "application/json"}) == (200, None)
+        assert answer("GET", "/v1/runs/nope") == (404, None)  # refused, and with nothing left unread
+        assert answer("GET", "/healthz") == (200, None)  # the same socket, still answering
+        assert kept.sock is not None
+
+        kept.putrequest("POST", "/v1/traces", skip_accept_encoding=True)
+        kept.putheader("Content-Type", "application/json")
+        kept.putheader("Content-Length", "1001")
+        kept.endheaders()  # the head alone: sending the body is the race this file does not run
+        refused = kept.getresponse()
+        assert (refused.status, refused.getheader("Connection")) == (413, "close")
+        assert kept.sock is None  # and http.client took it at its word, and let the socket go
     finally:
-        connection.close()
+        kept.close()
 
 
 def test_a_body_that_unzips_past_the_limit_is_refused_once_it_is_unzipped(server: Server) -> None:
