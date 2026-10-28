@@ -1,3 +1,17 @@
+# 0.2.29
+
+- **`assurance serve` says when it is closing a connection.** A refusal has always closed it —
+  what is left of a refused body is not read, and cannot be taken for the next request — but no
+  answer said so. This server is the endpoint an OTLP/HTTP exporter keeps a connection open to
+  between batches, so an exporter learned the connection was gone on the batch *after* the
+  refusal, as a socket that had stopped working. Every answer that ends its connection now carries
+  `Connection: close`, which covers the other reason one ends as well: the client having asked.
+
+  A refused `GET` leaves nothing unread, so it does not close and does not say so — the half that
+  keeps this from becoming "close everything". One keep-alive connection carrying four requests is
+  what holds that line: a batch taken and a `GET` refused come back with no `Connection` header,
+  and the next request down the same socket is what proves it stayed up.
+
 # 0.2.28
 
 - **`assurance audit` reads Codex sessions.** `assurance_budget.codex` turns a Codex CLI rollout

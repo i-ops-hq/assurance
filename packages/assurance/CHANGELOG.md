@@ -1,3 +1,11 @@
+# 0.1.37
+
+- **An exporter is told when `assurance serve` closes a connection.** A request the server refuses
+  — one past the size limit, or to an endpoint it does not have — ends that connection, and the
+  answer now says `Connection: close` rather than leaving the sender to find out on its next batch,
+  when the socket is already gone. Connections carrying requests the server accepts are untouched
+  and stay open. `assurance-budget` 0.2.29, pinned exactly.
+
 # 0.1.36
 
 - **`assurance audit` reads Codex sessions as well as Claude Code ones.** Run it in a folder where
