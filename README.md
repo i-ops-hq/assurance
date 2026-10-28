@@ -9,7 +9,7 @@
 [![tests](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml/badge.svg)](https://github.com/i-ops-hq/assurance/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-2563eb)](LICENSE)
 
-[Quick start](#quick-start) · [While you work](#run-it-after-every-session) · [Use cases](#use-cases) · [Commands](#commands) · [Guides](#guides) · [Feedback](#tell-us-where-its-wrong)
+[Quick start](#quick-start) · [Co-change](#what-usually-changes-with-what-you-just-changed) · [Use cases](#use-cases) · [Commands](#commands) · [After every turn](#run-it-after-every-turn-if-you-want-that) · [Feedback](#tell-us-where-its-wrong)
 
 </div>
 
@@ -75,35 +75,33 @@ What "All done" left out:
 - ❔ The test the prompt asked for **last ran before the last edit, and failed**. The file it named was
   changed. Whether the fix is right is not something it claims to know, and it says so.
 
-## Run it after every session
+## What usually changes with what you just changed
 
-Turn on the Stop hook and Claude Code runs the audit each time Claude finishes a turn. It speaks only
-when there is something to say, at one of three levels, named first:
-
-| Level | When | Who is asked |
-|---|---|---|
-| **note** | Code changed this turn and nothing has tested it yet | You, once, with the command to run. Claude is not asked anything |
-| **suggested review** | A test failed after the last edit, a protected path changed, or Claude says the tests pass with nothing behind it | You, and Claude: fix it or say why not |
-| **stop and check** | Untested code was pushed, merged, published, deployed, migrated or committed on main | You, and Claude: verify it before anything builds on it |
-
-```
-assurance · note: no test or check has passed since the last edit to src/billing/invoice.py (14:04). Run pytest -q tests/test_invoice.py before you commit or push.
-assurance · suggested review: the last test run after the last edit to src/billing/invoice.py (14:04) failed: pytest -q tests/test_invoice.py (tests/test_invoice.py::test_eur_rounding; 1 failed, 11 passed in 0.33s).
-assurance · stop and check: pushed at 14:06 with no passing test or check after the last edit to src/billing/invoice.py (14:04).
-```
+The other half of an unfinished change is the file you forgot. `assurance coupling` reads your git
+history — no graph, no configuration, no model — and names what travels with the files you touched
+and that you have not touched this time.
 
 ```bash
-uvx assurance@latest hook install   # shows the change to ~/.claude/settings.json, asks, then writes it
-uvx assurance hook remove           # takes it out again; nothing else changes
+uvx assurance coupling    # in any git repository
 ```
 
-It knows the test commands of Maven, Gradle, Bazel, Django, Rails, jest, vitest, go, cargo and more,
-reads your `package.json`, `Makefile` and `justfile` scripts to learn yours, and never counts a run of
-zero tests as a pass. [What it recognises](docs/guide/project-rules.md).
+Run in this repository with nothing changed, it falls back to the repository as a whole, and the
+first thing it says is about its own release process:
 
-Or as a Claude Code plugin: `claude plugin marketplace add i-ops-hq/assurance`, then
-`claude plugin install assurance@i-ops-hq`. It never blocks or fails a session. Everything about
-pinning, sharing it with a team, Windows and what the plugin runs: [the hook guide](docs/guide/hook.md).
+```
+  plugins/assurance/.claude-plugin/plugin.json
+    plugins/assurance/scripts/assurance.sh         34 of its 35 commits    4.8x chance
+    packages/assurance/pyproject.toml              34 of its 35 commits    4.4x chance
+    packages/assurance/README.md                   35 of its 35 commits    4.0x chance
+    packages/assurance/CHANGELOG.md                34 of its 35 commits    4.1x chance
+```
+
+The release version lives in those files and they move as one set. **Twice in one day the author of
+this paragraph moved some of them and not the others**, and a test caught it both times. The tool
+had already said so, from history, before either mistake.
+
+Every report ends with the `git log` command that checks its own first line, so you never have to
+take its word for it.
 
 ## Use cases
 
@@ -150,6 +148,47 @@ Every command works as a CI gate as it is:
 | `0` | Checked, found nothing |
 | `1` | Something to look at, **including something it couldn't check** |
 | `2` | Couldn't run |
+
+## Run it after every turn, if you want that
+
+Everything above is something you run. This is the same audit as a Stop hook, running itself each
+time Claude finishes a turn, which some people want and some people do not.
+
+Worth knowing before you turn it on: **keeping an agent working until a condition holds is something
+Claude Code ships on its own**, with [`/goal`](https://code.claude.com/docs/en/goal). What that
+condition is judged against is the difference. `/goal`'s own documentation says its evaluator
+*"doesn't run commands or read files independently"* and *"can only judge what Claude has already
+surfaced in the conversation"* — so an agent that says the tests passed can satisfy it by saying so.
+This reads the session's tool records and computes whether a test actually ran after the last edit,
+from the exit status that was recorded. Neither is better at everything; they answer different
+questions, and only one of them is unimpressed by a confident sentence.
+
+It speaks only when there is something to say, at one of three levels, named first:
+
+| Level | When | Who is asked |
+|---|---|---|
+| **note** | Code changed this turn and nothing has tested it yet | You, once, with the command to run. Claude is not asked anything |
+| **suggested review** | A test failed after the last edit, a protected path changed, or Claude says the tests pass with nothing behind it | You, and Claude: fix it or say why not |
+| **stop and check** | Untested code was pushed, merged, published, deployed, migrated or committed on main | You, and Claude: verify it before anything builds on it |
+
+```
+assurance · note: no test or check has passed since the last edit to src/billing/invoice.py (14:04). Run pytest -q tests/test_invoice.py before you commit or push.
+assurance · suggested review: the last test run after the last edit to src/billing/invoice.py (14:04) failed: pytest -q tests/test_invoice.py (tests/test_invoice.py::test_eur_rounding; 1 failed, 11 passed in 0.33s).
+assurance · stop and check: pushed at 14:06 with no passing test or check after the last edit to src/billing/invoice.py (14:04).
+```
+
+```bash
+uvx assurance@latest hook install   # shows the change to ~/.claude/settings.json, asks, then writes it
+uvx assurance hook remove           # takes it out again; nothing else changes
+```
+
+It knows the test commands of Maven, Gradle, Bazel, Django, Rails, jest, vitest, go, cargo and more,
+reads your `package.json`, `Makefile` and `justfile` scripts to learn yours, and never counts a run of
+zero tests as a pass. [What it recognises](docs/guide/project-rules.md).
+
+Or as a Claude Code plugin: `claude plugin marketplace add i-ops-hq/assurance`, then
+`claude plugin install assurance@i-ops-hq`. It never blocks or fails a session. Everything about
+pinning, sharing it with a team, Windows and what the plugin runs: [the hook guide](docs/guide/hook.md).
 
 ## Guides
 
