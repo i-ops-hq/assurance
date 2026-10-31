@@ -42,6 +42,8 @@ from assurance_budget.outcome import outcome, outcome_lines
 from assurance_budget.record import RunRecord, is_run_record, model_lines, model_summary, read_run_record
 from assurance_budget.sessions import (
     Declared,
+    agent_actor,
+    agent_name,
     Session,
     ToolCall,
     after_last_edit,
@@ -73,11 +75,8 @@ _READ_BEFORE_EDIT_ENFORCED = frozenset({"claude-code"})
 #: What to call the agent whose session this is, in the report's first line. A source with no entry
 #: is named by its own `Session.source`, so a reader added later says what it read without this
 #: having to be edited — and never says "Claude Code" over somebody else's transcript.
-_AGENT_NAMES = {"claude-code": "Claude Code", CODEX_SOURCE: "Codex"}
-
-
-def _agent_name(source: str) -> str:
-    return _AGENT_NAMES.get(source, source or "Agent")
+#: The report's header names the agent from `sessions.agent_name`, the same map the findings use, so
+#: the header and the sentences under it can never disagree about whose session this is.
 
 
 #: How a run record's edits and commands are named in the report, rather than the tool each is read as.
@@ -151,7 +150,7 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         declared_note = ""  # the finding says it already
     out: dict[str, Any] = {"systemMessage": _notice_line(notice, declared_note)}
     if nudge and notice.ask and not data.get("stop_hook_active"):  # a note asks nothing of Claude
-        finding = notice.finding.replace("Claude's last message says", "Your last message says")
+        finding = notice.finding.replace(f"{agent_actor(session.source)}'s last message says", "Your last message says")
         context = f"Assurance audit of this session ({notice.level}): {_end_sentence(finding)}"
         if notice.consequence:
             context += f" {_end_sentence(notice.consequence)}"
@@ -580,7 +579,7 @@ def _claim_line(report: dict[str, Any]) -> str | None:
     if not claim:
         return None
     words = claim["excerpt"]
-    whose = "Claude's" if report.get("claim") else "The run's"
+    whose = f"{agent_actor(report.get('source') or '')}'s" if report.get("claim") else "The run's"
     said = f"{whose} last word: \"{words}\"" + ("" if words.endswith((".", "!", "?", "…")) else ".")
     against = list(claim["against"])
     if not against:
@@ -819,7 +818,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     sid = session.session_id[:8] if session.session_id else "?"
     duration = _duration_phrase(report.get("duration_seconds"))
     where = session.cwd or str(session.path)
-    header = f"Agent run {session.session_id}" if run else f"{_agent_name(session.source)} session {sid}"
+    header = f"Agent run {session.session_id}" if run else f"{agent_name(session.source)} session {sid}"
     if duration:
         header += f" — {duration}"
     if where:

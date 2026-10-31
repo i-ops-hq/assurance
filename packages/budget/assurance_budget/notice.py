@@ -36,6 +36,7 @@ from typing import Sequence
 from assurance_budget.asked import NamedCommand, includes, names_cover, names_in, pattern_covers
 from assurance_budget.sessions import (
     _CHANGE_TOOLS,
+    agent_actor,
     Place,
     _git_subcommand,
     _SHELL_TOOLS,
@@ -554,7 +555,7 @@ def _claim(
     else:
         recognised = " it recognises" if after else ""
         why = f"no test or check{recognised} ran after {_edits(tuple(pending.paths), pending.last_at)}"
-    return _Finding(text_seq, f"Claude's last message says the tests pass, but {why}", ask, after)
+    return _Finding(text_seq, f"{agent_actor(session.source)}'s last message says the tests pass, but {why}", ask, after)
 
 
 def claim_against(session: Session, declared: Declared | None = None, already: Sequence[str] = ()) -> list[str]:
@@ -603,7 +604,8 @@ def _claim_over_a_failure(session: Session, boundary: int, runs: list[_Run]) -> 
         return None
     return _Finding(
         text_seq,
-        f"Claude's last message says the tests pass, but the last {failing.noun} failed: {failing.label}{_shown(failing)}",
+        f"{agent_actor(session.source)}'s last message says the tests pass, "
+        f"but the last {failing.noun} failed: {failing.label}{_shown(failing)}",
         "Fix what failed and run it again, or correct what you said.",
     )
 

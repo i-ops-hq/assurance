@@ -16,6 +16,7 @@ import pytest
 
 from assurance_budget.codex import CODEX_SOURCE, find_latest_codex_session, is_codex, read_codex
 from assurance_budget.events import LogError
+from assurance_budget.notice import stop_notice
 from assurance_budget.session_cli import audit, format_report, main
 from assurance_budget.sessions import edited_without_read
 
@@ -217,10 +218,61 @@ def test_the_report_names_codex_and_not_claude_code(tmp_path: Path) -> None:
     path = _rollout(tmp_path, _meta("/p"), _item(_command("ls", "/p")))
     session = read_codex(path)
     loops, report = audit(session, None, None)
-    first = format_report(session, loops, report).splitlines()[0]
+    whole = format_report(session, loops, report)
+    first = whole.splitlines()[0]
     assert first.startswith("Codex session ")
     assert "Claude Code" not in first
+    # Not only the header. Checking `splitlines()[0]` is why "Claude's last word" survived a whole
+    # release under a line that correctly said "Codex session": no assertion read the body.
+    assert "Claude" not in whole
     assert report["source"] == CODEX_SOURCE
+
+
+def _claimed(tmp_path: Path, *, failed: bool = False) -> Path:
+    """A rollout whose last word claims the tests pass over an edit nothing bears out. `failed` puts
+    a failing run after the edit, so the claim is held against a result instead of against silence."""
+    after = (
+        [_item(_command("pytest -q", "/p", exit_code=1, output="..FF\n2 failed, 5 passed in 0.12s", ident="exec-3"),
+               when="2026-10-26T09:00:03.000Z")]
+        if failed else []
+    )
+    return _rollout(
+        tmp_path, _meta("/p"),
+        _item(_typed("fix the bug in a.py"), when="2026-10-26T09:00:01.000Z"),
+        _item(_patch({"/p/a.py": {"type": "update", "unified_diff": "@@\n", "move_path": None}}),
+              when="2026-10-26T09:00:02.000Z"),
+        *after,
+        _item({"type": "AgentMessage", "id": "a1", "phase": "final_answer",
+               "content": [{"type": "Text", "text": "All tests pass now."}]}, when="2026-10-26T09:00:09.000Z"),
+    )
+
+
+def test_a_claim_finding_over_a_codex_rollout_names_codex(tmp_path: Path) -> None:
+    """The finding reports on the agent's own last message, so naming the wrong agent makes it false
+    about the one thing it reports on. Every claim finding over a Codex rollout said "Claude's" from
+    0.1.36 until this was fixed."""
+    notice = stop_notice(read_codex(_claimed(tmp_path)))
+    assert notice is not None
+    assert notice.finding.startswith("Codex's last message says the tests pass, but ")
+    assert "Claude" not in notice.finding
+
+
+@pytest.mark.parametrize(
+    "failed, tail",
+    [
+        (False, "Nothing in the session goes against it, which is not the same as bearing it out."),
+        (True, "Against it: the last test run failed: pytest -q."),
+    ],
+    ids=["nothing-bears-it-out", "a-run-that-failed"],
+)
+def test_the_reports_last_word_names_codex_on_either_branch(tmp_path: Path, failed: bool, tail: str) -> None:
+    """`_claim_line` chose between "Claude's" and "The run's" — a session against a run record, not
+    one agent against another — so a Codex session took the Claude half of a question it was not asked."""
+    session = read_codex(_claimed(tmp_path, failed=failed))
+    loops, report = audit(session, None, None)
+    out = format_report(session, loops, report)
+    assert f'Codex\'s last word: "All tests pass now." {tail}' in out
+    assert "Claude" not in out
 
 
 def test_a_file_the_shell_printed_counts_as_read(tmp_path: Path) -> None:
