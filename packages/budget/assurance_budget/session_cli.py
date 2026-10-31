@@ -42,6 +42,7 @@ from assurance_budget.outcome import outcome, outcome_lines
 from assurance_budget.record import RunRecord, is_run_record, model_lines, model_summary, read_run_record
 from assurance_budget.sessions import (
     Declared,
+    agent_name,
     Session,
     ToolCall,
     after_last_edit,
@@ -73,11 +74,8 @@ _READ_BEFORE_EDIT_ENFORCED = frozenset({"claude-code"})
 #: What to call the agent whose session this is, in the report's first line. A source with no entry
 #: is named by its own `Session.source`, so a reader added later says what it read without this
 #: having to be edited — and never says "Claude Code" over somebody else's transcript.
-_AGENT_NAMES = {"claude-code": "Claude Code", CODEX_SOURCE: "Codex"}
-
-
-def _agent_name(source: str) -> str:
-    return _AGENT_NAMES.get(source, source or "Agent")
+#: The report's header names the agent from `sessions.agent_name`, the same map the findings use, so
+#: the header and the sentences under it can never disagree about whose session this is.
 
 
 #: How a run record's edits and commands are named in the report, rather than the tool each is read as.
@@ -819,7 +817,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
     sid = session.session_id[:8] if session.session_id else "?"
     duration = _duration_phrase(report.get("duration_seconds"))
     where = session.cwd or str(session.path)
-    header = f"Agent run {session.session_id}" if run else f"{_agent_name(session.source)} session {sid}"
+    header = f"Agent run {session.session_id}" if run else f"{agent_name(session.source)} session {sid}"
     if duration:
         header += f" — {duration}"
     if where:
