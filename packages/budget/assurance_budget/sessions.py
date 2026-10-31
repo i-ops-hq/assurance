@@ -44,6 +44,32 @@ KNOWN_RECORDS = (
     "agent-name",
 )
 
+#: Two names per `Session.source`, because the report's header and a finding need different words.
+#: The header names the tool a person installed — "Claude Code session a1b2c3" — and a finding names
+#: the actor that did the work — "Claude's last message says the tests pass". Collapsing them to one
+#: string was tried and got the header wrong, which is why this is a pair.
+#:
+#: A finding naming the wrong agent is worse than one naming none: since the Codex reader shipped in
+#: 0.1.36, every claim finding over a Codex rollout said "Claude's last message", which is a false
+#: statement about the one thing the sentence reports on. A source with no entry is named by its own
+#: `source`, so a reader added later says what it read without this being edited.
+_AGENT_NAMES = {
+    "claude-code": ("Claude Code", "Claude"),
+    "codex": ("Codex", "Codex"),
+    "opentelemetry": ("Agent run", "the agent"),
+}
+
+
+def agent_name(source: str) -> str:
+    """The tool whose session this is, for the report's header."""
+    return _AGENT_NAMES.get(source, (source, source))[0] or "Agent"
+
+
+def agent_actor(source: str) -> str:
+    """Who did the work, for a sentence that names it: `Claude`, `Codex`, else the source."""
+    return _AGENT_NAMES.get(source, (source, source))[1] or "the agent"
+
+
 _ASSISTANT_ONLY = frozenset({"text", "thinking", "redacted_thinking"})
 _EDIT_TOOLS = frozenset({"Edit", "MultiEdit", "NotebookEdit"})
 _WRITE_TOOLS = frozenset({"Write"})
