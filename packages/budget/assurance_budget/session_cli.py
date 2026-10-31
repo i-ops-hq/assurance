@@ -42,6 +42,7 @@ from assurance_budget.outcome import outcome, outcome_lines
 from assurance_budget.record import RunRecord, is_run_record, model_lines, model_summary, read_run_record
 from assurance_budget.sessions import (
     Declared,
+    agent_actor,
     agent_name,
     Session,
     ToolCall,
@@ -149,7 +150,7 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
         declared_note = ""  # the finding says it already
     out: dict[str, Any] = {"systemMessage": _notice_line(notice, declared_note)}
     if nudge and notice.ask and not data.get("stop_hook_active"):  # a note asks nothing of Claude
-        finding = notice.finding.replace("Claude's last message says", "Your last message says")
+        finding = notice.finding.replace(f"{agent_actor(session.source)}'s last message says", "Your last message says")
         context = f"Assurance audit of this session ({notice.level}): {_end_sentence(finding)}"
         if notice.consequence:
             context += f" {_end_sentence(notice.consequence)}"
@@ -578,7 +579,7 @@ def _claim_line(report: dict[str, Any]) -> str | None:
     if not claim:
         return None
     words = claim["excerpt"]
-    whose = "Claude's" if report.get("claim") else "The run's"
+    whose = f"{agent_actor(report.get('source') or '')}'s" if report.get("claim") else "The run's"
     said = f"{whose} last word: \"{words}\"" + ("" if words.endswith((".", "!", "?", "…")) else ".")
     against = list(claim["against"])
     if not against:
