@@ -12,6 +12,13 @@
   what holds that line: a batch taken and a `GET` refused come back with no `Connection` header,
   and the next request down the same socket is what proves it stayed up.
 
+- **A finding names the agent whose session it read.** Since the Codex reader shipped in 0.2.28, a
+  claim finding and the report's last-word line over a Codex rollout both said "Claude" — a false
+  statement about the one thing those sentences report on. The names live once now, as a pair per
+  source: the tool for the report's header ("Codex session 01a17788") and the actor for a sentence
+  that names it ("Codex's last message says the tests pass"). A source with no entry is named by
+  its own `source`, so a reader added later says what it read without this being edited.
+
 # 0.2.28
 
 - **`assurance audit` reads Codex sessions.** `assurance_budget.codex` turns a Codex CLI rollout
