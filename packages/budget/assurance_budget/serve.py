@@ -151,7 +151,7 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             self._post()
         except _Refused as refused:
-            self.close_connection = True  # what is left of a refused body is not read
+            self.close_connection = True  # what is left of a refused body is not read, so the connection goes
             self._json(refused.status, {"error": refused.message})
 
     # --- writing --------------------------------------------------------------------------------
@@ -315,6 +315,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _send(self, status: int, body: bytes, kind: str) -> None:
         self.send_response(status)
+        if self.close_connection:
+            # This answer is the last one on this connection, whether because a refusal left a body
+            # unread or because the client asked to close. An exporter holds one open between batches:
+            # it is told here, rather than finding the socket gone on the batch after this.
+            self.send_header("Connection", "close")
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

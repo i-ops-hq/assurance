@@ -1,6 +1,6 @@
 {
   "name": "assurance",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "description": "After each turn, checks Claude's code changes against the tests that ran and what you asked for, and says so when untested code was pushed, merged, published or committed on main.",
   "author": {
     "name": "I-Ops",
