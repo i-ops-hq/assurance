@@ -24,8 +24,21 @@ from assurance_budget.sessions import outcome_of_test_run
     ("ctest", False, "Test project /src/build\nNo tests were found!!!"),
     ("npx jest --passWithNoTests", False, "No tests found, exiting with code 0"),
     ("npx vitest run", False, "No test files found, exiting with code 0"),
-    ("pytest -q -k nothing_matches", True, "12 deselected in 0.02s\n===== 12 deselected in 0.02s ====="),
-    ("pytest -q", True, "no tests ran in 0.01s\n============================ no tests ran in 0.01s ============================="),
+    ("pytest -k nothing_matches", True, "\n===== 12 deselected in 0.02s ====="),
+    ("pytest", True, "\n============================ no tests ran in 0.01s ============================="),
+    # `-q` prints the summary with no `=` banner. Both cases above used to be labelled `pytest -q`
+    # while supplying the banner as well, so the quiet form -- the one the docs prescribe -- was
+    # never under test, and an all-skipped `-q` run was read as a pass until 2026-11-02.
+    ("pytest -q -k nothing_matches", True, "\n12 deselected in 0.02s"),
+    ("pytest -q", True, "\nno tests ran in 0.01s"),
+    ("pytest -q", False, "sssss                                   [100%]\n5 skipped in 0.03s"),
+    # `format_session_duration` appends ` (H:MM:SS)` once a session reaches 60s, and `-q` does not
+    # suppress it. Omitting that group left the quiet branch doing nothing for any suite over a
+    # minute, which is where `-q` and skips conditional on a database or a key concentrate.
+    ("pytest -q", False, "2 skipped in 61.02s (0:01:01)"),
+    ("pytest -q", True, "no tests ran in 75.00s (0:01:15)"),
+    # A CRLF transcript ends the line with \r, so a `$` anchor misses it. Windows is a real target.
+    ("pytest -q", True, "2 skipped in 0.01s\r\n"),
     ("python -m unittest", False, "\n----------------------------------------------------------------------\nRan 0 tests in 0.000s\n\nOK"),
     ("npx mocha", False, "\n  0 passing (1ms)\n"),
     ("bundle exec rspec", False, "\nFinished in 0.001 seconds\n0 examples, 0 failures\n"),
@@ -33,7 +46,9 @@ from assurance_budget.sessions import outcome_of_test_run
     ("go test ./...", False, "?   \texample.com/app\t[no test files]\n?   \texample.com/app/cmd\t[no test files]\n"),
     ("go test -run Nope ./...", False, "ok  \texample.com/app\t0.004s [no tests to run]\n"),
     ("cargo test", False, "    Finished `test` profile\n     Running unittests src/lib.rs\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n"),
-], ids=["ctest", "jest", "vitest", "pytest-deselected", "pytest-none", "unittest", "mocha", "rspec", "dotnet", "go-no-files", "go-no-match", "cargo"])
+], ids=["ctest", "jest", "vitest", "pytest-deselected", "pytest-none", "pytest-q-deselected",
+                                 "pytest-q-none", "pytest-q-all-skipped", "pytest-q-long-skipped",
+                                 "pytest-q-long-none", "pytest-q-crlf", "unittest", "mocha", "rspec", "dotnet", "go-no-files", "go-no-match", "cargo"])
 def test_a_run_of_no_tests_is_empty(command: str, error: bool, output: str) -> None:
     assert outcome_of_test_run(command, error, output) == "empty"
 
@@ -126,3 +141,37 @@ def test_the_gates_count_it_as_nothing_verified(tmp_path: Path, capsys: pytest.C
 ], ids=["pytest-failure-mentions-it", "jest-log-line", "pytest-collection-error", "pnpm-recursive", "dotnet-two-dlls", "maven-modules", "make-two-runners"])
 def test_a_run_that_ran_tests_or_failed_is_not_empty(command: str, error: bool, output: str, outcome: str) -> None:
     assert outcome_of_test_run(command, error, output) == outcome
+
+
+@pytest.mark.parametrize("command, head", [
+    ("ctest && pytest -q", "100% tests passed, 0 tests failed out of 5\n"),
+    ("./gradlew test && pytest -q", "BUILD SUCCESSFUL in 12s\n"),
+    ("bazel test //... && pytest -q", "Executed 3 out of 3 tests: 3 tests pass.\n"),
+    ("phpunit && pytest -q", "OK (5 tests, 7 assertions)\n"),
+    ("bun test && pytest -q", " 5 pass\n 0 fail\n"),
+    ("go test -cover ./... && pytest -q", "ok  \texample.com/app\t0.015s\tcoverage: 85.0%\n"),
+], ids=["ctest", "gradle", "bazel", "phpunit", "bun", "go-cover"])
+@pytest.mark.parametrize("quiet", ["2 skipped in 0.01s\n", "no tests ran in 0.01s\n"],
+                         ids=["skipped", "no-tests"])
+def test_one_runner_finding_nothing_does_not_make_the_whole_command_empty(
+        command: str, head: str, quiet: str) -> None:
+    """A command can be two runners, and the bare `-q` summary cannot speak for both.
+
+    Reading pytest's quiet summary is what makes this reachable: the bannerless line appears in every
+    `-q` run, so without a guard `ctest && pytest -q` reported "ran no tests" while the hook named
+    **ctest**, which had just run five. False about the command it names is worse, for this product,
+    than a sentence it never says.
+
+    Counting test segments is what answers it, rather than a pattern per runner. Six runners here and
+    only two print anything a pattern could key on as "tests ran" — `./gradlew test` prints
+    `BUILD SUCCESSFUL in 12s` whether it ran a thousand tests or none, so no regex over its output
+    could ever have told these apart.
+    """
+    assert outcome_of_test_run(command, False, head + quiet) == "passed"
+
+
+def test_a_single_pytest_command_is_still_read_as_having_verified_nothing() -> None:
+    # The counterfactual for the guard above: one runner, same output, and the emptiness stands.
+    # Without this, a guard that simply refused to ever say "empty" would pass the whole class.
+    assert outcome_of_test_run("pytest -q", False, "2 skipped in 0.01s\n") == "empty"
+    assert outcome_of_test_run("pytest -q tests/ && echo done", False, "2 skipped in 0.01s\n") == "empty"
