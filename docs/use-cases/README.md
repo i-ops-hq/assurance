@@ -12,5 +12,20 @@ the workflow, the few lines that set it up, and what it does not do.
 | [Platform, DevOps and SRE](platform.md) | An agent pushes, deploys or migrates over code nothing tested | Stop and check on the ship; what a change reaches; limits a session cannot raise |
 | [Teams building their own agents](agent-builders.md) | The gate said allow, the run said done, and the check failed | A run record or your OTel traces, audited; a verdict your code can stop on |
 
+Every page has its own workflow diagram. The general shape is the same everywhere:
+
+```mermaid
+flowchart LR
+    s0(["Prompt"])
+    s1["AI agent<br/>edits code"]
+    s2["Agent runs<br/>the tests"]
+    A["🛡️ Assurance<br/>checks what<br/>really happened"]
+    s4(["Commit, push,<br/>deploy"])
+    s0 --> s1 --> s2 --> A --> s4
+    style A stroke:#dc2626,stroke-width:3px
+```
+
+The red box is Assurance. Everything around it is your workflow as it is today.
+
 New to it? Start with the [README](../../README.md): one command shows what your last Claude Code
 session did and did not check.

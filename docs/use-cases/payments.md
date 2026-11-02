@@ -10,14 +10,20 @@ and the reconciliation test last ran before the final edit, and failed. Nobody r
 so the change ships on the agent's word. In money code an off-by-one-cent bug is a ledger break, a
 refund dispute and an audit finding.
 
-## Where Assurance sits
+## The workflow, with Assurance in it
 
+```mermaid
+flowchart LR
+    s0(["Ticket"])
+    s1["Agent edits<br/>billing code"]
+    A["🛡️ Assurance<br/>ledger tests passed?<br/>migrations untouched?"]
+    s3["Pull request"]
+    s4(["Deploy"])
+    s0 --> s1 --> A --> s3 --> s4
+    style A stroke:#dc2626,stroke-width:3px
 ```
-ticket ─▶ agent edits billing code ─▶ note: nothing has tested it yet
-                                   ─▶ ledger tests run ─▶ suggested review if they failed
-                                   ─▶ git push / deploy ─▶ stop and check if nothing passed after the edit
-                                   ─▶ CI: assurance audit --fail-on-outcome --fail-on-claim
-```
+
+The red box is Assurance. Everything around it is your workflow as it is today.
 
 ## Set it up
 
