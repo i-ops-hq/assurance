@@ -1777,7 +1777,9 @@ def outcome_of_test_run(
     empty.
     """
     visible = exit_known and _exit_is_visible(command, "test", declared)
-    if ran_no_tests(result_tail, whole=visible and len(result_tail) < _RESULT_TAIL_CHARS):
+    whole = visible and len(result_tail) < _RESULT_TAIL_CHARS
+    if ran_no_tests(result_tail, whole=whole) or _quiet_pytest_verified_nothing(
+            command, result_tail, declared, whole):
         return "empty"  # pytest exits 5 and jest 1 when nothing ran: the exit is the emptiness, not a failure
     if visible:
         return "failed" if error else "passed"
@@ -1806,7 +1808,21 @@ _RAN_SOME = re.compile(
     r"|^ok\s+\S+\s+[\d.]+s\s*$|^test result: \w+\. [1-9]|^Ran [1-9]\d* tests? in",
     re.M,
 )
-_PYTEST_FINAL = re.compile(r"^=+ (.+) in [\d.]+s(?: \([\d:]+\))? =+$", re.M)
+_PYTEST_FINAL = re.compile(r"^=+ (.+) in [\d.]+s(?: \([\d:]+\))? =+\r?$", re.M)
+#: `pytest -q` prints its summary with no `=` banner around it: a bare `2 skipped in 0.00s` or
+#: `no tests ran in 0.00s`. The banner is exactly what `-q` suppresses, and every branch above keyed
+#: on it, so an all-skipped `-q` run was recorded as a PASS -- identical at every gate to a suite
+#: that verified everything, with the agent's "All tests pass now" believed. `-q` is the form this
+#: project's docs and every use-case page prescribe. Read only through
+#: `_quiet_pytest_verified_nothing`, which is command-aware: a bare count line cannot speak for a
+#: command that is two runners.
+#:
+#: The duration group is not decoration. `format_session_duration` appends ` (H:MM:SS)` once a
+#: session reaches 60 seconds and `-q` does not suppress that, so without it this does nothing for
+#: any suite over a minute -- which is where `-q` and skips conditional on a database, a network or
+#: a key actually live. Found by a reviewer who ran a real 61-second all-skipped suite.
+_PYTEST_QUIET_FINAL = re.compile(r"^((?:\d+ [a-z]+)(?:, \d+ [a-z]+)*) in [\d.]+s(?: \([\d:]+\))?\r?$", re.M)
+_PYTEST_QUIET_NONE = re.compile(r"^no tests ran in [\d.]+s(?: \([\d:]+\))?\r?$", re.M)
 _CARGO_BINARY = re.compile(r"^test result: \w+\. (\d+) passed; (\d+) failed", re.M)
 _GO_LINE = re.compile(r"^(ok|FAIL|\?)\s+\S+.*$", re.M)
 
@@ -1848,6 +1864,39 @@ def failure_evidence(tail: str) -> str:
         parts.append(counts[-1])
     said = "; ".join(parts)
     return said if len(said) <= _EVIDENCE_MAX else said[: _EVIDENCE_MAX - 1] + "…"
+
+
+def _quiet_pytest_verified_nothing(
+    command: str, tail: str, declared: Declared | None, whole: bool
+) -> bool:
+    """Whether a `pytest -q` run in this command printed a summary meaning it verified nothing.
+
+    Separate from `ran_no_tests` because it needs the command, and because what it reads is weaker
+    evidence than anything that function keys on. `===== 2 skipped in 0.01s =====` is self-evidently
+    pytest's whole-run final line; a bare `2 skipped in 0.01s` is not. So two conditions guard it.
+
+    `whole`, for the same reason the cargo and go part-counting branches have it: under `| tail -3`
+    the bare line can be one package's summary with another package's `4 passed` cut away, and
+    `unknown` is the honest answer then.
+
+    Exactly one test segment, because a command can be two runners -- `ctest && pytest -q`, where
+    the first ran five tests and the second found none. Attributing the second half's emptiness to
+    the whole command made the hook say *"ctest ... ran no tests"*, which is false about the command
+    it names. For a product whose doctrine is "prove it did what it said", a sentence that is wrong
+    about the run it names is worse than one it never says. Counting segments answers that for every
+    runner at once, including the ones whose passing output says nothing a pattern could key on:
+    `./gradlew test` prints `BUILD SUCCESSFUL in 12s` whether it ran a thousand tests or none.
+    """
+    if not whole:
+        return False
+    segments = split_shell_segments(command)
+    if sum(1 for seg in segments if seg and _classify_segment(seg, declared) == "test") != 1:
+        return False
+    if _PYTEST_QUIET_NONE.search(tail):
+        return True
+    final = _PYTEST_QUIET_FINAL.findall(tail)
+    return bool(final) and not re.search(r"\b(?:passed|failed|errors?|xpassed|xfailed)\b", final[-1]) and bool(
+        re.search(r"\b(?:skipped|deselected)\b", final[-1]))
 
 
 def ran_no_tests(tail: str, whole: bool = False) -> bool:
