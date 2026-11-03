@@ -1,3 +1,26 @@
+# 0.2.30
+
+- **A `pytest -q` run that skipped every test is no longer recorded as a pass.** Under `-q` pytest
+  prints its final line with no `=` banner around it — a bare `2 skipped in 0.00s` — and the check
+  that decides a run's outcome keyed on the banner. A suite whose every test was skipped therefore
+  exited 0 and was recorded exactly as a genuine pass: in the audit's own report, in the
+  `--fail-on-outcome` gate a program stops on, and in the Stop hook, which then had nothing to say
+  against "all tests pass now". `pytest` without `-q` was right the whole time, which is why this
+  lasted: the test that held the claim was named for `pytest -q` and supplied the banner anyway, so
+  the quiet form had never been under test.
+
+  A bare count line is weaker evidence than a banner, so two conditions guard it. The output must be
+  whole, not a `| tail -3` fragment with another package's `4 passed` cut away. And the command must
+  be exactly one test runner — `ctest && pytest -q`, where the first ran five tests and the second
+  found none, would otherwise have the hook say *"ctest … ran no tests"*, which is false about the
+  command it names. Counting segments answers that for every runner at once, including the ones
+  whose passing output says nothing a pattern could key on: `./gradlew test` prints
+  `BUILD SUCCESSFUL in 12s` whether it ran a thousand tests or none.
+
+  Out on its own rather than held for the next batch. A test run that verified nothing, recorded as
+  a pass, is the one failure this tool exists to catch, and every project whose suite runs under
+  `-q` was exposed to it.
+
 # 0.2.29
 
 - **`assurance serve` says when it is closing a connection.** A refusal has always closed it —

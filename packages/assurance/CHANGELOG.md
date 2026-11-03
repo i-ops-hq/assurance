@@ -1,3 +1,18 @@
+# 0.1.38
+
+- **A test run that verified nothing is no longer reported as a pass.** `pytest -q` prints its final
+  line without the `=` banner the outcome check read, so a suite whose every test was skipped came
+  back indistinguishable from one that passed — in the report, in the gates a program stops on, and
+  in the Stop hook, which had nothing to say against a claim that the tests pass. The quiet form is
+  read now, and a run that verified nothing is called that. `assurance-budget` 0.2.30, pinned
+  exactly.
+
+- **Every use-case page says where the audit sits in a workflow you already have**, as one diagram
+  per page, and three industries were added: pharmaceutical manufacturing, energy and utilities, and
+  safety-critical software. What each page claims is held by a scenario test in the repository rather
+  than by its author, so a page that stops being true fails the suite — which is how the defect
+  above was found.
+
 # 0.1.37
 
 - **An exporter is told when `assurance serve` closes a connection.** A request the server refuses
