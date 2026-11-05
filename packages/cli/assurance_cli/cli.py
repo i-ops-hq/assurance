@@ -109,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
         from assurance_cli.clearance import main as clearance_main  # noqa: PLC0415 — lazy, like the siblings
         return int(clearance_main(tail[1:]))
     if not tail:
+        wizard = _wizard_if_wanted(tail)
+        if wizard is not None:
+            return wizard
         print(_START_HERE, end="")
         return 0
 
@@ -313,6 +316,29 @@ def main(argv: list[str] | None = None) -> int:
     except (PathEscapeError, FileNotFoundError, NotADirectoryError) as exc:
         return _emit({"error": str(exc)}, args if args.command in ("check", "diff") else argparse.Namespace(as_json=False), code=2)
 
+
+
+def _wizard_if_wanted(tail: list[str]) -> int | None:
+    """The first-run wizard's exit code, or None to keep today's behaviour.
+
+    None for every case that is not a person at a terminal typing `assurance` with nothing after
+    it — a script, a pipe, CI, `TERM=dumb`, `IOPS_NO_WIZARD` — because this command runs inside
+    Claude Code as a Stop hook and inside CI, where a prompt is a hang and a hang is worse than an
+    error. The non-TTY path still prints `_START_HERE`, and the test that asserts that is the
+    regression guard for the whole feature.
+
+    Also None when `assurance-budget` is absent: the wizard lives there, beside the settings-backup
+    logic and `_is_tty` that it drives, and `assurance-cli` does not depend on it. Imported lazily
+    and failing soft for the same reason `_run_forwarded` does — an install that only ever wanted
+    `assurance check` should not pay for the rest.
+    """
+    try:
+        wizard = importlib.import_module("assurance_budget.wizard")
+    except ImportError:
+        return None
+    if not wizard.wants_a_wizard(tail):
+        return None
+    return int(wizard.run())
 
 
 def _run_forwarded(name: str, forwarded: list[str]) -> int:
