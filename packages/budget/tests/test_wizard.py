@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import io
 import sys
-import termios
 from pathlib import Path
 
 import pytest
+
+if sys.platform != "win32":
+    # termios is Unix-only, and a module-level import of it fails COLLECTION on Windows, which
+    # skips nothing and errors everything in the file. The `skipif` marks on the two tests that
+    # use it never get the chance to run. Guarded the same way `test_wizard_pty.py` guards `pty`.
+    import termios
 
 from assurance_budget import hook_setup, wizard
 
