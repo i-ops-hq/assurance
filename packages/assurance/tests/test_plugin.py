@@ -115,8 +115,12 @@ def test_no_frontmatter_pre_approves_a_tool() -> None:
 
 
 def test_the_whole_plugin_is_five_readable_files() -> None:
-    """A reader should be able to get through all of it, which is the claim the README makes."""
-    assert sorted(str(p.relative_to(PLUGIN)) for p in _shipped()) == [
+    """A reader should be able to get through all of it, which is the claim the README makes.
+
+    `as_posix()` rather than `str()`: on Windows a relative path stringifies with backslashes, so
+    this compared `skills\\audit\\SKILL.md` against `skills/audit/SKILL.md` and failed there only.
+    """
+    assert sorted(p.relative_to(PLUGIN).as_posix() for p in _shipped()) == [
         ".claude-plugin/icon.svg",
         ".claude-plugin/plugin.json",
         "PRIVACY.md",
