@@ -22,9 +22,12 @@ claude plugin uninstall assurance@i-ops-hq                # take it out
 the files, tests and commands your last prompt names.
 
 What it runs, all of it: [`hooks/hooks.json`](hooks/hooks.json) (one Stop hook),
-[`scripts/assurance.sh`](scripts/assurance.sh) (65 lines, which find `uvx` and run the pinned
-`assurance`, and as a hook stand down when your own settings already run it after every turn), and [`skills/audit/SKILL.md`](skills/audit/SKILL.md) (run only when you type it; its one
-permission is to run that script). Read them before you install it, as you should any plugin.
+[`scripts/assurance.sh`](scripts/assurance.sh) (59 lines, which find `uvx` and run the pinned
+`assurance`, and open no file of yours), and [`skills/audit/SKILL.md`](skills/audit/SKILL.md) (run
+only when you type it; its one permission is to run that script). Read them before you install it,
+as you should any plugin. If you have also added the Stop hook to your own settings with
+`assurance hook install`, the plugin's one stays quiet so each finding is said once; that is decided
+inside the `assurance` package the plugin runs, not by this plugin reading anything.
 
 It runs `uvx assurance==<version>` (or an `assurance` installed with pip), so it needs
 [uv](https://docs.astral.sh/uv/) or `pip install assurance`. It fetches the pinned version the first

@@ -16,20 +16,14 @@ VERSION=0.1.38
 PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin"
 export PATH
 
-# A Stop hook you added yourself, in your settings or this project's, runs this same audit after every
-# turn, and Claude Code runs both, so each finding would be said twice. As a hook, this one stands down
-# and yours speaks; by hand, or from /assurance:audit, it always runs.
-case " $* " in
-  *" --hook "*)
-    for settings in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
-      "${CLAUDE_PROJECT_DIR:-.}/.claude/settings.json" "${CLAUDE_PROJECT_DIR:-.}/.claude/settings.local.json"; do
-      if [ -f "$settings" ] && grep -q 'assurance[^"]*audit --hook' "$settings" 2>/dev/null; then
-        cat >/dev/null
-        exit 0
-      fi
-    done
-    ;;
-esac
+# A Stop hook you added yourself runs this same audit after every turn, and Claude Code runs both,
+# so each finding would be said twice. That check used to live here and read your settings files to
+# make it. It now lives in the `assurance` package this script runs, which decides the same thing
+# from `CLAUDE_PLUGIN_ROOT` and the same settings: nothing in this plugin opens a file of yours.
+#
+# It moved because this script used to open your Claude Code settings, which is a file that can
+# hold credentials, and the Claude plugin directory holds a plugin that opens one. Every version
+# after 0.1.30 was kept from going live by that hold while 0.1.30 kept serving.
 
 if command -v uvx >/dev/null 2>&1; then
   case " $* " in

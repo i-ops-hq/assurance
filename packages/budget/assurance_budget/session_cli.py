@@ -11,10 +11,11 @@ import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from assurance_core.run_budget import Ceilings, Progress, ProgressWatch, Stalled
 
+from assurance_budget import hook_setup
 from assurance_budget.console import survive_narrow_consoles
 from assurance_budget.config import (
     ConfigError,
@@ -86,6 +87,33 @@ _RECORD_NAMES = {"Bash": "command", "Write": "edit", "Read": "read"}
 SAMPLE_SESSION = Path(__file__).resolve().parent / "data" / "sample-session.jsonl"
 
 
+def plugin_defers_to_your_own_hook(
+    env: Mapping[str, str] | None = None, cwd: Path | None = None
+) -> bool:
+    """True when THIS run is the plugin's Stop hook and you have installed your own as well.
+
+    Both run `assurance audit --hook`, and Claude Code runs both, so every finding would be said
+    twice. The plugin's one stands down and yours speaks, because yours is the one you can see in
+    your settings and change.
+
+    `CLAUDE_PLUGIN_ROOT` is set by Claude Code only for a plugin's own hook, and that is what makes
+    this safe: without that gate the check would silence BOTH hooks the moment one was installed,
+    and audit nothing at all.
+
+    This logic used to live in the plugin's shell script, which opened the settings files itself.
+    It moved here because a plugin that reads `~/.claude/settings.json` reads the file credentials
+    live in, and the Claude plugin directory holds a plugin that does — `MCP_FORWARDS_CREDENTIAL_ENV`,
+    which kept every version after 0.1.30 from going live. The read did not go away; it happens in
+    this package now, beside `plugin_enabled`, which already reads the same files for the
+    mirror-image question.
+    """
+    environ = os.environ if env is None else env
+    if not environ.get("CLAUDE_PLUGIN_ROOT"):
+        return False
+    here = cwd or Path(environ.get("CLAUDE_PROJECT_DIR") or ".")
+    return bool(hook_setup.our_stop_hooks(here.resolve(), environ))
+
+
 def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     """Claude Code Stop hook. Reads the hook input, audits the transcript, and always exits 0.
 
@@ -102,6 +130,8 @@ def run_hook(stdin_text: str, *, nudge: bool = False) -> int:
     on a note and never twice in one turn (`stop_hook_active`). A hook that cannot read its input says so and lets the session
     end; an audit tool must never be the reason a session breaks.
     """
+    if plugin_defers_to_your_own_hook():
+        return EXIT_OK  # your own hook is about to say the same thing
     try:
         data = json.loads(stdin_text) if stdin_text.strip() else {}
     except json.JSONDecodeError:

@@ -151,6 +151,30 @@ def plugin_enabled(cwd: Path, env: Mapping[str, str]) -> str | None:
     return None
 
 
+def our_stop_hooks(cwd: Path, env: Mapping[str, str]) -> list[tuple[str, str]]:
+    """`(scope, command)` for every settings file holding a Stop hook that runs our audit.
+
+    One traversal, because three callers need the same answer: `_status` reports where the hook is,
+    the first-run wizard reads the pinned version out of it, and the plugin's own hook stands down
+    when it finds one. A scope whose settings cannot be read is skipped rather than guessed at —
+    unreadable is not absent, and the callers that care about the difference say so themselves.
+    """
+    found: list[tuple[str, str]] = []
+    for scope in SCOPES:
+        try:
+            settings = load_settings(settings_path(scope, cwd, env))
+            stop = _find_stop(settings) if settings is not None else None
+        except SetupError:
+            continue
+        for group in stop or []:
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                continue
+            for entry in group["hooks"]:
+                if isinstance(entry, dict) and is_ours(entry):
+                    found.append((scope, _entry_command(entry)))
+    return found
+
+
 def with_hook(settings: Mapping[str, Any], command: str) -> dict[str, Any]:
     """`settings` with exactly one assurance Stop hook, running `command`.
 
