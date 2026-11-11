@@ -81,23 +81,29 @@ The plugin runs the same hook, pinned to the release, and finds `uvx` even when 
 hooks without your terminal's PATH. It fetches that version the first time it runs and uses the copy
 from then on, without the network. It also adds `/assurance:audit`, which shows the whole report
 for the session you run it in; only you can run it, so it adds nothing to Claude's context until you do.
-Use the plugin or `assurance hook install`, not both: together they audit twice per turn, and
-`assurance hook status` says so.
+The plugin and `assurance hook install` no longer collide. Since 0.1.39 the plugin ships no hook at
+all: it is one skill, `/assurance:audit`, which you run when you want a report. The audit that runs
+by itself after every turn comes from `assurance hook install` and nowhere else, so installing both
+is now the ordinary setup rather than a mistake.
 
 **Read what a plugin runs before you install it, this one included.** A plugin runs as you. In
 February 2026 Snyk scanned 3,984 agent skills from two public registries, ClawHub and skills.sh, of the
 kind Claude Code, Cursor and OpenClaw load: 36.82% had at least one security flaw, 13.4% a critical
 one, and 76 carried confirmed malicious payloads for credential theft, backdoors and data exfiltration
 ([ToxicSkills](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/)). This plugin is
-[`plugins/assurance/`](../../plugins/assurance): one Stop hook, one 65-line shell script that runs the pinned
-`uvx assurance==<version>`, and a skill that only you can run, whose only permission is to run that
-script when you type `/assurance:audit`.
+[`plugins/assurance/`](../../plugins/assurance): five files, none of which runs anything on its own —
+a manifest, an icon, a README, a privacy note, and one skill that only you can invoke. The skill
+asks Claude to run `uvx assurance@<version> audit`, and Claude asks you before it does.
 It calls no model and sends nothing anywhere; the network is used once, by `uvx`, to fetch the pinned
 package from PyPI.
 
+**Why it has no hook.** Anthropic's plugin directory accepts hooks, shell scripts, inline shell and
+pre-approved tools only from organizations it has verified, and i-ops-hq is not one. Rather than
+ship a plugin that cannot be listed, the automatic audit lives in the package, where you install it
+into your own settings and can see it there.
+
 On Windows, Claude Code runs hooks in Git Bash when Git for Windows is installed, and in PowerShell
-when it is not. The plugin's hook is a shell script, so it needs Git Bash; without it, use
-`uvx assurance@latest hook install`, which writes a hook both shells can run. Commands Claude runs
+when it is not. `assurance hook install` writes a hook both shells can run. Commands Claude runs
 through the PowerShell tool are read like Bash ones: `Set-Content app.py` counts as an edit and
 `pytest` as a test. Their result is taken from what the runner printed, because that tool's error
 flag has not been checked against its exit status.
@@ -109,14 +115,14 @@ flag has not been checked against its exit status.
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.38 audit --hook --nudge" }] }
+      { "hooks": [{ "type": "command", "command": "uvx --offline assurance@0.1.39 audit --hook --nudge" }] }
     ]
   }
 }
 ```
 
 Put it in `~/.claude/settings.json` for every project, or `.claude/settings.json` for one. Leave out
-`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.38 --version` once first:
+`--nudge` to be told without Claude being asked. Run `uvx assurance@0.1.39 --version` once first:
 `--offline` runs the copy uv already has, so the hook never waits on PyPI.
 
 The version is pinned on purpose. A hook runs after every turn in every project, so it should run a
