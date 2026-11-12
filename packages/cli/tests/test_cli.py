@@ -6,6 +6,7 @@ import importlib.metadata
 
 import csv
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -941,10 +942,56 @@ def test_mcp_version_flag(capsys) -> None:
     assert capsys.readouterr().out.strip().startswith("assurance-mcp ")
 
 
-def test_no_args_prints_start_here(capsys) -> None:
+class _NotATerminal:
+    """Stands in for a stream a script owns, so the first-run wizard's gate stays shut."""
+
+    def isatty(self) -> bool:
+        return False
+
+
+def test_no_args_prints_start_here(capsys, monkeypatch) -> None:
+    """A bare invocation that is NOT a person at a terminal keeps today's output, byte for byte.
+
+    This is the regression guard for the whole first-run wizard: revert its TTY gate and a script
+    gets a selection control instead of this text. stdin is pinned non-interactive because under
+    `pytest -s` these streams really are a terminal, and a prompt there would hang the suite —
+    which is the same reason the product gates on it.
+    """
+    monkeypatch.setattr(sys, "stdin", _NotATerminal())
     assert main([]) == 0
     out = capsys.readouterr().out
     assert "assurance <command> --help for more." in out
+
+
+def test_a_bare_invocation_at_a_terminal_opens_the_wizard(capsys, monkeypatch) -> None:
+    """The other side of the gate: a person typing `assurance` gets the wizard, not a help dump."""
+    pytest.importorskip("assurance_budget")
+    from assurance_budget import hook_setup, wizard
+
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("IOPS_NO_WIZARD", raising=False)
+    monkeypatch.setenv("TERM", "xterm")
+    monkeypatch.setattr(hook_setup, "_is_tty", lambda: True)
+    monkeypatch.setattr(wizard, "run", lambda: 7)  # a code nothing else returns
+    assert main([]) == 7
+    assert "assurance <command> --help for more." not in capsys.readouterr().out
+
+
+def test_ci_keeps_the_help_even_at_a_terminal(capsys, monkeypatch) -> None:
+    """Spec case 2 at the CLI boundary: CI is where a prompt is a hang."""
+    pytest.importorskip("assurance_budget")
+    from assurance_budget import hook_setup, wizard
+
+    monkeypatch.setenv("CI", "1")
+    monkeypatch.setenv("TERM", "xterm")
+    monkeypatch.setattr(hook_setup, "_is_tty", lambda: True)
+    monkeypatch.setattr(wizard, "run", _refuse_to_run)
+    assert main([]) == 0
+    assert "assurance <command> --help for more." in capsys.readouterr().out
+
+
+def _refuse_to_run() -> int:
+    raise AssertionError("the wizard ran under CI, where a prompt is a hang")
 
 
 def test_check_with_no_folder_uses_cwd(tmp_path: Path, monkeypatch, capsys) -> None:
