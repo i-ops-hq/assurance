@@ -1,3 +1,37 @@
+# 0.1.39
+
+- **The Claude Code plugin ships no hook and no script, so it can be listed again.** Anthropic's
+  plugin directory accepts command hooks, inline shell, pre-approved tools and files outside a short
+  allowed list only from organizations it has verified, and i-ops-hq is not one. Every version after
+  0.1.30 was refused on four of those at once, so the directory served 0.1.30 from 13 October while
+  each new release was held. The plugin is now five files that run nothing by themselves: a manifest,
+  an icon, a README, a privacy note, and one skill. `/assurance:audit` asks Claude to run
+  `uvx assurance@0.1.39 audit`, and Claude asks you before it does.
+
+- **The audit that runs by itself moved to `assurance hook install`, and did not go away.** That is
+  the same hook, writing into your own settings, showing the change and backing up what was there
+  first — and the package is not a plugin, so the directory has no say over it. Installing the plugin
+  and the hook together used to double every finding; the plugin has no hook now, so it is just the
+  ordinary setup.
+
+- **The listing no longer says "After each turn".** That described the hook the plugin used to ship.
+  A skill reports when you ask it to, and the description in `plugin.json` and `marketplace.json` now
+  says that instead.
+
+- **Nothing in the plugin reads a file of yours.** The script used to open your Claude Code settings
+  and grep them, to stay quiet when you had installed the hook yourself. Those files can hold
+  credentials, and the directory flagged it (`MCP_FORWARDS_CREDENTIAL_ENV`). With the script gone
+  there is nothing left to read them, and the only variable the plugin names anywhere is
+  `$CLAUDE_SESSION_ID`.
+
+- **The four rules are tests now, not intentions.** `test_plugin.py` fails if a hook of any type
+  comes back, if a file outside the allowed types or starting with `#!` is added, if inline shell
+  appears in a skill, or if `allowed-tools` names anything beyond Read, Grep, Glob and LS. Each was
+  counterfactualled by putting the violation back and confirming its guard fails.
+
+- Released out of batch on purpose: the newest version had been refused since 21 October and installs
+  were eight versions back. `assurance-budget` stays at 0.2.30, pinned exactly; it did not change.
+
 # 0.1.38
 
 - **A test run that verified nothing is no longer reported as a pass.** `pytest -q` prints its final
