@@ -75,6 +75,36 @@ What "All done" left out:
 - ❔ The test the prompt asked for **last ran before the last edit, and failed**. The file it named was
   changed. Whether the fix is right is not something it claims to know, and it says so.
 
+## In use
+
+The plugin figures are Anthropic's, from the Claude plugin directory. The download figures are
+PyPI's, via [pypistats.org](https://pypistats.org/packages/assurance). This tool has no server, no
+account and no telemetry of its own.
+
+**The Claude Code plugin, over 30 days**
+
+| | |
+|---|---|
+| Loads | **128,018** |
+| Load errors | **0** |
+| Failed installs | **0** |
+| Command errors | **0** |
+
+**PyPI downloads, all time**
+
+| Package | Total | Excluding mirrors |
+|---|---|---|
+| [`assurance`](https://pypi.org/project/assurance/) | 46,007 | **33,158** |
+| [`assurance-cli`](https://pypi.org/project/assurance-cli/) | 48,638 | 33,018 |
+| [`assurance-budget`](https://pypi.org/project/assurance-budget/) | 48,576 | 32,832 |
+| [`assurance-core`](https://pypi.org/project/assurance-core/) | 40,698 | 32,663 |
+| [`assurance-deps`](https://pypi.org/project/assurance-deps/) | 30,608 | 28,165 |
+| [`assurance-authority`](https://pypi.org/project/assurance-authority/) | 30,188 | 28,045 |
+| [`assurance-reach`](https://pypi.org/project/assurance-reach/) | 27,404 | 26,648 |
+| [`assurance-mcp`](https://pypi.org/project/assurance-mcp/) | 20,450 | 5,243 |
+
+<sub>Read 2026-11-12 05:36 UTC. PyPI data complete through 2026-11-11.</sub>
+
 ## What usually changes with what you just changed
 
 The other half of an unfinished change is the file you forgot. `assurance coupling` reads your git
