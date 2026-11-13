@@ -729,3 +729,186 @@ def test_a_real_empty_record_still_outranks_the_unconfigured_check(
 def test_the_states_the_gate_fails_on_are_states_that_exist() -> None:
     assert set(FAILURE_STATES) < set(STATES)
     assert "returned" not in FAILURE_STATES
+
+
+# --- input that is not what it claims to be, found by an adversarial pass ------------------------
+
+
+def _depth_that_overruns_the_stack(ceiling: int = 400_000) -> int | None:
+    """A nesting depth at which `json.loads` raises `RecursionError` on this machine, or None.
+
+    Probed rather than hardcoded. `json.loads` uses the C scanner, which does not consult
+    `sys.setrecursionlimit`, so the threshold is however much C stack is left at the moment of
+    parsing — it moved from 1,500 on one machine to 20,000 on another. A constant here would be a
+    test that quietly stops exercising its own path on any machine but the one it was written on.
+    """
+    depth = 10_000
+    while depth <= ceiling:
+        try:
+            json.loads('{"a":' * depth + "1" + "}" * depth)
+        except RecursionError:
+            return depth
+        depth *= 2
+    return None
+
+
+def test_nesting_that_outruns_the_stack_is_an_unreadable_line_and_not_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`json.loads` raises `RecursionError` for the same class of input as `JSONDecodeError` — a
+    line that is not what it claims to be — and only one of the two was caught.
+
+    Two things made it worth fixing rather than tidying. The published exit table says 1 is
+    "something to look at" and 2 is "could not run", so a parser crash reported as a finding about
+    the caller's job. And a traceback is the one output path here never designed to be content-free:
+    whatever is being parsed when the stack runs out can land in the exception text, and a
+    provider's file is full of real replies.
+    """
+    depth = _depth_that_overruns_the_stack()
+    if depth is None:  # pragma: no cover - a machine with more stack than this test can exhaust
+        pytest.skip("json.loads did not overrun the stack at any depth probed, so there is nothing to catch here")
+
+    sent = _jsonl(tmp_path / "sent.jsonl", [{"recordId": "p1"}])
+    out = tmp_path / "out.jsonl"
+    out.write_text('{"recordId":"p1","modelOutput":' + '{"a":' * depth + "1" + "}" * depth + "}\n",
+                   encoding="utf-8")
+
+    assert main([str(sent), str(out)]) == 0
+    printed = capsys.readouterr()
+    assert "Traceback" not in printed.out + printed.err
+    assert "was not JSON" in printed.out
+    # The line's own bytes must not travel out with the diagnostic.
+    assert '{"a"' not in printed.out + printed.err
+
+
+def test_a_line_that_cannot_be_parsed_is_counted_rather_than_dropped(tmp_path: Path) -> None:
+    """The deterministic half, which does not depend on this machine's stack at all: whatever
+    `json.loads` raises, the line is counted as unreadable rather than silently skipped."""
+    import assurance_cli.batch as batch
+
+    sent = _jsonl(tmp_path / "sent.jsonl", [{"recordId": "p1"}])
+    out = _jsonl(tmp_path / "out.jsonl", [{"recordId": "p1", "modelOutput": _converse("a day")}])
+
+    real = json.loads
+
+    def exploding(text: str, **kw: object) -> object:
+        raise RecursionError("maximum recursion depth exceeded while decoding a JSON object")
+
+    batch.json.loads = exploding  # type: ignore[assignment]
+    try:
+        # The provider is named rather than detected: with every line unreadable there is nothing to
+        # detect it from, and that is its own correct behaviour (exit 2, a file we cannot identify)
+        # rather than the thing under test here.
+        report = read_job(out, sent, provider="bedrock").report
+    finally:
+        batch.json.loads = real  # type: ignore[assignment]
+
+    assert report["coverage"]["unparsable_lines"] == 2  # one line each in sent and out
+    assert report["accounted"] == 0
+    assert "no line could be read" in report["summary"], report["summary"]
+
+
+def test_a_manifest_nested_too_deeply_cannot_run_rather_than_crash(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A manifest we were told to read and cannot is `2`, could not run — unlike a single bad line
+    in the output file, which is a finding about the job."""
+    depth = _depth_that_overruns_the_stack()
+    if depth is None:  # pragma: no cover
+        pytest.skip("json.loads did not overrun the stack at any depth probed")
+    sent = _jsonl(tmp_path / "sent.jsonl", [{"recordId": "p1"}])
+    out = _jsonl(tmp_path / "out.jsonl", [{"recordId": "p1", "modelOutput": _converse("a day")}])
+    manifest = tmp_path / "manifest.json.out"
+    manifest.write_text('{"a":' * depth + "1" + "}" * depth, encoding="utf-8")
+
+    assert main([str(sent), str(out), "--manifest", str(manifest)]) == 2
+    printed = capsys.readouterr()
+    assert "Traceback" not in printed.out + printed.err
+    assert "nested too deeply" in printed.err
+    assert '{"a"' not in printed.err
+
+
+def test_a_request_body_that_cannot_be_hashed_is_unverified_and_not_verified(tmp_path: Path) -> None:
+    """Two uncomputable digests comparing equal would report a verified binding on a record neither
+    side could hash — a pass produced by a check that did not run."""
+    from assurance_cli.batch import _body_digest
+
+    deep: object = 1
+    for _ in range(200_000):
+        deep = {"a": deep}
+    assert _body_digest(deep) == "", "an unhashable body produced a digest"
+
+    # A body that is present but whose digest cannot be computed, which `modelInput: null` does not
+    # reach — null is caught one branch earlier by the echo being absent, so a fixture using it
+    # tests nothing about this guard. Forced here, because nesting that parses and then will not
+    # serialise is a narrow band to hit from a file and the guard should not depend on finding it.
+    import assurance_cli.batch as batch
+
+    sent = _jsonl(tmp_path / "sent.jsonl", [{"recordId": "p1", "modelInput": {"m": 1}}])
+    out = _jsonl(tmp_path / "out.jsonl",
+                 [{"recordId": "p1", "modelInput": {"m": 1}, "modelOutput": _converse("a day")}])
+    real = batch._body_digest
+    batch._body_digest = lambda value: ""  # type: ignore[assignment]
+    try:
+        report = read_job(out, sent).report
+    finally:
+        batch._body_digest = real  # type: ignore[assignment]
+    assert report["binding"]["verified"] == 0, "two uncomputable digests compared equal"
+    assert report["binding"]["binding_unverified"] == 1
+    assert report["binding"]["binding_mismatch"] == 0
+
+
+# --- what is kept, and the flag for when it should not be ----------------------------------------
+
+
+def test_hash_keys_digests_the_key_in_the_shareable_files_only(tmp_path: Path) -> None:
+    """The promise is about prompts and replies, and a record key is neither — it is caller data,
+    and per-key coverage cannot be said without it. Callers use natural keys and a run record is
+    built to be shared, so this keeps the key out of the two artifacts that travel while the report
+    the operator reads keeps it, because they are the one who has to go and look it up.
+    """
+    from assurance_cli.batch import record_lines, run_record_lines
+
+    sent = _jsonl(tmp_path / "sent.jsonl",
+                  [{"recordId": "invoice-2026-00412"}, {"recordId": "invoice-2026-00999"}])
+    out = _jsonl(tmp_path / "out.jsonl",
+                 [{"recordId": "invoice-2026-00412", "modelOutput": _converse("a full day")}])
+    job = read_job(out, sent, declared=Declared(token_floor=10))
+
+    shared = "".join(record_lines(job.records, hash_keys=True)) + "".join(
+        run_record_lines(job.report, job.records, "day0", hash_keys=True))
+    assert "invoice-2026-00412" not in shared
+    assert "invoice" not in shared
+
+    # The report is read locally by the person who must act on it, so it keeps the real key.
+    assert job.report["keys"]["missing_keys"] == ["invoice-2026-00999"]
+    assert any("invoice-2026-00999" in line for line in job.report["keys"]["evidence"])
+
+
+def test_without_the_flag_the_key_is_written_as_it_was_given(tmp_path: Path) -> None:
+    """The control. Without this, a `record_lines` that hashed unconditionally would pass the test
+    above and silently break every caller joining on their own key."""
+    from assurance_cli.batch import record_lines
+
+    sent = _jsonl(tmp_path / "sent.jsonl", [{"recordId": "invoice-2026-00412"}])
+    out = _jsonl(tmp_path / "out.jsonl",
+                 [{"recordId": "invoice-2026-00412", "modelOutput": _converse("a full day")}])
+    job = read_job(out, sent, declared=Declared(token_floor=10))
+    assert "invoice-2026-00412" in "".join(record_lines(job.records))
+
+
+def test_a_hashed_key_is_the_same_digest_in_every_job(tmp_path: Path) -> None:
+    """Stability is what makes lineage and a rollup across stages work on the digest. A per-run salt
+    would make each day's file unjoinable to the last, which is the feature request 9 is for."""
+    from assurance_cli.batch import record_lines
+
+    digests = []
+    for day in ("a", "b"):
+        folder = tmp_path / day
+        folder.mkdir()
+        sent = _jsonl(folder / "sent.jsonl", [{"recordId": "person-1042"}])
+        out = _jsonl(folder / "out.jsonl",
+                     [{"recordId": "person-1042", "modelOutput": _converse("a full day")}])
+        job = read_job(out, sent, declared=Declared(token_floor=10))
+        digests.append(json.loads(record_lines(job.records, hash_keys=True)[0])["record"])
+    assert digests[0] == digests[1] and "person" not in digests[0]

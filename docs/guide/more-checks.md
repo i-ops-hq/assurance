@@ -121,7 +121,20 @@ A few provider facts the flags exist for:
 
 Nothing derived from a reply is kept in a form that reconstructs any of it: `output_tokens`, a
 16-character digest prefix, a count of a declared pattern, and how much of the reply repeats itself.
-The text is read and discarded.
+The text is read and discarded, and a provider's error object is reduced to its code, because an
+error message can quote the request.
+
+**What is kept is the record key, verbatim.** Per-key coverage is the feature and "person 2210 came
+back empty" cannot be said without it, so the key appears in `--records` and in `--run-record`. The
+promise above is about prompts and replies; it is not "nothing of yours is written down". If your
+keys are natural ones — an invoice number, a filename, a case reference — and those files get
+shared, `--hash-keys` writes a stable digest into them instead, and coverage, lineage and a rollup
+across days all still work on it. The report you read keeps the real keys either way, because you
+are the one who has to go and look them up.
+
+A line that is not valid JSON, or that is nested too deeply for the parser to finish, is counted and
+reported rather than raising: it is one unreadable line in a job, not a reason to stop. A *manifest*
+that cannot be parsed is exit 2, because it is a file the command was told to read.
 
 **A gate will not pass a check that was not configured.** `--fail-on-record` asks about `empty`
 among the rest, so asking for it with no `--token-floor` and no `--item-pattern` exits 1 and says

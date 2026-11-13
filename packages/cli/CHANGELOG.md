@@ -1,5 +1,20 @@
 # 0.6.10
 
+- **A deeply nested line no longer crashes the reader.** `json.loads` raises `RecursionError` for
+  the same class of input as `JSONDecodeError` — a line that is not what it claims to be — when the
+  nesting outruns the C stack, and only one of the two was caught. It mattered for two reasons
+  beyond tidiness: the published exit table reserves `1` for "something to look at", so a parser
+  crash reported as a finding about the caller's job, and a traceback is the one output path here
+  never designed to be content-free. Caught wherever `JSONDecodeError` is, and not bounded by a
+  depth constant, because the real limit is how much stack is left at the moment of parsing and it
+  moves between machines. An unparseable *manifest* is exit 2, since it is a file the command was
+  told to read.
+- **`--hash-keys`.** The reply-content promise is about prompts and replies, and holds; the record
+  key is caller data and is kept verbatim, because per-key coverage cannot be stated without it.
+  Callers use natural keys and a run record is built to be shared, so this writes a stable digest
+  into `--records` and `--run-record` while the report you read keeps the real keys. Stable across
+  jobs, so lineage and a rollup across days still work on the digest.
+- A file where no line could be read says so, rather than reporting "all returned" of nothing.
 - **`--lineage`: per-key coverage that counts the work, not the lines.** A pipeline resending a
   failed record must give the resend a new record ID, so keys-sent against keys-returned calls the
   original a gap and the resend an extra — wrong twice about one record that succeeded. Declare what

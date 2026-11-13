@@ -39,7 +39,17 @@ documented-wrong on two providers and merely unsupported on the third.
 **Nothing derived from a reply is kept in a form that reconstructs any of it.** `output_tokens`,
 `reply_sha16` (a 16-character prefix of a digest), `parsed_items` and `repeat_ratio` are numbers and
 a hash; the text they were computed from is never written, printed or returned. That is the same
-rule as `process_attribution` matching `ps -o comm=` and never a command line.
+rule as `process_attribution` matching `ps -o comm=` and never a command line. A provider's error
+object is reduced to its code for the same reason, since an error message can quote the request.
+
+**What *is* kept is the record key, verbatim, and that is worth saying rather than leaving to be
+inferred.** Per-key coverage is the feature and "person 2210 came back empty" cannot be said without
+the key, so it appears in the per-record file and in the emitted run-record lines. The promise is
+about prompts and replies; it is not "nothing of yours is written down". Callers use natural keys —
+an invoice number, a filename, a case reference — and a run record is built to be shared and rolled
+up, so `--hash-keys` writes a stable digest into those two artifacts instead while coverage and
+lineage keep working. The human report keeps the real keys either way, because the person reading it
+is the person who has to go and look them up.
 
 The per-record results are also emitted as `assurance.run/1` model lines (`--run-record`), so
 `assurance audit`, `assurance drift` and `--fail-on-claim` work on a batch job with nothing further
@@ -107,6 +117,17 @@ def _records(count: int) -> str:
     return f"{count} record" if count == 1 else f"{count} records"
 
 
+def _key_digest(key: str) -> str:
+    """A record key as a stable 16-character digest, for `--hash-keys`.
+
+    Stable across jobs and across days on purpose: the same key hashes the same way everywhere, so
+    coverage, lineage and a rollup across stages all still work on the digest. It is not a secret —
+    a caller who knows a key can confirm it is present — it keeps a natural key out of an artifact
+    built to be passed around.
+    """
+    return hashlib.sha256(key.encode("utf-8", "replace")).hexdigest()[:16]
+
+
 def _body_digest(value: Any) -> str:
     """A stable 16-character digest of a request body, and the only thing kept from it.
 
@@ -129,8 +150,14 @@ def _body_digest(value: Any) -> str:
     """
     if value is None:
         return ""
-    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-                           default=str)
+    try:
+        canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+                               default=str)
+    except (RecursionError, ValueError):
+        # Nesting that parsed can still outrun the stack on the way back out, and a cycle built in
+        # code raises ValueError. Either way the digest is uncomputable, which makes the binding
+        # unverified rather than mismatched: we did not fail to match, we failed to look.
+        return ""
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
@@ -439,7 +466,13 @@ def _lines(path: Path) -> tuple[list[dict[str, Any]], int]:
             continue
         try:
             parsed = json.loads(line)
-        except json.JSONDecodeError:
+        # `RecursionError` beside `JSONDecodeError`, because `json.loads` raises it for the same
+        # class of input — a line that is not what it claims to be — when the nesting outruns the C
+        # stack. Not bounded by a depth constant on purpose: the real limit is how much stack is
+        # left at the moment of parsing, so it moves between machines and between call sites, and a
+        # constant would be wrong on both sides of wherever it was set. Catching unwinds the stack,
+        # so the next line parses normally.
+        except (json.JSONDecodeError, RecursionError):
             unparsable += 1
             continue
         if isinstance(parsed, dict):
@@ -488,7 +521,7 @@ def _lineage_map(path: Path) -> dict[str, str]:
         raise BatchError(f"cannot read {path}: {exc}") from exc
     try:
         whole: Any = json.loads(text)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
         whole = None
     if isinstance(whole, Mapping):
         found = parse_lineage(whole)
@@ -516,6 +549,11 @@ def _manifest_report(path: Path, reads: Sequence[Read], counted: int) -> dict[st
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise BatchError(f"cannot read {path}: {exc}") from exc
+    except RecursionError as exc:
+        # The exception's own text is not repeated here: whatever was being parsed when the stack
+        # ran out can land in it, and a provider's file is full of real replies. A traceback is the
+        # one output path in this tool that was never designed to be content-free.
+        raise BatchError(f"cannot read {path}: it is nested too deeply to parse") from exc
     if not isinstance(manifest, Mapping):
         raise BatchError(f"{path} is not a JSON object")
 
@@ -642,9 +680,13 @@ def read_job(
         seen[key] += 1
         read = reader(key, line, declared)
         echoed = None if echo_key is None else line.get(echo_key)
-        if echoed is None or key not in sent_digests:
+        echo_digest = "" if echoed is None else _body_digest(echoed)
+        # An empty digest on either side means it could not be computed, not that it matched
+        # nothing: two uncomputable digests comparing equal would report a verified binding on a
+        # record neither side could hash.
+        if echoed is None or not echo_digest or not sent_digests.get(key):
             binding["binding_unverified"] += 1
-        elif _body_digest(echoed) != sent_digests[key]:
+        elif echo_digest != sent_digests[key]:
             # The reply came back under this key carrying a different request than the one that went
             # up under it. Nothing about this line is trustworthy, its state included, so it is
             # refused rather than classified.
@@ -823,7 +865,9 @@ def _findings(report: Mapping[str, Any]) -> list[str]:
     if coverage["duplicate_keys_in_input"]:
         found.append(f"{len(coverage['duplicate_keys_in_input'])} keys sent more than once")
     if coverage["unparsable_lines"]:
-        found.append(f"{coverage['unparsable_lines']} lines were not JSON")
+        count = coverage["unparsable_lines"]
+        found.append(f"{count} line{'' if count == 1 else 's'} "
+                     f"{'was' if count == 1 else 'were'} not JSON, or was nested too deeply to parse")
     if coverage["lines_without_a_key"] or coverage["input_lines_without_a_key"]:
         total = coverage["lines_without_a_key"] + coverage["input_lines_without_a_key"]
         found.append(f"{total} lines carry no record key, so they join to nothing")
@@ -831,7 +875,8 @@ def _findings(report: Mapping[str, Any]) -> list[str]:
         found.append(f"{report['content']['over_repeat_ceiling']} replies repeat themselves past the declared ceiling")
     keys = report["keys"]
     if keys["missing"]:
-        found.append(f"{keys['missing']} of {keys['expected']} keys have no record for any attempt")
+        found.append(f"{keys['missing']} of {keys['expected']} keys "
+                     f"{'has' if keys['missing'] == 1 else 'have'} no record for any attempt")
     if keys["refused"]:
         plural = "key" if keys["refused"] == 1 else "keys"
         found.append(f"{keys['refused']} {plural} could not be resolved from the resend map")
@@ -862,6 +907,9 @@ def _summary(report: Mapping[str, Any]) -> str:
     else:
         head = f"{accounted} of {sent} records came back"
     detail = ", ".join(f"{records[state]} {state}" for state in STATES if records[state])
+    if not accounted:
+        # "all returned" of nothing read as a clean job on a file where no line could be parsed.
+        return f"{head}; no line could be read."
     return f"{head}; {detail or 'all returned'}."
 
 
@@ -897,7 +945,8 @@ def format_job(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def run_record_lines(report: Mapping[str, Any], reads: Sequence[Read], run: str, claim: str = "") -> list[str]:
+def run_record_lines(report: Mapping[str, Any], reads: Sequence[Read], run: str, claim: str = "",
+                     *, hash_keys: bool = False) -> list[str]:
     """The job as `assurance.run/1` lines: one `model` line per record, one `outcome` line per check,
     and the caller's own claim if they gave one.
 
@@ -921,7 +970,7 @@ def run_record_lines(report: Mapping[str, Any], reads: Sequence[Read], run: str,
             "provider": provider, "model": read.shape,
             "input_tokens": read.input_tokens, "output_tokens": read.output_tokens,
             "stop": read.stop, "error": read.error,
-            "record": read.key, "state": read.state,
+            "record": _key_digest(read.key) if hash_keys else read.key, "state": read.state,
             "reply_sha16": read.reply_sha16,
             "parsed_items": read.parsed_items, "repeat_ratio": read.repeat_ratio,
         }))
@@ -945,7 +994,7 @@ def run_record_lines(report: Mapping[str, Any], reads: Sequence[Read], run: str,
     return lines
 
 
-def record_lines(reads: Sequence[Read]) -> list[str]:
+def record_lines(reads: Sequence[Read], *, hash_keys: bool = False) -> list[str]:
     """One JSONL line per record and nothing else: the input `assurance drift` reads.
 
     Separate from `--run-record` on purpose, and the reason is arithmetic rather than taste.
@@ -957,7 +1006,8 @@ def record_lines(reads: Sequence[Read]) -> list[str]:
     Concatenate these across jobs to drift a rate over a run: one line stays one record.
     """
     return [json.dumps({
-        "record": read.key, "state": read.state, "shape": read.shape, "stop": read.stop,
+        "record": _key_digest(read.key) if hash_keys else read.key,
+        "state": read.state, "shape": read.shape, "stop": read.stop,
         "output_tokens": read.output_tokens, "input_tokens": read.input_tokens,
         "reply_sha16": read.reply_sha16, "parsed_items": read.parsed_items,
         "repeat_ratio": read.repeat_ratio, "error": read.error,
@@ -1026,6 +1076,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--content-path", help="Where the reply text is, dotted")
     parser.add_argument("--run-record", help="Write the records as assurance.run/1 lines (- for stdout)")
     parser.add_argument("--records", help="Write one JSONL line per record, for assurance drift (- for stdout)")
+    parser.add_argument(
+        "--hash-keys", action="store_true",
+        help=("Write a stable digest instead of the record key into --records and --run-record, "
+              "for when your keys are natural ones and those files get shared. Coverage and "
+              "lineage still work; the report you read keeps the real keys"),
+    )
     parser.add_argument("--run", help="The run id those lines carry. Default: the output file's name")
     parser.add_argument("--claim", default="", help="What the pipeline says it achieved, for --fail-on-claim")
     parser.add_argument(
@@ -1090,11 +1146,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.run_record:
         run = args.run or Path(args.output).name
-        written = _write(args.run_record, run_record_lines(report, job.records, run, args.claim))
+        written = _write(args.run_record,
+                         run_record_lines(report, job.records, run, args.claim,
+                                          hash_keys=args.hash_keys))
         if written is not None:
             return written
     if args.records:
-        written = _write(args.records, record_lines(job.records))
+        written = _write(args.records, record_lines(job.records, hash_keys=args.hash_keys))
         if written is not None:
             return written
 
