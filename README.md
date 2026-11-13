@@ -164,6 +164,7 @@ One install, one `assurance` command.
 | `assurance coupling` | What usually changes with what you just changed, from git history — and which of those you have not touched. No graph, no configuration. |
 | `assurance reach` | What does a change to this file reach, by a code graph such as Graphify's, and how far behind the code is that graph? |
 | `assurance clearance` | Is the person who asked cleared for every owner their change reaches? |
+| `assurance batch` | What did an LLM batch job actually return, per record? Returned, errored, truncated, empty, or a reply shape it could not read — on Bedrock, OpenAI Batch and Anthropic Message Batches. |
 | `assurance diff` | Did the work cover everything it should have? For example, retrieved docs vs. required docs. |
 | `assurance pin` | Did an MCP server quietly change a tool's description after you approved it? |
 | `assurance deps` | What will `pip install` or `npm install` run on your machine? Read without running it. |

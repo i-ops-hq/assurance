@@ -1,3 +1,36 @@
+# 0.6.10
+
+- **`assurance batch sent.jsonl out.jsonl.out`**: what an LLM batch job actually returned, per
+  record — `returned`, `errored`, `truncated`, `empty`, `unreadable`, `expired`, `canceled` or
+  `refused`. Bedrock, OpenAI Batch and Anthropic Message Batches, from local files, no new
+  dependency. `--fail-on-record` and `--fail-on-truncation [rate]` are the CI gates.
+- **A gate does not pass a check that was not configured.** `--fail-on-record` asks about `empty`,
+  so asking for it with no `--token-floor` and no `--item-pattern` exits 1 and says why: only a
+  wholly blank reply could have been found, and exit 0 would report the job clean on the strength
+  of a check that never ran. Naming the states instead (`--fail-on-record errored truncated`) says
+  you did not mean to ask about reply content, and passes. Exit 1 rather than 2 because both
+  READMEs publish 1 as "something it couldn't check" and 2 as "could not run".
+- **`empty` and `unreadable` are separate states.** An empty reply is an observation; an unreadable
+  one is the absence of one. A reply body matching none of the eight shapes this knows is counted
+  and reported, never read as a pass, and `--stop-path` / `--content-path` / `--output-tokens-path`
+  name the fields of a model that shipped after this release.
+- AWS states that `modelOutput`'s format depends on the invocation type: Converse's body calls the
+  stop reason `stopReason` and the InvokeModel bodies call it `completionReason` or `stop_reason`,
+  so a check that greps one name finds no truncation on half of Bedrock. Each body is named
+  separately and the test for truncation runs once per shape.
+- Content-free by construction: `output_tokens`, a 16-character digest prefix, a count of a declared
+  `--item-pattern`, and how much of the reply repeats itself. The text is read and discarded.
+- `--manifest manifest.json.out` compares Bedrock's own six counts against the records:
+  `totalRecordCount − processedRecordCount` is reported as its own category, records never
+  attempted, and the provider's token total is stated beside the sum of the records rather than
+  preferred. A sum with any unknown usage in it is called a floor.
+- `--error-file` for OpenAI, which keeps its failures in a separate file: without it the shortfall
+  is reported as unaccounted for rather than missing.
+- `--run-record` writes the job as `assurance.run/1` lines, so `assurance audit` and
+  `--fail-on-claim` work on a batch job unchanged; `--records` writes one line per record for
+  `assurance drift`. Two files because a run record also carries a task line, an outcome line per
+  check and a claim, and those would sit in the denominator of a rate.
+
 # 0.6.9
 
 - `assurance audit` is described as reading Claude Code **or Codex**, in the command list and in

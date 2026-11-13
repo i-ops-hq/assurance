@@ -68,6 +68,7 @@ never waits on PyPI.
 | `assurance serve` | a local endpoint any agent sends its traces or runs to, and any workflow asks for a run's audit |
 | `assurance coupling` | what usually changes with what you just changed, from git history — and what has not this time |
 | `assurance reach` | what does a change to this file reach, by a code graph, and how far behind the code is that graph? |
+| `assurance batch` | what did an LLM batch job actually return, per record — and which replies said nothing? |
 | `assurance diff` / `assurance check` | did the work cover what it was supposed to, and what did it miss? |
 | `assurance pin` | did an MCP server change a tool definition after you approved it? |
 | `assurance deps` | what will a `pip install` or `npm install` execute, read without executing it? |

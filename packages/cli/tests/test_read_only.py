@@ -1,4 +1,14 @@
-"""CLI write gate — only baseline and pin may write files."""
+"""CLI write gate — only the three commands that write on request may write files.
+
+`init` writes a baseline, `pin --save` writes pins, and `batch --run-record` / `--records` write the
+files the caller named on the command line. Everything else reads and reports: a check that leaves
+something behind on the machine it was asked to look at is not a check.
+
+`batch.py` joined the list on 2026-11-12, and widening an allowlist is how a gate stops meaning
+anything, so it came with `test_batch_writes_only_through_one_helper` below. The rule that matters
+is not "which files may write" but "a write happens only because someone asked for it by name", and
+one write path per module is the part of that a reader can check.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +16,7 @@ import ast
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parents[1] / "assurance_cli"
-WRITING_MODULES = frozenset({"baseline.py", "pin.py"})
+WRITING_MODULES = frozenset({"baseline.py", "pin.py", "batch.py"})
 
 
 def test_only_baseline_and_pin_write():
@@ -26,6 +36,25 @@ def _forbidden_writes(path: Path, tree: ast.AST) -> list[str]:
             if node.func.attr in {"write_text", "write_bytes"}:
                 hits.append(f"{path.name}: calls .{node.func.attr}()")
     return hits
+
+
+def test_batch_writes_only_through_one_helper():
+    """`batch.py` may write, so there is one place that does it and this is the gate on that.
+
+    Scattered writes are what the module list used to prevent for free. With `batch.py` on the list
+    its own writes are no longer checked by anything, unless something checks that they all go
+    through `_write`, whose two callers are the two flags that name a path.
+    """
+    tree = ast.parse((PACKAGE / "batch.py").read_text(encoding="utf-8"))
+    inside: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)
+                    and inner.func.attr in {"write_text", "write_bytes"}):
+                inside.append(node.name)
+    assert inside == ["_write"], f"batch.py writes from {inside or 'nowhere'}, not only from _write"
 
 
 def test_baseline_write_counterfactual():

@@ -43,6 +43,7 @@ assurance — your AI agent says it's done. This tells you what it didn't check.
   assurance coupling                      what usually changes with what you changed, and did not
   assurance reach src/money.py            what a change to a file reaches, by a code graph
   assurance clearance src/money.py        ...and whether the asker is cleared for every owner it reaches
+  assurance batch sent.jsonl out.jsonl    what a batch job returned: empty, truncated, unreadable
   assurance diff --expected A --found B   was everything that should have been read, read?
   assurance pin --save | --check          did an MCP server change a tool after you approved it?
   assurance deps package.json             what an install will execute, read without running it
@@ -102,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
     tail = list(sys.argv[1:] if argv is None else argv)
     if tail and tail[0] in FORWARDED:
         return _run_forwarded(tail[0], tail[1:])
+    if tail and tail[0] == "batch":
+        # Forwarded whole, like `clearance`, so its own parser owns `--help` and its fifteen flags
+        # are declared once. The `deps` comment below is the reason: a second copy of a sibling's
+        # flags in this file is the drift this repo already has two gates about.
+        from assurance_cli.batch import main as batch_main  # noqa: PLC0415 — lazy, like the siblings
+        return int(batch_main(tail[1:]))
     if tail and tail[0] == "clearance":
         # Lives here rather than in a sibling because it joins two of them, and importing either
         # from the other would give a tool about dependency graphs a worse one. Forwarded the same
@@ -151,6 +158,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "clearance", add_help=False,
         help="Whether the person who asked is cleared for every owner their change reaches",
+    )
+
+    sub.add_parser(
+        "batch", add_help=False,
+        help="What a batch job actually returned, per record: returned, errored, truncated, empty, unreadable",
     )
 
     init_parser = sub.add_parser("init", help="Write .assurance.json baseline")
