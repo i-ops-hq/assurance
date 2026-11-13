@@ -54,10 +54,12 @@ import json
 import re
 import sys
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import chain
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+from assurance_cli.lineage import Attempt, cover, parse_lineage, summarise
 
 EXIT_OK = 0
 EXIT_GATE = 1
@@ -103,6 +105,40 @@ class BatchError(RuntimeError):
 def _records(count: int) -> str:
     """`count` records, said so a job of one does not read as a job of none."""
     return f"{count} record" if count == 1 else f"{count} records"
+
+
+def _body_digest(value: Any) -> str:
+    """A stable 16-character digest of a request body, and the only thing kept from it.
+
+    **The canonical form, written down because a caller has to produce the same one:** JSON with
+    object keys sorted, no whitespace between tokens, non-ASCII escaped, then SHA-256, then the
+    first 16 hex characters. In Python that is exactly::
+
+        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+    Canonical and not raw bytes, and this is the call that decides whether check A is usable at all.
+    A provider is free to reserialise what it echoes — different key order, different spacing,
+    different unicode escaping — and a hash over raw bytes would then differ on *every* record. A
+    check that fires on every record is indistinguishable from a broken one, and the first
+    thing anybody does with it is turn it off.
+
+    Check A exists because the key cannot be trusted on its own: AWS offers `recordId` as the only
+    correlation and says nothing about output ordering, and there are community reports of supplied
+    record IDs being replaced. The prompt itself is hashed and discarded — a request body holds
+    whatever the caller put in it, which in a population simulation is a person.
+    """
+    if value is None:
+        return ""
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+                           default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+#: Where each provider echoes the request back, if it does. OpenAI and Anthropic do not echo the
+#: body in the output file, so on those providers check A cannot run — and the report says
+#: `binding_unverified` rather than reporting a job whose binding was never checked as bound.
+_ECHO = {"bedrock": "modelInput", "openai": None, "anthropic": None}
+_REQUEST = {"bedrock": "modelInput", "openai": "body", "anthropic": "params"}
 
 
 @dataclass(frozen=True)
@@ -439,6 +475,34 @@ def detect_provider(lines: Iterable[Mapping[str, Any]]) -> str:
     )
 
 
+def _lineage_map(path: Path) -> dict[str, str]:
+    """The caller's resend map, from a JSON object or from JSONL pairs.
+
+    A file that parses but holds no pair this understands is an error, not an empty map: a coverage
+    report built on a lineage file nobody could read would show every resend as a gap and look
+    exactly like a job that lost records.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise BatchError(f"cannot read {path}: {exc}") from exc
+    try:
+        whole: Any = json.loads(text)
+    except json.JSONDecodeError:
+        whole = None
+    if isinstance(whole, Mapping):
+        found = parse_lineage(whole)
+    else:
+        rows, _ = _lines(path)
+        found = parse_lineage(rows)
+    if not found:
+        raise BatchError(
+            f"{path} holds no resend pairs this understands: either {{\"retry\": \"original\"}} as a "
+            'JSON object, or JSONL lines of {"original": "...", "retry": "..."}'
+        )
+    return found
+
+
 def _manifest_report(path: Path, reads: Sequence[Read], counted: int) -> dict[str, Any]:
     """Bedrock's `manifest.json.out` against what came back.
 
@@ -520,6 +584,7 @@ def read_job(
     error_file: Path | None = None,
     manifest: Path | None = None,
     declared: Declared | None = None,
+    lineage: Path | None = None,
 ) -> Job:
     """What a batch job's files say happened, as `--json` prints it.
 
@@ -551,10 +616,23 @@ def read_job(
     expected = set(sent_keys)
     duplicates_sent = [key for key, count in Counter(sent_keys).items() if count > 1]
 
+    # Check A, the half that does not trust the key: what we sent, by key, hashed.
+    request_key = _REQUEST[guessed]
+    sent_digests: dict[str, str] = {}
+    for line in in_lines:
+        raw = line.get(key_name) or line.get("customId")
+        if isinstance(raw, (str, int)) and str(raw) and request_key in line:
+            sent_digests[str(raw)] = _body_digest(line[request_key])
+
     reader = _READERS[guessed]
+    echo_key = _ECHO[guessed]
     reads: list[Read] = []
     seen: Counter[str] = Counter()
     keyless = 0
+    # Check A's two outcomes, kept apart on purpose. `binding_mismatch` means the output is joined
+    # to the wrong request and is serious. `binding_unverified` means the echo was absent or
+    # unreadable: not a pass, and not an accusation either.
+    binding = {"verified": 0, "binding_mismatch": 0, "binding_unverified": 0}
     for line in out_lines:
         raw = line.get(key_name) or line.get("customId")
         if not isinstance(raw, (str, int)) or not str(raw):
@@ -562,7 +640,20 @@ def read_job(
             continue
         key = str(raw)
         seen[key] += 1
-        reads.append(reader(key, line, declared))
+        read = reader(key, line, declared)
+        echoed = None if echo_key is None else line.get(echo_key)
+        if echoed is None or key not in sent_digests:
+            binding["binding_unverified"] += 1
+        elif _body_digest(echoed) != sent_digests[key]:
+            # The reply came back under this key carrying a different request than the one that went
+            # up under it. Nothing about this line is trustworthy, its state included, so it is
+            # refused rather than classified.
+            binding["binding_mismatch"] += 1
+            read = replace(read, state="refused",
+                           why="the echoed request is not the one sent under this key")
+        else:
+            binding["verified"] += 1
+        reads.append(read)
 
     if error_file is not None:
         error_lines, error_unparsable = _lines(error_file)
@@ -577,9 +668,32 @@ def read_job(
             reads.append(reader(key, line, declared))
 
     counts = Counter(read.state for read in reads)
+    # Check B is computed before the per-key report rather than beside it, because `total −
+    # processed` is a coverage fact: records the provider never attempted belong in the answer to
+    # "how many of the things we asked for are done", not only in a block about the manifest.
+    manifest_report = None if manifest is None else _manifest_report(manifest, reads, len(reads))
+    never_attempted = None if manifest_report is None else manifest_report["not_attempted"]
+
+    # Request 4: a final state per key the job was asked to do, not per line that came back. A
+    # resend under a new record ID is the same work, so it belongs to the original's chain rather
+    # than being a gap and an extra.
+    lineage_map = _lineage_map(lineage) if lineage is not None else {}
+    keys = summarise(
+        cover(
+            sent_keys,
+            [Attempt(read.key, read.state, read.output_tokens) for read in reads],
+            lineage_map,
+        ),
+        never_attempted=never_attempted,
+    )
     returned_keys = {read.key for read in reads}
     not_returned = sorted(expected - returned_keys)
-    unknown_keys = sorted(returned_keys - expected) if expected else []
+    # A declared resend is not an unexpected key: it is the key the caller told us replaced one they
+    # sent. Reporting it as never sent would contradict the coverage line in the same report, which
+    # has just counted it as that record's answer. An *undeclared* key is still unexpected — that is
+    # the whole of call 3, and it is what keeps the map from being decorative.
+    declared_retries = {retry for retry, original in lineage_map.items() if original in expected}
+    unknown_keys = sorted(returned_keys - expected - declared_retries) if expected else []
     duplicates_out = sorted(key for key, count in seen.items() if count > 1)
 
     other_stops = Counter(
@@ -624,13 +738,19 @@ def read_job(
             "output_tokens_known": len(known_tokens),
             "output_tokens_unknown": attempted - len(known_tokens),
             "output_tokens_sum": sum(known_tokens),
+            # Check C, propagated. The manifest block already said this; so does the per-key report
+            # and so do the emitted run-record lines. A floor named in one surface and printed as a
+            # total in another is an understatement that reappears wherever nobody is looking.
+            "output_tokens_is_a_floor": attempted > len(known_tokens),
             "identical_replies": sum(count for count in fingerprints.values() if count > 1),
             "max_repeat_ratio": max(repeats) if repeats else None,
             "over_repeat_ceiling": 0 if declared.repeat_ceiling is None else sum(
                 1 for ratio in repeats if ratio >= declared.repeat_ceiling
             ),
         },
-        "manifest": None if manifest is None else _manifest_report(manifest, reads, attempted),
+        "keys": keys,
+        "binding": {**binding, "lineage_file": None if lineage is None else str(lineage)},
+        "manifest": manifest_report,
         "notes": [],
         "findings": [],
     }
@@ -660,6 +780,20 @@ def _notes(report: Mapping[str, Any], provider: str, error_file: Path | None, de
         )
     if declared.item_pattern is None:
         notes.append("no --item-pattern was declared, so parsed_items is not checked")
+    unverified = report["binding"]["binding_unverified"]
+    if unverified:
+        where = "this provider does not echo the request in its output file" if provider != "bedrock" \
+            else "the echo was absent from the line, or the key was never sent"
+        notes.append(
+            f"check A could not run on {_records(unverified)}: {where}. That is neither a pass nor "
+            "a mismatch — the join is by key alone on those, and the key is the thing check A exists "
+            "not to trust"
+        )
+    if report["keys"]["lineage"]["pairs"] == 0:
+        notes.append(
+            "no --lineage map was given, so a record resent under a new key reads as one key missing "
+            "and one key unexpected. Nothing here infers a resend from a name or an ordering"
+        )
     unknown = report["content"]["output_tokens_unknown"]
     if unknown:
         notes.append(
@@ -695,6 +829,21 @@ def _findings(report: Mapping[str, Any]) -> list[str]:
         found.append(f"{total} lines carry no record key, so they join to nothing")
     if report["content"]["over_repeat_ceiling"]:
         found.append(f"{report['content']['over_repeat_ceiling']} replies repeat themselves past the declared ceiling")
+    keys = report["keys"]
+    if keys["missing"]:
+        found.append(f"{keys['missing']} of {keys['expected']} keys have no record for any attempt")
+    if keys["refused"]:
+        plural = "key" if keys["refused"] == 1 else "keys"
+        found.append(f"{keys['refused']} {plural} could not be resolved from the resend map")
+    if keys["never_attempted"]:
+        found.append(f"the provider never attempted {_records(keys['never_attempted'])} of what was sent")
+    found.extend(keys["lineage"]["refusals"][:10])
+    found.extend(keys["lineage"]["unknown_originals"][:10])
+    if report["binding"]["binding_mismatch"]:
+        found.append(
+            f"{_records(report['binding']['binding_mismatch'])} echoed a different request than the "
+            "one sent under that key, so the output is joined to the wrong input"
+        )
     manifest = report["manifest"]
     if manifest:
         found.extend(manifest["disagreements"])
@@ -704,7 +853,14 @@ def _findings(report: Mapping[str, Any]) -> list[str]:
 def _summary(report: Mapping[str, Any]) -> str:
     records = report["records"]
     sent, accounted = report["sent"], report["accounted"]
-    head = f"{accounted} of {sent} records came back" if sent else f"{accounted} records came back"
+    if not sent:
+        head = f"{accounted} records came back"
+    elif accounted > sent:
+        # More lines than keys sent, which is what resends look like. "3 of 2 came back" is not a
+        # sentence; the per-key line below is where the ratio belongs.
+        head = f"{accounted} records came back for {sent} sent"
+    else:
+        head = f"{accounted} of {sent} records came back"
     detail = ", ".join(f"{records[state]} {state}" for state in STATES if records[state])
     return f"{head}; {detail or 'all returned'}."
 
@@ -712,6 +868,15 @@ def _summary(report: Mapping[str, Any]) -> str:
 def format_job(report: Mapping[str, Any]) -> str:
     """The report as text: the summary, what did not hold, and what was not checked."""
     lines = [report["summary"]]
+    keys = report.get("keys") or {}
+    if keys.get("expected"):
+        # The coverage sentence is the one their request asked for, and it answers a different
+        # question from the record counts above: those are about lines that came back, this is about
+        # work that was asked for.
+        lines.append("  " + keys["summary"])
+        if keys.get("output_tokens_is_a_floor"):
+            lines.append(f"  output tokens: {keys['output_tokens_sum']} or more — a floor, because "
+                         f"{keys['keys_with_unknown_usage']} of {keys['expected']} keys reported no usage")
     shapes = report.get("shapes") or {}
     if shapes:
         lines.append("  shapes read: " + ", ".join(f"{name} ({count})" for name, count in sorted(shapes.items())))
@@ -760,6 +925,16 @@ def run_record_lines(report: Mapping[str, Any], reads: Sequence[Read], run: str,
             "reply_sha16": read.reply_sha16,
             "parsed_items": read.parsed_items, "repeat_ratio": read.repeat_ratio,
         }))
+    # Check C again, because this is the surface furthest from the reader: an audit of these lines
+    # reports tokens, and a floor that loses its label here is an understatement nobody can see.
+    lines.append(json.dumps({
+        "schema": RECORD_SCHEMA, "type": "outcome", "run": run,
+        "step": "batch", "name": "every record reported its usage",
+        "passed": not report["keys"]["output_tokens_is_a_floor"],
+        "detail": ("" if not report["keys"]["output_tokens_is_a_floor"] else
+                   f"{report['keys']['keys_with_unknown_usage']} keys reported no usage, so "
+                   f"{report['keys']['output_tokens_sum']} output tokens is a floor and not a total"),
+    }))
     for name, passed, detail in _checks(report):
         lines.append(json.dumps({
             "schema": RECORD_SCHEMA, "type": "outcome", "run": run,
@@ -800,6 +975,15 @@ def _checks(report: Mapping[str, Any]) -> list[tuple[str, bool, str]]:
         ("no record errored", not records["errored"], f"{records['errored']} errored"),
         ("every record sent was accounted for", not coverage["not_returned"],
          f"{coverage['not_returned']} not accounted for"),
+        ("every key the job was asked to do is covered",
+         report["keys"]["covered"] == report["keys"]["expected"],
+         f"{report['keys']['expected'] - report['keys']['covered']} of "
+         f"{report['keys']['expected']} not covered"),
+        ("the resend map resolved for every key", not report["keys"]["refused"],
+         f"{report['keys']['refused']} keys refused: " + "; ".join(report["keys"]["lineage"]["refusals"][:3])),
+        ("every output was bound to the request that was sent",
+         not report["binding"]["binding_mismatch"],
+         f"{report['binding']['binding_mismatch']} echoed a different request"),
     ]
     manifest = report["manifest"]
     if manifest:
@@ -824,6 +1008,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", choices=sorted(_READERS), help="Default: read it from the keys in the file")
     parser.add_argument("--error-file", help="OpenAI only: the batch's error file, which holds the failures")
     parser.add_argument("--manifest", help="Bedrock only: manifest.json.out, to check the provider's own counts")
+    parser.add_argument(
+        "--lineage",
+        help=("Your resend map, so a record resent under a new key counts as the same work: "
+              'a JSON object of {"retry": "original"}, or JSONL lines of '
+              '{"original": "...", "retry": "..."}. Never inferred'),
+    )
+    parser.add_argument(
+        "--fail-on-uncovered", nargs="?", type=int, const=0, default=None, metavar="N",
+        help=f"Exit {EXIT_GATE} when more than N expected keys are not covered (bare: more than none)",
+    )
     parser.add_argument("--token-floor", type=int, help="A reply under this many output tokens is empty")
     parser.add_argument("--item-pattern", help="A regex for one item of an answer; none found is empty")
     parser.add_argument("--repeat-ceiling", type=float, help="A reply repeating this share of its lines is a finding")
@@ -882,6 +1076,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             error_file=Path(args.error_file) if args.error_file else None,
             manifest=Path(args.manifest) if args.manifest else None,
             declared=declared,
+            lineage=Path(args.lineage) if args.lineage else None,
         )
     except BatchError as exc:
         print(f"assurance batch: {exc}", file=sys.stderr)
@@ -948,6 +1143,22 @@ def _exit_code(args: argparse.Namespace, report: Mapping[str, Any]) -> int:
                 "--item-pattern, so only a wholly blank reply could have been found. Declare one "
                 "of them, or name the states you meant (--fail-on-record errored truncated "
                 "unreadable refused expired canceled).",
+                file=sys.stderr,
+            )
+            return EXIT_GATE
+    if args.fail_on_uncovered is not None:
+        uncovered = report["keys"]["expected"] - report["keys"]["covered"]
+        if uncovered > args.fail_on_uncovered:
+            return EXIT_GATE
+        # The same rule as --fail-on-record, for the same reason. "Covered" means a key came back
+        # with an answer, and with no --token-floor and no --item-pattern a reply of four tokens
+        # saying nothing counts as an answer — so a pass here would rest on a check that did not
+        # run. There is no states escape for this flag: coverage is a claim about every key.
+        if args.token_floor is None and args.item_pattern is None:
+            print(
+                "assurance batch: asked to fail on uncovered keys with no --token-floor and no "
+                "--item-pattern, so a reply that answers nothing still counts as covered. Declare "
+                "one of them for this gate to mean what it says.",
                 file=sys.stderr,
             )
             return EXIT_GATE

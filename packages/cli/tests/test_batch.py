@@ -499,7 +499,12 @@ def test_the_emitted_lines_are_a_run_record_and_fail_on_claim_holds_the_claim_ag
     assert [line["type"] for line in lines].count("model") == 2
     assert any(line["type"] == "claim" for line in lines)
     failed = [line for line in lines if line["type"] == "outcome" and not line["passed"]]
-    assert [line["name"] for line in failed] == ["every record returned something"]
+    # Two, and both are right: the empty record is one line that said nothing, and it is also one of
+    # the two keys the job was asked to do, so neither the record check nor the coverage check holds.
+    assert [line["name"] for line in failed] == [
+        "every record returned something",
+        "every key the job was asked to do is covered",
+    ]
 
     assert audit.main([str(record), "--fail-on-claim"]) == 1
     capsys.readouterr()

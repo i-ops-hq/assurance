@@ -1,5 +1,35 @@
 # 0.6.10
 
+- **`--lineage`: per-key coverage that counts the work, not the lines.** A pipeline resending a
+  failed record must give the resend a new record ID, so keys-sent against keys-returned calls the
+  original a gap and the resend an extra — wrong twice about one record that succeeded. Declare what
+  you resent and each expected key gets one final state: `returned`, `recovered`, `missing`,
+  `refused`, or the latest accounted attempt's verdict. Chains of several hops are followed.
+- **A resend link is declared, never inferred**, and an unmapped key in the output stays an
+  unexpected key. Guessing the edge from a name or an ordering would put a prediction inside a
+  coverage number, and a map that adopts whatever turns up cannot fail.
+- **A malformed resend map is refused with its reason, not resolved**: two resends for one original,
+  a key that is both a resend and a record of its own, a chain past the bound. Which branch was
+  meant is not something to guess at.
+- **`missing` means an absence of information, not a failure.** A key whose attempts all errored is
+  `errored`; `missing` is the only state that means this cannot tell you. The evidence keeps the
+  whole chain, because "truncated then OK" and "OK first time" are the same verdict and very
+  different facts. `expired` never becomes `recovered` without a declared resend, since Anthropic
+  expiry destroys the result.
+- **Check A, request-to-response binding.** Where a provider echoes the request — Bedrock echoes
+  `modelInput` — it is hashed against what went up under that key. `binding_mismatch` means the line
+  answers a different request and the record is refused; `binding_unverified` means the echo was
+  absent or unreadable, which is neither a pass nor an accusation. The hash is over a canonical form
+  (keys sorted, no whitespace, non-ASCII escaped), written down in the module because the caller must
+  reproduce it — over raw bytes a provider's reserialisation would mismatch every record, and a check
+  that always fires is indistinguishable from a broken one.
+- **Check B reaches the per-key report**: `totalRecordCount − processedRecordCount` is a coverage
+  fact, not a footnote about the manifest.
+- **Check C propagates.** With any unknown usage the token sum is a floor on every surface — per-key
+  report, summary, manifest comparison and the emitted run-record lines — because a floor labelled in
+  one place and printed as a total in another is an understatement that reappears where nobody looks.
+- `--fail-on-uncovered [N]` exits 1 above N uncovered keys, and will not pass while the check that
+  finds an empty reply is unconfigured.
 - **`assurance batch sent.jsonl out.jsonl.out`**: what an LLM batch job actually returned, per
   record — `returned`, `errored`, `truncated`, `empty`, `unreadable`, `expired`, `canceled` or
   `refused`. Bedrock, OpenAI Batch and Anthropic Message Batches, from local files, no new

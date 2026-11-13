@@ -141,6 +141,71 @@ assurance audit run.jsonl --fail-on-claim                                       
 record instead, which is what `assurance drift` reads: a run record also carries a task line, an
 outcome line per check and a claim, and those would sit in the denominator of a rate.
 
+### Per-key coverage, when the pipeline resends
+
+A pipeline that resends a failed record has to give the resend a new record ID, because the provider
+will not accept the old one twice. So the obvious coverage check — keys sent against keys returned —
+calls the original a gap *and* the resend an extra, and is wrong twice about one record that
+succeeded. A pipeline doing the right thing looks worse than one that never retried.
+
+Tell it what you resent and it counts the work instead of the lines:
+
+```bash
+assurance batch sent.jsonl out.jsonl.out --token-floor 10 --lineage resends.json
+# 1001 records came back for 1000 sent; 980 returned, 20 truncated.
+#   998 of 1000 keys covered — 2 empty, 18 recovered.
+```
+
+`--lineage` takes a JSON object of `{"retry": "original"}`, or JSONL lines of
+`{"original": "...", "retry": "..."}`. Chains of several hops are followed, so a record resent twice
+is one key with three attempts.
+
+| final state | means |
+|---|---|
+| `returned` | the first attempt came back with an answer |
+| `recovered` | a later attempt came back with an answer; an earlier one had failed |
+| `missing` | no record for this key or for any declared resend of it |
+| `refused` | the resend map cannot be resolved for this key, so its coverage is not computed |
+| anything else | the latest accounted attempt's verdict — `empty`, `truncated`, `errored`, `unreadable`, `expired`, `canceled` |
+
+**`missing` is reserved for an absence of information, not for a failure.** A key whose attempts all
+errored is `errored` — you know what happened to it. A key with no line anywhere is `missing`, the
+only state that means this cannot tell you. The evidence keeps the whole chain, because "truncated
+then OK" and "OK first time" are the same verdict and very different facts.
+
+**A resend link is declared, never inferred.** Nothing guesses that `p1-retry` resends `p1` from its
+name, a timestamp or an ordering. A key in the output that no map entry claims is an unexpected key
+and is reported as one — a map that absorbs whatever turns up cannot fail, and a coverage number
+built on a guessed link is worse than no coverage number.
+
+**A malformed map is refused, not resolved.** Two resends declared for one original, a key that is
+both a resend and a record of its own, a chain past the bound — each refuses that key and says why.
+Which branch you meant is not something to guess at.
+
+`--fail-on-uncovered [N]` exits 1 above N uncovered keys, and like `--fail-on-record` it will not
+pass while the check that finds an empty reply is unconfigured.
+
+### Binding the reply to the request you sent
+
+`recordId` is the only correlation AWS offers and its page says nothing about output ordering, so a
+join that is correct by key can still be wrong. Where a provider echoes the request back — Bedrock
+echoes `modelInput` — the echo is hashed against what went up under that key:
+
+- **`binding_mismatch`** — the hashes differ, so this line answers a different request than the one
+  sent under its key. The record is refused rather than classified; nothing about it is trustworthy.
+- **`binding_unverified`** — the echo is absent or unreadable, which includes every record on
+  OpenAI and Anthropic, since neither echoes the request. Not a pass and not an accusation.
+
+The hash is over a canonical form, not raw bytes: keys sorted, no whitespace between tokens,
+non-ASCII escaped. A provider is free to reserialise what it echoes, and a check over raw bytes
+would then differ on every record — a check that fires on every record is indistinguishable from a broken one. The exact form is written down in `batch.py`, because you have to produce the
+same one.
+
+**Unknown propagates.** If any record reported no usage, the token sum is a floor rather than a
+total, and every surface says so — the per-key report, the text summary, the manifest comparison and
+the emitted run record. A floor labelled in one place and printed as a total in another is an
+understatement that reappears wherever nobody is looking.
+
 ## Use it from an MCP client
 
 Works in Cursor, Claude Desktop, Claude Code and any other MCP client.
