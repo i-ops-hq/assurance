@@ -117,6 +117,11 @@ def _records(count: int) -> str:
     return f"{count} record" if count == 1 else f"{count} records"
 
 
+def _keys(count: int) -> str:
+    """`count` keys, the same way. Ad-hoc plurals had started appearing inline beside this helper."""
+    return f"{count} key" if count == 1 else f"{count} keys"
+
+
 def _key_digest(key: str) -> str:
     """A record key as a stable 16-character digest, for `--hash-keys`.
 
@@ -878,8 +883,7 @@ def _findings(report: Mapping[str, Any]) -> list[str]:
         found.append(f"{keys['missing']} of {keys['expected']} keys "
                      f"{'has' if keys['missing'] == 1 else 'have'} no record for any attempt")
     if keys["refused"]:
-        plural = "key" if keys["refused"] == 1 else "keys"
-        found.append(f"{keys['refused']} {plural} could not be resolved from the resend map")
+        found.append(f"{_keys(keys['refused'])} could not be resolved from the resend map")
     if keys["never_attempted"]:
         found.append(f"the provider never attempted {_records(keys['never_attempted'])} of what was sent")
     found.extend(keys["lineage"]["refusals"][:10])

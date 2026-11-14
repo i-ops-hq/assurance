@@ -517,3 +517,20 @@ def test_coverage_of_nothing_is_not_an_error() -> None:
     summary = summarise(cover([], []))
     assert summary["expected"] == 0 and summary["covered"] == 0
     assert "0 of 0" in summary["summary"]
+
+
+@pytest.mark.parametrize("lineage,expected", [
+    pytest.param({"p1r": "p1", "p1r2": "p1"}, "1 key could not be resolved", id="one"),
+    pytest.param({"p1": "p2", "p2": "p1"}, "2 keys could not be resolved", id="two"),
+])
+def test_the_refused_count_reads_as_a_sentence(tmp_path: Path, lineage: dict[str, str], expected: str) -> None:
+    """The findings list is prose a person reads, and this line had no test at all.
+
+    Found by the Stop hook asking what had verified an edit to it: the suite was green before and
+    after, because every other test asserts `keys["lineage"]["refusals"]` rather than the sentence
+    built from the count. Green was consistent with having broken it.
+    """
+    report = _job(tmp_path, ["p1", "p2"],
+                  [("p1", _reply("a full day")), ("p2", _reply("a full day"))],
+                  lineage=lineage)
+    assert any(expected in finding for finding in report["findings"]), report["findings"]
