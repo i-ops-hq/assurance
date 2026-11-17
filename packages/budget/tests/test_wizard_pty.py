@@ -60,8 +60,34 @@ print("RESTORED=" + str(before == after))
 '''
 
 
-def _drive(tmp_path: Path, keys: list[bytes], limit: float = 8.0) -> str:
-    """Run the demo under a PTY, send `keys`, return everything it drew."""
+#: The question the demo asks. Its arrival on the PTY is the child saying it has started, imported
+#: and reached `choose` — which is a fact, where a fixed sleep was a guess.
+_PROMPT = b"Install the Stop hook?"
+
+
+def _wait_for(drawn: bytearray, marker: bytes, limit: float) -> bool:
+    deadline = time.time() + limit
+    while time.time() < deadline:
+        if marker in bytes(drawn):
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def _drive(tmp_path: Path, keys: list[bytes], limit: float = 20.0) -> str:
+    """Run the demo under a PTY, send `keys`, return everything it drew.
+
+    **Readiness is waited for, not assumed.** The first version slept a flat 0.35s before the first
+    key and allowed 8s in total. That passed everywhere except one loaded macOS 3.10 runner, where
+    the child had not finished starting by the deadline and was killed before printing anything —
+    and the assertion that caught it read `assert None == '1'`, which says nothing about what went
+    wrong. So the child is now waited for until it draws its question, the budget is generous
+    rather than tight, and a deadline that expires fails with a sentence naming which one.
+
+    **The drain thread is joined rather than abandoned.** `pty.fork` from a multi-threaded process
+    is documented as deadlock-prone in the child, and this module forks once per parametrised case,
+    so a thread left running from the previous case is a hazard the next one inherits.
+    """
     demo = tmp_path / "demo.py"
     demo.write_text(_DEMO, encoding="utf-8")
 
@@ -89,21 +115,30 @@ def _drive(tmp_path: Path, keys: list[bytes], limit: float = 8.0) -> str:
 
     reader = threading.Thread(target=drain, daemon=True)
     reader.start()
+    expired = ""
     try:
-        for key in keys:
-            time.sleep(0.35)  # let the frame be drawn before the next key lands
-            os.write(fd, key)
-        deadline = time.time() + limit
-        while time.time() < deadline and b"RESTORED=" not in bytes(drawn):
-            time.sleep(0.05)
+        if not _wait_for(drawn, _PROMPT, limit):
+            expired = f"the demo never drew its question within {limit}s"
+        else:
+            for key in keys:
+                time.sleep(0.35)  # let the frame be drawn before the next key lands
+                os.write(fd, key)
+            if not _wait_for(drawn, b"RESTORED=", limit):
+                expired = f"the demo never printed RESTORED= within {limit}s of the last key"
     finally:
         stop.set()
         with contextlib.suppress(OSError):
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
         with contextlib.suppress(OSError):
-            os.close(fd)
-    return bytes(drawn).decode(errors="replace")
+            os.close(fd)  # unblocks the drain thread's os.read
+        reader.join(timeout=5.0)
+    text = bytes(drawn).decode(errors="replace")
+    if expired:
+        # Said here rather than left to an assertion on a field that was never printed: "it did not
+        # finish" and "it answered wrongly" need different people to look at them.
+        pytest.fail(f"{expired}\n--- what it drew ---\n{_plain(text)}")
+    return text
 
 
 def _plain(text: str) -> str:
