@@ -4,13 +4,13 @@
     "name": "I-Ops"
   },
   "metadata": {
-    "description": "Assurance for Claude Code: what a session actually did, checked after every turn."
+    "description": "Assurance for Claude Code: what a session actually did, and what it could not check."
   },
   "plugins": [
     {
       "name": "assurance",
       "source": "./plugins/assurance",
-      "description": "After each turn, checks Claude's code changes against the tests that ran and what you asked for, and says so when untested code was pushed, merged, published or committed on main."
+      "description": "Ask /assurance:audit what the session you are in actually did: the edits, the tests and checks that ran after them, and what could not be checked. Arithmetic over the transcript; no model decides anything."
     }
   ]
 }

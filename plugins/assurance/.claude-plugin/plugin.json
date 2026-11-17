@@ -1,7 +1,7 @@
 {
   "name": "assurance",
-  "version": "0.1.38",
-  "description": "After each turn, checks Claude's code changes against the tests that ran and what you asked for, and says so when untested code was pushed, merged, published or committed on main.",
+  "version": "0.1.39",
+  "description": "Ask /assurance:audit what the session you are in actually did: the edits, the tests and checks that ran after them, and what could not be checked. Arithmetic over the transcript; no model decides anything.",
   "author": {
     "name": "I-Ops",
     "url": "https://i-ops.dev"

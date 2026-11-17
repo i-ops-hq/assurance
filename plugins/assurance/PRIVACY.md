@@ -1,16 +1,20 @@
 # Privacy
 
-This covers the Assurance plugin for Claude Code: its Stop hook and its `/assurance:audit` skill.
-The code it describes is in this folder and in the [`assurance`](https://pypi.org/project/assurance/)
-package the plugin runs.
+This covers the Assurance plugin for Claude Code, which is one skill, `/assurance:audit`. The code
+it describes is in this folder and in the [`assurance`](https://pypi.org/project/assurance/) package
+the skill asks Claude to run.
+
+It also covers the Stop hook in that package, which you install yourself with
+`assurance hook install` and which is not part of this plugin. The hook reads the same things in the
+same way; the difference is only when it runs.
 
 ## What it reads
 
 - **The transcript of the session it audits.** Claude Code keeps a transcript of each session on
-  your machine. When Claude finishes a turn, Claude Code runs the plugin's Stop hook and gives it the
-  path to that session's transcript. When you run `/assurance:audit`, the skill passes the audit
-  its session's id, and the audit opens the transcript with that name. It does not open any other
-  session's transcript.
+  your machine. When you run `/assurance:audit`, the audit is given that session's id and opens the
+  transcript with that name. It does not open any other session's transcript. The Stop hook, if you
+  installed it, is handed the path to the finishing session's transcript by Claude Code, and reads
+  that one only.
 - **Its settings, if you have made any:** `.assurance/config.toml` in the project,
   `~/.config/assurance/config.toml` (on Windows, `%APPDATA%\assurance\config.toml`), and
   `ASSURANCE_MAX_*` environment variables.

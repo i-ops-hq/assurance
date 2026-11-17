@@ -52,10 +52,10 @@ claude plugin install assurance@i-ops-hq
 Or add it to `~/.claude/settings.json` yourself:
 
 ```json
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.38 audit --hook --nudge" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "uvx --offline assurance@0.1.39 audit --hook --nudge" } ] } ] } }
 ```
 
-Run `uvx assurance@0.1.38 --version` once first: `--offline` runs the copy uv already has, so the hook
+Run `uvx assurance@0.1.39 --version` once first: `--offline` runs the copy uv already has, so the hook
 never waits on PyPI.
 
 ## Every command
