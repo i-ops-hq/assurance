@@ -386,10 +386,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         path = _newest_session(cwd)
         if path is None:
             print(
-                f"assurance audit: no Claude Code or Codex session recorded for {cwd}. "
-                f"Looked in {_looked_in()} and {_codex_looked_in()}. Run it inside a project where "
-                "you have used one of them, pass a transcript path, or see a sample report with: "
-                "assurance audit --demo",
+                f"assurance audit: no Claude Code or Codex session recorded for {cwd}."
+                + _try_these_instead(cwd)
+                + f" Looked in {_looked_in()} and {_codex_looked_in()}. Pass a transcript path, or "
+                "see a sample report with: assurance audit --demo",
                 file=sys.stderr,
             )
             return EXIT_UNREADABLE
@@ -1145,6 +1145,61 @@ def _newest_session(cwd: Path) -> Path | None:
         if path is not None and path.is_file()
     ]
     return max(found, key=lambda path: path.stat().st_mtime) if found else None
+
+
+def _where_sessions_live(limit: int = 400, head: int = 16384) -> list[tuple[str, int]]:
+    """Folders that do have sessions, most first, read from the files both agents already wrote.
+
+    The refusal this feeds is produced by scanning both roots, so at the moment it says "no session
+    recorded for this folder" it already holds the answer to "then where?". Not saying it cost a
+    user three runs and the conclusion that this tool could not read Codex: every one of his fifteen
+    Codex sessions was in a single folder he happened not to be standing in, and each refusal was
+    correct.
+
+    Bounded on purpose — `limit` files, `head` bytes of each — because this runs on the path where
+    something already went wrong, and a diagnostic that takes a minute is its own failure. `cwd` sits
+    in the first few records of both formats, so the head is enough.
+    """
+    counts: Counter[str] = Counter()
+    for root in (_looked_in(), _codex_looked_in()):
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.jsonl"))[:limit]:
+            try:
+                with path.open("r", encoding="utf-8", errors="replace") as handle:
+                    blob = handle.read(head)
+            except OSError:
+                continue
+            for line in blob.splitlines():
+                if '"cwd"' not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue  # a head cut mid-line is the normal case, not a problem
+                folder = record.get("cwd") or (record.get("payload") or {}).get("cwd")
+                if isinstance(folder, str) and folder:
+                    counts[folder] += 1
+                    break
+    return counts.most_common()
+
+
+def _try_these_instead(cwd: Path) -> str:
+    """The sentence that names where to run it, or nothing when there is genuinely nowhere."""
+    elsewhere = [(folder, n) for folder, n in _where_sessions_live() if folder != str(cwd)]
+    if not elsewhere:
+        return ""
+    folder, n = elsewhere[0]
+    # One folder named, the rest counted. "X, and 19 other folders — run it there" does not say
+    # which there; the suggestion has to point at exactly one place to be followable.
+    rest = ""
+    if len(elsewhere) > 1:
+        plural = "" if len(elsewhere) == 2 else "s"
+        rest = f" ({len(elsewhere) - 1} other folder{plural} {'has' if len(elsewhere) == 2 else 'have'} some too.)"
+    # Absolute, as recorded: `display_path` shortens relative to a session's cwd, and the point here
+    # is that it is somewhere the reader is not standing.
+    return (f" {n} {'session is' if n == 1 else 'sessions are'} recorded for {folder} — "
+            f"run it there.{rest}")
 
 
 def _looked_in() -> Path:
