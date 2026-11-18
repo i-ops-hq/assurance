@@ -42,7 +42,15 @@ from pathlib import Path
 import pytest
 
 from assurance_budget import sessions as sessions_module
-from assurance_budget.sessions import bash_label, classify_bash, is_scan, shell_segments
+from assurance_budget.sessions import (
+    _cut_from_the_end,
+    _exit_is_visible,
+    bash_label,
+    classify_bash,
+    is_scan,
+    outcome_of_test_run,
+    shell_segments,
+)
 
 #: The command from 7668d5fa at 15:46:55 that produced "2223 passed", with the path shortened. The
 #: shape is what matters: an assignment, a `find`, then the interpreter as a quoted variable.
@@ -174,20 +182,116 @@ def test_the_assignment_is_collected_after_the_terminator_too() -> None:
 
 
 def test_every_site_that_classifies_a_segment_resolves_variables_first() -> None:
-    """The drift guard, and the reason this fix is one helper rather than eight patches. Eight
-    functions across three modules each did heredoc-strip, split and classify themselves. A ninth
-    that skipped the heredoc strip is how `assurance notices` came to crash with ValueError on an
-    apostrophe inside a `cat <<'EOF'` body. By the shape of the call, not a grep: a comment naming
-    `split_shell_segments` would trip a text search."""
+    """The drift guard, and it has already been wrong once in the direction that matters.
+
+    Its first version asked whether a function called `split_shell_segments`. `_exit_is_visible` and
+    `_cut_from_the_end` call `_scan_shell` and assemble segments by hand, so they sailed through a
+    guard that was checking a spelling rather than the property. The cost was a manufactured pass:
+    with the interpreter in a variable neither could find the test segment, `_exit_is_visible` fell
+    through to its trusting default, and `"$PY" -m pytest ... | tail -8` whose runner printed
+    `1 failed, 73 passed` was recorded as PASSED.
+
+    So the property is where the segments CAME FROM, not which function split them. By the shape of
+    the calls, not a grep: a comment naming the helper would satisfy a text search.
+    """
+    safe = {"shell_segments", "shell_pipeline", "_resolve_variables"}
     offenders = []
     for path in sorted(Path(sessions_module.__file__).resolve().parent.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            if node.name == "shell_segments":
-                continue  # the helper itself is the one place that may call the raw split
-            body = ast.dump(node)
-            if "_classify_segment" in body and "split_shell_segments" in body:
+            calls = {
+                getattr(call.func, "id", "") or getattr(call.func, "attr", "")
+                for call in ast.walk(node)
+                if isinstance(call, ast.Call)
+            }
+            if "_classify_segment" in calls and not calls & safe:
                 offenders.append(f"{path.name}:{node.name}")
     assert offenders == [], offenders
+
+
+# --- the outcome of a run it can now see, which is where resolving nearly did harm ----------------
+
+
+PIPED_PLAIN = "python -m pytest t -q 2>&1 | tail -8"
+PIPED_VAR = 'PY=/x/bin/python; "$PY" -m pytest t -q 2>&1 | tail -8'
+
+
+@pytest.mark.parametrize(
+    "tail,expected,why",
+    [
+        ("1 failed, 73 passed in 1.20s", "failed", "the runner printed a failure"),
+        ("74 passed in 1.20s", "passed", "the runner printed a pass, which is evidence of its own"),
+        ("", "unknown", "nothing was printed, so nothing is known"),
+        ("...unrelated trailing output...", "unknown", "no summary line, so nothing is known"),
+    ],
+)
+def test_a_piped_run_is_read_from_what_the_runner_printed(tail: str, expected: str, why: str) -> None:
+    """A pipe replaces the exit status, so the result comes from the runner's own summary or not at
+    all. `passed` here is text-derived and legitimate -- pytest prints its failure count after its
+    pass count, so a `tail` that keeps one keeps the other. What is never legitimate is reading
+    `tail`'s exit status as the test's.
+    """
+    assert outcome_of_test_run(PIPED_PLAIN, False, tail, None, True) == expected, why
+
+
+@pytest.mark.parametrize(
+    "tail", ["1 failed, 73 passed in 1.20s", "74 passed in 1.20s", "", "...unrelated..."]
+)
+def test_the_variable_form_is_read_exactly_like_the_plain_one(tail: str) -> None:
+    """The control for the whole of item 4, and the one the fix originally failed. Resolving the
+    interpreter must change only whether the run is SEEN, never how its result is judged."""
+    assert outcome_of_test_run(PIPED_VAR, False, tail, None, True) == outcome_of_test_run(
+        PIPED_PLAIN, False, tail, None, True
+    )
+
+
+@pytest.mark.parametrize(
+    "command,visible,why",
+    [
+        (PIPED_VAR, False, "a pipe hands the status to tail"),
+        ('PY=/x/bin/python; set -o pipefail; "$PY" -m pytest t | tail -8', True, "pipefail keeps the test's status"),
+        ('PY=/x/bin/python; "$PY" -m pytest t && git push', True, "&& keeps a failure"),
+        ('PY=/x/bin/python; "$PY" -m pytest t; echo done', False, "echo's status replaces it"),
+        ('PY=/x/bin/python; "$PY" -m pytest t', True, "nothing follows it"),
+    ],
+)
+def test_whether_the_exit_status_is_the_tests_own(command: str, visible: bool, why: str) -> None:
+    assert _exit_is_visible(command, "test", None) is visible, why
+
+
+@pytest.mark.parametrize(
+    "plain,variable,expected,why",
+    [
+        ("python -m pytest t -q | head -20",
+         'PY=/x/bin/python; "$PY" -m pytest t -q | head -20',
+         "unknown", "head keeps the start, so a failure printed later could be the part missing"),
+        ("python -m pytest t -q | tail -20",
+         'PY=/x/bin/python; "$PY" -m pytest t -q | tail -20',
+         "passed", "tail keeps the end, where the summary is"),
+    ],
+)
+def test_output_cut_from_the_end_reads_the_same_through_a_variable(
+    plain: str, variable: str, expected: str, why: str
+) -> None:
+    """`_cut_from_the_end` had the same defect as `_exit_is_visible` and for the same reason: its own
+    hand-built segments, no resolution. With the interpreter in a variable it could not find the
+    test, so it could not tell a `head` from a `tail` and a truncated run read as a clean pass."""
+    tail = "74 passed in 1.20s"
+    assert outcome_of_test_run(plain, False, tail, None, True) == expected, why
+    assert outcome_of_test_run(variable, False, tail, None, True) == expected, why
+
+
+def test_a_command_it_cannot_parse_does_not_get_its_exit_status_trusted() -> None:
+    """The two callers of `shell_pipeline` need opposite answers when the command will not parse, and
+    both are the cautious one for their own question.
+
+    `_exit_is_visible` says False: an exit status it cannot reason about is not the test's, so the
+    result has to come from what the runner printed. `_cut_from_the_end` says True: it cannot rule out
+    a `head`, so it must assume the output was cut. Collapsing either to the convenient answer turns
+    an unreadable command into a clean pass.
+    """
+    unparseable = "python -m pytest t 'unclosed"
+    assert _exit_is_visible(unparseable, "test", None) is False
+    assert _cut_from_the_end(unparseable, None) is True

@@ -1936,14 +1936,24 @@ def ran_no_tests(tail: str, whole: bool = False) -> bool:
     return False
 
 
-def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
-    """True when the test's own output was piped through `head` or `sed -n`: the start was kept, so a
-    failure printed after the part that was kept could be what is missing. A `head` in another
-    pipeline of the same command does not touch the test's output."""
-    try:
-        tokens = _scan_shell(strip_heredoc_bodies(command))[0]
-    except ValueError:
-        return True
+def shell_pipeline(command: str) -> tuple[list[list[str]], list[str]]:
+    """Segments ready to classify, with the separators between them, variables resolved.
+
+    `shell_segments` throws the separators away, and two functions need them: whether anything after
+    the test can replace its exit status, and whether a `head` cut the test's own output. Both built
+    this by hand and neither resolved variables, so with the interpreter in a variable they could not
+    find the test segment at all -- and `_exit_is_visible` then fell through to its trusting default
+    and said the exit status was the test's. A `"$PY" -m pytest ... | tail -8` whose runner printed
+    `1 failed, 73 passed` was recorded as PASSED. Resolving the interpreter is what made that
+    reachable: before it, the command was unclassified and no outcome was computed at all.
+
+    Empty segments are kept, unlike `split_shell_segments`, because `separators[index:]` only means
+    anything while the indices line up.
+
+    Raises `ValueError` on an unclosed quote. Each caller has its own safe answer for that, and they
+    differ: an unreadable command must not be read as a visible exit status.
+    """
+    tokens = _scan_shell(strip_heredoc_bodies(command))[0]
     segments: list[list[str]] = [[]]
     separators: list[str] = []
     for tok in tokens:
@@ -1952,6 +1962,17 @@ def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
             segments.append([])
         else:
             segments[-1].append(tok)
+    return _resolve_variables(segments), separators
+
+
+def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
+    """True when the test's own output was piped through `head` or `sed -n`: the start was kept, so a
+    failure printed after the part that was kept could be what is missing. A `head` in another
+    pipeline of the same command does not touch the test's output."""
+    try:
+        segments, separators = shell_pipeline(command)
+    except ValueError:
+        return True
     for index, seg in enumerate(segments):
         if not seg or _classify_segment(seg, declared) != "test":
             continue
@@ -1996,17 +2017,9 @@ def _unless_flagged(summary: str | None, error: bool, exit_known: bool) -> str:
 
 def _exit_is_visible(command: str, kind: BashKind = "test", declared: Declared | None = None) -> bool:
     try:
-        tokens = _scan_shell(strip_heredoc_bodies(command))[0]
+        segments, separators = shell_pipeline(command)
     except ValueError:
         return False
-    segments: list[list[str]] = [[]]
-    separators: list[str] = []
-    for tok in tokens:
-        if tok in _SHELL_SEPARATORS:
-            separators.append(tok)
-            segments.append([])
-        else:
-            segments[-1].append(tok)
     pipefail = any(_sets_pipefail(seg) for seg in segments)
     for index, seg in enumerate(segments):
         if not seg or _classify_segment(seg, declared) != kind:
