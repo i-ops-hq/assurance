@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -361,23 +362,56 @@ def installed_hook(cwd: Path, env: Mapping[str, str]) -> Installed:
 
 # --- the frame -------------------------------------------------------------------------------------
 
-_VALUE = "Your agent says it's done. This says what it didn't check."
-
 _WHAT_IT_DOES = (
-    "Read the coding session in this folder and report what it",
-    "actually did and what it skipped. Every answer is arithmetic",
-    "over what happened; no model decides anything.",
+    "What a coding-agent session actually covered, and what it quietly did not.",
+    "Runs on your machine. No account, no API key, no network.",
 )
 
+#: Drawn in `RICH.rule`, which is the one character `glyphs_for` already proves encodable against
+#: the stream — it tests `RICH.rule` by name, and this is that character. So a console that is given
+#: RICH can draw this, and one that cannot never sees it. The alternative, a wordmark that arrives as
+#: a rectangle of replacement characters, is worse than no wordmark at all.
+_WORDMARK = (
+    "   █████  ███████ ███████ ██    ██ ██████   █████  ███    ██  ██████ ███████",
+    "  ██   ██ ██      ██      ██    ██ ██   ██ ██   ██ ████   ██ ██      ██",
+    "  ███████ ███████ ███████ ██    ██ ██████  ███████ ██ ██  ██ ██      █████",
+    "  ██   ██      ██      ██ ██    ██ ██   ██ ██   ██ ██  ██ ██ ██      ██",
+    "  ██   ██ ███████ ███████  ██████  ██   ██ ██   ██ ██   ████  ██████ ███████",
+)
 
-def _welcome(out: TextIO, st: Style, gl: Glyphs) -> None:
-    print(st.dim("WELCOME TO"), file=out)
-    print(st.bold(st.cyan("ASSURANCE")), file=out)
-    print(st.cyan(gl.rule * 9), file=out)
+#: Who made it, said once. The separator is `gl.sep` rather than a literal, because `·` has no byte
+#: at all in a Windows locale code page and this line is the one a first-time reader is most likely
+#: to be looking at.
+_FROM = ("from I-Ops", "Operations Intelligence, LLC", "https://i-ops.dev")
+
+
+def _wordmark(out: TextIO, st: Style, gl: Glyphs, columns: int | None = None) -> None:
+    """The name, in block letters where the console can draw them and in plain capitals where it
+    cannot.
+
+    Width is checked as well as encoding. The block form is 76 columns, and a wordmark that wraps is
+    the same failure as one that mojibakes — it is the first thing a new reader sees, and a broken
+    first impression is the thing this whole change exists to fix.
+    """
+    width = shutil.get_terminal_size(fallback=(80, 24)).columns if columns is None else columns
+    if gl is RICH and width >= max(len(line) for line in _WORDMARK):
+        for line in _WORDMARK:
+            print(st.cyan(line), file=out)
+    else:
+        # Contiguous, not spaced out: `test_a_narrow_console_gets_the_ascii_wordmark_and_does_not
+        # _raise` looks for the product name, and spacing it apart was a styling preference with
+        # no argument behind it that happened to break a test checking something real.
+        print(st.bold(st.cyan("  ASSURANCE")), file=out)
+        print(st.cyan("  " + gl.rule * 9), file=out)
+
+
+def _welcome(out: TextIO, st: Style, gl: Glyphs, columns: int | None = None) -> None:
+    _wordmark(out, st, gl, columns)
     print(file=out)
-    print(st.bold(_VALUE), file=out)
+    print(st.dim(f"  {f' {gl.sep} '.join(_FROM)}"), file=out)
+    print(file=out)
     for line in _WHAT_IT_DOES:
-        print(line, file=out)
+        print(f"  {line}", file=out)
     print(file=out)
 
 
