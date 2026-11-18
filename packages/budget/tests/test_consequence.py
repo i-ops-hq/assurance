@@ -124,7 +124,7 @@ def test_reaching_only_your_own_code_stays_a_note(tmp_path: Path, capsys: pytest
 def test_without_a_graph_the_warning_is_what_it_was(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     said = str(_said(_project(tmp_path, REACHES, owners="", graph=False), capsys)["systemMessage"])
     assert said.startswith("assurance · note: no test or check has passed since the last edit to src/billing/invoice.py (")
-    assert said.endswith("). Run the project's tests before you commit or push.")
+    assert said.endswith(").\nRun the project's tests before you commit or push.")
 
 
 def test_a_graph_read_too_slowly_is_said_to_be_so(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -285,7 +285,7 @@ def test_a_raised_note_is_found_in_a_transcript_too_long_to_parse(tmp_path: Path
 
     path = tmp_path / "s.jsonl"
     raised = ("assurance · suggested review: no test or check has passed since the last edit to a.py (10:01); "
-              "the change reaches 2 other files. Run pytest before you commit or push.")
+              "the change reaches 2 other files.\nRun pytest before you commit or push.")
     line = {"type": "attachment", "attachment": {"type": "hook_system_message", "content": raised}}
     path.write_text(json.dumps(line) + "\n", encoding="utf-8")
     assert transcript_has_note(path)
@@ -376,7 +376,7 @@ def test_too_little_history_says_nothing(tmp_path: Path, capsys: pytest.CaptureF
     # not a history.
     root = _history(tmp_path, COUPLED[:6] + COUPLED[12:26])
     said = str(_said(root, capsys)["systemMessage"])
-    assert said.endswith("). Run the project's tests before you commit or push.") and "git history" not in said
+    assert said.endswith(").\nRun the project's tests before you commit or push.") and "git history" not in said
 
 
 def test_a_pair_seen_twice_is_not_evidence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

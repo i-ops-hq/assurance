@@ -1483,9 +1483,13 @@ def changes_limits_file(call: ToolCall, cwd: str) -> bool:
         command = shell_command(call)
         if command is None or call.refused:
             return False
-        # A write target is compared as written, never expanded, so a command that writes the
-        # limits file names it; the shell parser is only needed for the ones that do.
-        return "config.toml" in command and _bash_writes_session_limits(command, cwd, call.cwd)
+        # A write target is compared as written, never expanded, so a command that writes the limits
+        # file names it; the shell parser is only needed for the ones that do. The exception is
+        # `assurance audit --learn`, which writes that file and names no path at all -- and this fast
+        # path, whose comment asserted the rule, is what silently kept the guard from ever seeing it.
+        if "config.toml" not in command and "--learn" not in command:
+            return False
+        return _bash_writes_session_limits(command, cwd, call.cwd)
     return False
 
 
@@ -1498,12 +1502,31 @@ def _bash_writes_session_limits(command: str, cwd: str, start: str = "") -> bool
     except ValueError:
         return False
     place = Place(cwd, "", start)
-    for tokens, _argv in place.walk(segments):
+    for tokens, argv in place.walk(segments):
+        if _learns_a_command(argv or tokens):
+            return True
         for target in _write_targets(tokens):
             where = place.resolve(target)
             if where is not None and _is_session_limits_file(where, cwd):
                 return True
     return False
+
+
+def _learns_a_command(argv: list[str]) -> bool:
+    """`assurance audit --learn "<command>"` writes this project's limits file without naming it.
+
+    No redirection and no path, so `_write_targets` sees nothing. If that went undetected a session
+    could teach itself a check and have the same session count it -- which is the whole reason
+    `load_declared` distrusts a project config the session changed. A flag is not an exception to
+    that guard.
+
+    Matched loosely on purpose: any segment mentioning both `assurance` and `--learn` counts. Over-
+    detecting makes a session distrust its own config, which is the harmless direction; under-
+    detecting hands an agent a way to pass its own audit.
+    """
+    if not any(tok == "--learn" or tok.startswith("--learn=") for tok in argv):
+        return False
+    return any("assurance" in tok for tok in argv)
 
 
 def _is_absolute_path_token(path: str) -> bool:

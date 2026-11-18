@@ -119,6 +119,10 @@ class Notice:
     consequence: str = ""
     """What the change reaches and who owns it (`assurance_budget.consequence`), said after the finding
     and kept out of what says whether it was said before: a graph rebuilt is not a new finding."""
+    fix: str = ""
+    """What the person should run, said to them on its own line. Separate from `finding` because a
+    finding and an instruction are different sentences, and running them together is how an 80-word
+    paragraph carrying paths, times, counts and config advice came to be skimmed past."""
     once_per_stretch: bool = False
     """A note raised to a suggested review by what the change reaches: still said once per stretch of
     untested edits, as a note is."""
@@ -557,7 +561,8 @@ def _note(
     if reached is not None and reached.raises():
         # It reaches a protected path, or code someone else owns: worth asking Claude, not only you.
         ask = f"Run {run} for what you changed, or say plainly why they cannot run here."
-        return Notice(SUGGESTED_REVIEW, f"{finding}. Run {run}{NOTE_TAIL}", ask, unclassified, once_per_stretch=True)
+        return Notice(SUGGESTED_REVIEW, finding, ask, unclassified,
+                      fix=f"Run {run}{NOTE_TAIL}.", once_per_stretch=True)
     # The `note` stays. The argument for removing it is recorded here because last time it lived only
     # in a commit message -- 8218cf2 -- and came back a fortnight later with neither of us able to find
     # it. That commit proposed demoting this level rather than rewording it, on two grounds: it is the
@@ -576,7 +581,7 @@ def _note(
     # Left open on purpose: `ask` is "" here, so Claude is told nothing at all, and the piped-result
     # case is the one where that ask would be a single concrete sentence. Giving it one would be a
     # promotion of a sub-case, not a demotion of the level, and it has not been decided.
-    return Notice(NOTE, f"{finding}. Run {run}{NOTE_TAIL}", "", unclassified)
+    return Notice(NOTE, finding, "", unclassified, fix=f"Run {run}{NOTE_TAIL}.")
 
 
 #: What a test run prints when its command was never there to run: naming it again would not help.

@@ -20,6 +20,7 @@ from assurance_budget.config import (
     ConfigError,
     limits_for_json,
     load_ceilings,
+    learn_command,
     load_declared,
     project_overreach_notes,
 )
@@ -51,6 +52,7 @@ from assurance_budget.sessions import (
     bash_kinds_count,
     changed_limits_file,
     changed_manifests,
+    classify_bash,
     display_path,
     edited_without_read,
     find_latest_session,
@@ -180,25 +182,44 @@ _UNDECLARABLE = frozenset({"python -", "python -c", "(inside $( ))", "(no comman
 
 
 def _notice_line(notice: Notice, declared_note: str) -> str:
-    """The one line you see: the level first, then what happened."""
-    line = _notice_head(notice)
+    """What you see: the finding, then the evidence, then the fix -- one per line.
+
+    It used to be a single sentence carrying the paths, the times, the unclassified counts and advice
+    about editing a config file. The agent read it; a person skimming did not. Three short lines are
+    read in the order they matter, and the fix goes last because that is where the eye stops.
+
+    The evidence line is told to you and not to Claude on purpose: an agent should not be the one
+    deciding what counts as its own check.
+    """
+    lines = [_notice_head(notice)]
     if notice.consequence:
-        line += f" {_end_sentence(notice.consequence)}"
+        lines[0] += f" {_end_sentence(notice.consequence)}"
     if declared_note:
-        return f"{line} {declared_note}"
+        lines[0] += f" {declared_note}"
+        return "\n".join(lines)
+
     if notice.unclassified:
-        # Told to you, not to Claude: an agent should not be the one declaring what counts as its check.
         n = sum(notice.unclassified.values())
         ran = _count_phrase(n, "command", "commands")
-        line += f" {ran} after the last code edit could not be classified ({_unclassified_breakdown(notice.unclassified)})"
-        declarable = sorted((kind for kind in notice.unclassified if kind not in _UNDECLARABLE), key=lambda kind: (-notice.unclassified[kind], kind))
+        said = f"{ran} after the last code edit could not be classified ({_unclassified_breakdown(notice.unclassified)})"
+        declarable = sorted(
+            (kind for kind in notice.unclassified if kind not in _UNDECLARABLE),
+            key=lambda kind: (-notice.unclassified[kind], kind),
+        )
         if declarable:
             # Only what a declaration could name: one that cannot match is advice that cannot work.
             which = declarable[0] if len(declarable) == 1 else f"{declarable[0]} or {declarable[1]}"
-            line += f"; if {which} is this project's own test or check, declare it under [audit] in .assurance/config.toml and it will count."
+            # One command, not a file to open: the person reading this is mid-ship.
+            said += (
+                f"; if {which} is this project's own test or check, run "
+                f"`assurance audit --learn \"<the command>\"` and later audits will count it."
+            )
         else:
-            line += "."
-    return line
+            said += "."
+        lines.append(said)
+    if notice.fix:
+        lines.append(notice.fix)
+    return "\n".join(lines)
 
 
 #: How much of the end of a transcript the Stop hook reads first; `needs_earlier_lines` says when it
@@ -320,6 +341,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Audit a sample session bundled with assurance, to see what a report looks like",
     )
     parser.add_argument(
+        "--learn",
+        metavar="COMMAND",
+        help=(
+            "Record COMMAND under [audit] in this project's .assurance/config.toml as its own test or "
+            "check, so later audits count it. Nobody edits a config file mid-ship. It does NOT count "
+            "for the session that ran it: a session that can declare its own check could pass its own "
+            "audit, and a flag is not an exception to that"
+        ),
+    )
+    parser.add_argument(
         "--hook",
         action="store_true",
         help=(
@@ -339,6 +370,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _learn(command: str) -> int:
+    """`assurance audit --learn "<command>"`: record it, say where, and never pretend it counts now."""
+    text = command.strip()
+    if not text:
+        print("assurance audit: --learn needs a command, such as --learn \"make verify\"", file=sys.stderr)
+        return EXIT_UNREADABLE
+    kind = "tests" if classify_bash(text) == "test" else "checks"
+    try:
+        path, key, already = learn_command(Path.cwd(), text, kind)
+    except (ConfigError, OSError) as exc:
+        print(f"assurance audit: {exc}", file=sys.stderr)
+        return EXIT_UNREADABLE
+    where = display_path(str(path), str(Path.cwd()))
+    if already:
+        print(f"{text} is already declared under [audit] {key} in {where}.")
+        return EXIT_OK
+    print(f"Recorded {text} under [audit] {key} in {where}; later audits will count it.")
+    # Said plainly rather than left to be discovered: this session changed the file, so its own audit
+    # ignores what the file declares. That is the guard working, not a bug.
+    print("This session changed that file, so its own audit does not use it. The next one will.")
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run `assurance audit` and return its exit code.
 
@@ -355,6 +409,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.nudge:
         parser.error("--nudge only applies with --hook")
     survive_narrow_consoles()
+    if args.learn is not None:
+        if args.demo or args.transcript or args.session:
+            parser.error("--learn records a command for this project; leave out the transcript, --demo and --session")
+        return _learn(args.learn)
     if args.demo and args.transcript:
         parser.error("--demo audits the bundled sample; leave out the transcript path")
     if args.session is not None and (args.demo or args.transcript):

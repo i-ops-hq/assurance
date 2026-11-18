@@ -203,7 +203,8 @@ It speaks only when there is something to say, at one of three levels, named fir
 | **stop and check** | Untested code was pushed, merged, published, deployed, migrated or committed on main | You, and Claude: verify it before anything builds on it |
 
 ```
-assurance · note: no test or check has passed since the last edit to src/billing/invoice.py (14:04). Run pytest -q tests/test_invoice.py before you commit or push.
+assurance · note: no test or check has passed since the last edit to src/billing/invoice.py (14:04).
+Run pytest -q tests/test_invoice.py before you commit or push.
 assurance · suggested review: the last test run after the last edit to src/billing/invoice.py (14:04) failed: pytest -q tests/test_invoice.py (tests/test_invoice.py::test_eur_rounding; 1 failed, 11 passed in 0.33s).
 assurance · stop and check: pushed at 14:06 with no passing test or check after the last edit to src/billing/invoice.py (14:04).
 ```

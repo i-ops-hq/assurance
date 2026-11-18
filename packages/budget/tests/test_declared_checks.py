@@ -191,7 +191,7 @@ def test_the_hint_to_declare_a_check_is_told_to_you_and_not_to_claude(
     path = _session(tmp_path, [_read(tmp_path), _edit(tmp_path), _bash("python scripts/check.py"), _bash("git push")])
     out = _hook(path, capsys)
     assert out is not None
-    assert "declare it under [audit]" in str(out["systemMessage"])
+    assert 'run `assurance audit --learn "<the command>"`' in str(out["systemMessage"])
     context = out["hookSpecificOutput"]
     assert isinstance(context, dict) and "[audit]" not in context["additionalContext"]
 
