@@ -972,8 +972,17 @@ def test_a_bare_invocation_at_a_terminal_opens_the_wizard(capsys, monkeypatch) -
     monkeypatch.delenv("IOPS_NO_WIZARD", raising=False)
     monkeypatch.setenv("TERM", "xterm")
     monkeypatch.setattr(hook_setup, "_is_tty", lambda: True)
-    monkeypatch.setattr(wizard, "run", lambda: 7)  # a code nothing else returns
+    # `**kwargs` rather than a bare lambda: this module passes the first-run menu to `run`, and a
+    # stub that refuses it tests the stub's signature instead of the gate.
+    seen: dict[str, object] = {}
+
+    def _stub(**kwargs: object) -> int:
+        seen.update(kwargs)
+        return 7  # a code nothing else returns
+
+    monkeypatch.setattr(wizard, "run", _stub)
     assert main([]) == 7
+    assert seen.get("commands"), "the wizard was opened without anything to offer"
     assert "assurance <command> --help for more." not in capsys.readouterr().out
 
 
@@ -1029,3 +1038,32 @@ def test_check_skips_tool_directories_and_names_them(tmp_path: Path, capsys) -> 
     assert "2 directories skipped" in out
     assert ".git" in out and "node_modules" in out
     assert "files not opened (.git" not in out
+
+
+def test_every_command_the_first_run_menu_offers_is_a_real_one(capsys) -> None:
+    """The drift gate for the one list that lives in two places by necessity.
+
+    `assurance_cli` declares the subcommands; `assurance_budget` draws the menu and must not import
+    this module, so the names are passed across a boundary. A name that stops being a subcommand
+    would leave the first screen offering something that errors, which is a worse first impression
+    than no menu at all.
+    """
+    import pytest as _pytest
+
+    from assurance_cli.cli import FIRST_RUN_MENU, main
+
+    with _pytest.raises(SystemExit):
+        main(["--help"])
+    helped = capsys.readouterr().out
+    missing = [name for name, _ in FIRST_RUN_MENU if name not in helped]
+    assert not missing, f"the menu offers commands the CLI does not have: {missing}"
+    assert len(FIRST_RUN_MENU) == len({name for name, _ in FIRST_RUN_MENU}), "a command listed twice"
+
+
+def test_the_menu_lines_fit_a_terminal() -> None:
+    """A menu row is drawn with a cursor, a marker and the text. Past about 70 characters it wraps,
+    and a wrapped row makes the selected one ambiguous."""
+    from assurance_cli.cli import FIRST_RUN_MENU
+
+    too_long = [f"{n} {s}" for n, s in FIRST_RUN_MENU if len(f"{n:<10} {s}") > 70]
+    assert not too_long, too_long

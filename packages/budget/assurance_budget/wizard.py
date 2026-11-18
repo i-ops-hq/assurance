@@ -415,6 +415,32 @@ def _welcome(out: TextIO, st: Style, gl: Glyphs, columns: int | None = None) -> 
     print(file=out)
 
 
+def _pick_a_command(
+    out: TextIO, st: Style, gl: Glyphs, commands: Sequence[tuple[str, str]],
+    read_key: ReadKey | None,
+) -> bool:
+    """Show what there is to run and print the line for the one they pick. False if they cancelled.
+
+    It prints the command rather than running it, and that is the whole design. A first-run screen
+    that starts executing things is a surprise, and this tool's posture everywhere else is that
+    nothing happens the caller did not ask for — `deps` reads an install without running it, the
+    hook is shown before it is written. A signpost is also the more useful artifact: the reader ends
+    up with a line they can run again tomorrow, rather than output they cannot reproduce.
+    """
+    question = "What do you want to look at?"
+    labels = tuple(f"{name:<10} {summary}" for name, summary in commands)
+    picked = choose(question, labels, default=0, stream=out, style=st, glyphs=gl, read_key=read_key)
+    if picked is None:
+        return False
+    name, summary = commands[picked]
+    _collapse(out, st, gl, question, name)
+    print(file=out)
+    print(f"  Run:  {st.bold('assurance ' + name)}", file=out)
+    print(f"  {st.dim(summary)}", file=out)
+    print(file=out)
+    return True
+
+
 def _step(out: TextIO, st: Style, number: int, total: int, name: str) -> None:
     print(f"{st.cyan(f'{number} / {total}')}  {st.bold(name)}", file=out)
     print(file=out)
@@ -436,6 +462,7 @@ def run(
     stream: TextIO | None = None,
     read_key: ReadKey | None = None,
     hook_main: Callable[..., int] | None = None,
+    commands: Sequence[tuple[str, str]] = (),
 ) -> int:
     """The first run. 0 finished, `EXIT_CANCELLED` when Esc or Ctrl-C left everything as it was.
 
@@ -453,8 +480,18 @@ def run(
 
     _welcome(out, st, gl)
 
+    # The list comes from the caller. `assurance_cli` declares the subcommands and owns their one
+    # liners; `assurance_budget` holds the wizard and must not import it, so passing them in is what
+    # keeps this a presentation layer instead of a second place the command list lives.
+    total = 2 if commands else 1
+    if commands:
+        _step(out, st, 1, total, "What this can tell you")
+        if not _pick_a_command(out, st, gl, commands, read_key):
+            print(st.dim("Cancelled. Nothing was changed."), file=out)
+            return EXIT_CANCELLED
+
     state = installed_hook(here, environ)
-    _step(out, st, 1, 1, "Run the audit after every turn")
+    _step(out, st, total, total, "Run the audit after every turn")
     print("Add a Stop hook to your Claude Code user settings, so the audit runs", file=out)
     print("when a session ends. Your current settings are backed up first.", file=out)
     if state.unreadable:

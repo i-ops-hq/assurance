@@ -32,6 +32,29 @@ FORWARDED: dict[str, tuple[str, str]] = {
     "coupling": ("assurance_budget.coupling", "pip install assurance-budget"),
 }
 
+#: What the first-run menu offers, in the order a new reader should meet it. Declared here because
+#: this module owns the subcommands; `assurance_budget` holds the wizard and must not import this
+#: one, so the list is passed in rather than duplicated there. The text is menu-length rather than
+#: the parser's own `help=`, which runs to a hundred characters and does not fit a line with a
+#: cursor and a marker on it. `test_cli.py` holds every name here against the real subcommands.
+FIRST_RUN_MENU: tuple[tuple[str, str], ...] = (
+    ("audit", "what this session did, and what it skipped"),
+    ("check", "a folder of dated files: what is absent"),
+    ("drift", "did a failure rate actually shift?"),
+    ("coupling", "what usually changes with what you changed"),
+    ("reach", "what a change to this file reaches"),
+    ("clearance", "is the asker cleared for every owner it reaches?"),
+    ("budget", "where a run's budget went, and where it looped"),
+    ("authority", "may this task proceed for whoever asked?"),
+    ("deps", "what an install will execute, read without running it"),
+    ("hook", "run the audit after every turn"),
+    ("serve", "a local endpoint for any agent's traces"),
+    ("init", "write a .assurance.json baseline"),
+    ("diff", "did the work cover everything it should have?"),
+    ("pin", "did an MCP server change a tool definition?"),
+)
+
+
 _START_HERE = """\
 assurance — your AI agent says it's done. This tells you what it didn't check.
 
@@ -338,7 +361,7 @@ def _wizard_if_wanted(tail: list[str]) -> int | None:
         return None
     if not wizard.wants_a_wizard(tail):
         return None
-    return int(wizard.run())
+    return int(wizard.run(commands=FIRST_RUN_MENU))
 
 
 def _run_forwarded(name: str, forwarded: list[str]) -> int:

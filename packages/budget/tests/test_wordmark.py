@@ -87,3 +87,78 @@ def test_the_separator_follows_the_glyph_set_rather_than_being_a_literal() -> No
 def test_no_colour_means_no_escape_sequences() -> None:
     assert "\x1b[" not in _drawn(RICH, 100, {"NO_COLOR": "1"})
     assert "\x1b[" not in _drawn(PLAIN, 100, {"NO_COLOR": "1"})
+
+
+# --- the menu: a signpost, not a dispatcher --------------------------------------------------------
+
+_MENU = (("audit", "what this session did"), ("check", "what is absent"))
+
+
+def _run(keys: list[str], commands: tuple[tuple[str, str], ...] = _MENU) -> tuple[int, str]:
+    from assurance_budget import wizard
+
+    out = io.StringIO()
+    supply = iter(keys)
+    code = wizard.run(
+        env={"NO_COLOR": "1"}, stream=out, read_key=lambda: next(supply),
+        hook_main=lambda *a, **k: 1, commands=commands,
+    )
+    return code, out.getvalue()
+
+
+def test_picking_a_command_prints_the_line_to_run_it() -> None:
+    from assurance_budget import wizard
+
+    _, drawn = _run([wizard.ENTER, wizard.ENTER])
+    assert "Run:  assurance audit" in drawn
+    assert "what this session did" in drawn
+
+
+def test_picking_a_command_does_not_run_it() -> None:
+    """The whole design of the step. A first screen that starts executing things is a surprise, and
+    this tool's posture everywhere else is that nothing happens the caller did not ask for — `deps`
+    reads an install without running it, the hook is shown before it is written.
+
+    Checked structurally rather than by looking for absent output: `_pick_a_command` is handed no
+    way to execute anything, and that is the property worth pinning.
+    """
+    import ast
+    import inspect
+
+    from assurance_budget import wizard
+
+    source = inspect.getsource(wizard._pick_a_command)
+    tree = ast.parse(source.lstrip())
+    called = {
+        node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    }
+    for forbidden in ("run", "main", "system", "Popen", "check_call", "check_output", "exec"):
+        assert forbidden not in called, f"the menu step calls {forbidden}()"
+
+
+def test_cancelling_the_menu_changes_nothing() -> None:
+    from assurance_budget import wizard
+
+    code, drawn = _run([wizard.CANCEL])
+    assert code == wizard.EXIT_CANCELLED
+    assert "Nothing was changed" in drawn
+    assert "Install the Stop hook?" not in drawn, "it went on to the next step after a cancel"
+
+
+def test_no_commands_means_no_menu() -> None:
+    """The caller decides. `assurance_budget` is installable without `assurance_cli`, and a wizard
+    that invented a command list would be a second place the subcommands live."""
+    from assurance_budget import wizard
+
+    _, drawn = _run([wizard.ENTER], commands=())
+    assert "What do you want to look at?" not in drawn
+    assert "1 / 1" in drawn, "with no menu it is a one-step wizard again"
+
+
+def test_the_menu_is_numbered_as_the_first_of_two_when_it_is_there() -> None:
+    from assurance_budget import wizard
+
+    _, drawn = _run([wizard.ENTER, wizard.ENTER])
+    assert "1 / 2" in drawn and "2 / 2" in drawn
