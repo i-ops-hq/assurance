@@ -1897,7 +1897,12 @@ def _quiet_pytest_verified_nothing(
     """
     if not whole:
         return False
-    segments = split_shell_segments(command)
+    # Heredoc bodies stripped first, as every other caller of this does. Without it a body holding
+    # an apostrophe — `it doesn't matter` in a `cat > file <<'EOF'` block — reaches the quote scanner
+    # raw and raises `ValueError: No closing quotation` out of the reader. That crashed
+    # `assurance notices` with a traceback on a real machine's transcripts, which is the one command
+    # whose whole job is to measure whether the hook's findings get acted on.
+    segments = split_shell_segments(strip_heredoc_bodies(command))
     if sum(1 for seg in segments if seg and _classify_segment(seg, declared) == "test") != 1:
         return False
     if _PYTEST_QUIET_NONE.search(tail):
