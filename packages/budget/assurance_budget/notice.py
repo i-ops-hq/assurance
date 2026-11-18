@@ -426,6 +426,24 @@ def _note(
         # It reaches a protected path, or code someone else owns: worth asking Claude, not only you.
         ask = f"Run {run} for what you changed, or say plainly why they cannot run here."
         return Notice(SUGGESTED_REVIEW, f"{finding}. Run {run}{NOTE_TAIL}", ask, unclassified, once_per_stretch=True)
+    # The `note` stays. The argument for removing it is recorded here because last time it lived only
+    # in a commit message -- 8218cf2 -- and came back a fortnight later with neither of us able to find
+    # it. That commit proposed demoting this level rather than rewording it, on two grounds: it is the
+    # one level with no agent claim to contradict, so "it is only ever 'you changed code and nothing
+    # tested it'", and `assurance notices` measured it at 0 of 2 followed. Declined by Ashwinth on
+    # 2026-11-18, by which point both grounds had gone.
+    #
+    # The 0 of 2 was two findings on a single day, one of them in a scratchpad trial folder that
+    # exists because I made a fixture there -- so it was 0 of 1 real datum. The level now runs at 5 of
+    # 11, level with `suggested review` at 6 of 10 and above `stop and check` at 7 of 19. And the
+    # quoted sentence is not what four of those eleven said: those reported that a test DID run and a
+    # pipe destroyed its result, which is a different finding wearing this level's clothes. At n=11
+    # none of the rate differences is significant; what they do establish is that the number the
+    # demotion rested on was made of my own measurements of the tool.
+    #
+    # Left open on purpose: `ask` is "" here, so Claude is told nothing at all, and the piped-result
+    # case is the one where that ask would be a single concrete sentence. Giving it one would be a
+    # promotion of a sub-case, not a demotion of the level, and it has not been decided.
     return Notice(NOTE, f"{finding}. Run {run}{NOTE_TAIL}", "", unclassified)
 
 
