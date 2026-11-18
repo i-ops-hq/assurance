@@ -207,6 +207,104 @@ class _Asked:
         return self._covers[path]
 
 
+#: The count a runner printed, for evidence. A reader checking a verdict wants the number, not a
+#: reassurance that a number existed.
+_PASSED_COUNT = re.compile(r"\b(\d+ (?:passed|passing))\b")
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """What is known about one thing that could have been tested, with the evidence behind it.
+
+    `state` is `tested`, `untested`, `unconfirmed` or `unchanged`. `evidence` names the run and when
+    it ran, so a disagreement is settled by looking at a timestamp instead of deciding who to
+    believe -- which is the whole of why this type carries it.
+    """
+
+    what: str
+    at: float | None
+    state: str
+    evidence: str = ""
+    edits: tuple[str, ...] = ()
+
+
+def verdicts(session: Session, declared: Declared | None = None) -> list[Verdict]:
+    """The push, the latest commit and the working tree, judged separately.
+
+    One verdict over a whole session answers the wrong question, and session 7668d5fa is the proof.
+    The suite passed at 15:49, the push went at 21:46, and one more file was edited at 21:47. There
+    is no single true sentence about that: the push WAS tested and the working tree was NOT. Asked as
+    one question it came out as "pushed at 21:46 with no passing test", which is false about the push
+    and true about the tree -- and the false half is the half that was said.
+
+    Each is judged at its own moment, against the edits outstanding then, with the last passing run
+    before it as its evidence. A thing that never happened gets no verdict rather than a reassuring
+    one.
+    """
+    calls = session.tool_calls
+    pending = _Edits()
+    last_pass: _Run | None = None
+    shipped: dict[str, tuple[str, float | None, tuple[str, ...], _Run | None, int]] = {}
+    edited_at_all = False
+
+    for i, call in enumerate(calls):
+        if call.refused:
+            continue
+        edited = None if call.error else _code_edit(call, session.cwd)
+        if edited is not None:
+            pending.add(edited, call.at, i, call.seq)
+            edited_at_all = True
+            continue
+        command = shell_command(call) if call.name in _SHELL_TOOLS else None
+        if command is None:
+            continue
+        run = _verification(call, command, declared, session.cwd)
+        if run is not None and not run.elsewhere and run.outcome == "passed" and run.noun != "scan":
+            # A scan checks something other than the code edited, so its passing verifies no edit.
+            pending = _Edits()
+            last_pass = run
+        what = None if call.error else ship_action(command, call.branch, session.cwd, call.cwd)
+        if not what:
+            continue
+        key = "commit" if what.startswith(("committed", "merged")) else "push"
+        shipped[key] = (what, call.at, tuple(pending.paths), last_pass, pending.last_i)
+
+    out: list[Verdict] = []
+    for key, label in (("push", "Push"), ("commit", "Latest commit")):
+        if key not in shipped:
+            continue  # it never happened: silence, not a verdict
+        what, at, edits, evidence, last_i = shipped[key]
+        unreadable = _unclassified_counts(calls[last_i + 1 :], declared) if edits else ()
+        out.append(Verdict(label, at, _state(edits, dict(unreadable)), _evidence(evidence), edits))
+    tree_edits = tuple(pending.paths)
+    unreadable = _unclassified_counts(calls[pending.last_i + 1 :], declared) if tree_edits else ()
+    out.append(Verdict(
+        "Working tree",
+        pending.last_at,
+        "unchanged" if not edited_at_all else _state(tree_edits, dict(unreadable)),
+        _evidence(last_pass),
+        tree_edits,
+    ))
+    return out
+
+
+def _state(edits: tuple[str, ...], unreadable: Mapping[str, int]) -> str:
+    """Nothing outstanding is tested; otherwise unconfirmed when a command after the edit could not be
+    read, and untested when the record is complete and simply holds no run."""
+    if not edits:
+        return "tested"
+    return "unconfirmed" if unreadable else "untested"
+
+
+def _evidence(run: _Run | None) -> str:
+    if run is None:
+        return ""
+    count = _PASSED_COUNT.search(run.tail)
+    parts = [run.label] + ([count.group(1)] if count else [])
+    when = _clock(run.at)
+    return ", ".join(parts + ([when] if when else []))
+
+
 def stop_notice(session: Session, declared: Declared | None = None, *, set_aside: bool = False) -> Notice | None:
     """What the Stop hook should say after the session's latest turn; None when nothing is at stake.
 

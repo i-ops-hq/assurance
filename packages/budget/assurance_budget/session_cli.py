@@ -35,6 +35,7 @@ from assurance_budget.notice import (
     needs_earlier_lines,
     stop_notice,
     stretch_may_predate,
+    verdicts,
 )
 from assurance_budget.codex import CODEX_SOURCE, find_latest_codex_session, is_codex, read_codex
 from assurance_budget.otel import TRACE_SOURCE, is_trace, read_trace
@@ -680,6 +681,14 @@ def build_report(
         "edited_without_read": [] if session.source in _READ_BEFORE_EDIT_ENFORCED else list(unread_edits),
         "edits_with_no_recorded_read": no_recorded_read(unread_edits, session.source in _READ_BEFORE_EDIT_ENFORCED, unclassified),
         "after_last_edit": after,
+        # Three verdicts rather than one, because one answers the wrong question: in session
+        # 7668d5fa the push WAS tested and the working tree was NOT, and asked as a single
+        # question it came out as the false half.
+        "verdicts": [
+            {"what": v.what, "at": v.at, "state": v.state, "evidence": v.evidence,
+             "edits": list(v.edits)}
+            for v in verdicts(session, declared)
+        ],
         "unclassified_commands": unclassified,
         "unclassified_by_command": unclassified_by_command(session, declared),
         "bash_kinds": kinds,
@@ -864,6 +873,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
             "classified, so a read may be among them" if unseen.get("unclassified_commands") else ""
         )))
 
+    body.extend(verdict_lines(report.get("verdicts") or []))
     after = report.get("after_last_edit")
     if after is not None:
         body.append(_after_last_edit_line(after))
@@ -996,6 +1006,45 @@ def _end_sentence(text: str) -> str:
 def _count_phrase(n: int, singular: str, plural: str) -> str:
     """`1 thing` / `N things` — singular only at exactly 1."""
     return f"1 {singular}" if n == 1 else f"{n} {plural}"
+
+
+def verdict_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """One line each for the push, the latest commit and the working tree.
+
+    Separately, because a session has no single true answer. 7668d5fa pushed at 21:46 over a suite
+    that passed at 15:49 and then edited one more file at 21:47: the push was tested, the tree was
+    not, and the one-sentence version said the false half.
+
+    A `tested` line names the run and when it started -- the start, because what makes a run evidence
+    for an edit is that it began after it. A reader then checks a timestamp instead of deciding who to
+    believe.
+
+    What came after what is decided by ORDER in the record, never by the clock, exactly as
+    `stop_notice` decides it: a transcript is append-only, and its timestamps can be wrong, missing or
+    non-monotonic. `realistic-session.jsonl` is non-monotonic -- an edit stamped 11:05 is followed in
+    record order by passing runs stamped 10:10 and 10:11 -- so its report shows evidence whose clock
+    reads earlier than the edit it covers. The verdict is right and the fixture's clock is not. Do not
+    tidy the fixture to make this line look better; that is fitting the record to the tool.
+    """
+    out: list[str] = []
+    for row in rows:
+        what = str(row.get("what") or "")
+        state = str(row.get("state") or "")
+        when = _clock(row.get("at"))
+        edits = list(row.get("edits") or [])
+        evidence = str(row.get("evidence") or "")
+        head = f"{what} ({when})" if when else what
+        if state == "unchanged":
+            continue  # nothing was edited: a verdict here would be reassurance, not a finding
+        if state == "tested":
+            out.append(f"{head}: tested" + (f" — {evidence}" if evidence else ""))
+            continue
+        since = _count_phrase(len(edits), "edit", "edits")
+        said = "untested" if state == "untested" else "unconfirmed"
+        line = f"{head}: {since} since, {said}"
+        # The last thing known to have passed, even here: it bounds when the gap began.
+        out.append(line + (f" (last passing run: {evidence})" if evidence else ""))
+    return out
 
 
 def _after_last_edit_line(after: dict[str, Any]) -> str:

@@ -87,6 +87,7 @@ Agent run refund-42 — 14 min in /home/you/refunds-app
 6 tool calls, 1 failed — command 2, edit 2, delete_rows 1, search_docs 1
 
   The run's last word: "Done: the rounding is fixed and the tests pass." Against it: its own check "refund total matches the ledger" on c2 failed; reports/refunds.csv, an expected output, was not written; ruff check ., which must pass after an edit, did not run after the last one; t9 ran after policy blocked it.
+  Working tree: tested — pytest -q tests/test_refunds.py, 8 passed, 10:09
   After the last edit (10:07): 1 test run (pytest -q tests/test_refunds.py), 0 checks
   Against the task (10:00, "Fix the refund rounding in billing/refunds.py and make sure…"):
     billing/refunds.py: changed at 10:07.
@@ -164,6 +165,7 @@ Its task is the last thing the user said before its first model call, and its la
 2 tool calls, 1 failed — command 1, edit 1
 
   The run's last word: "Fixed the rounding in billing/refunds.py. The tests pass." Against it: its last run of `pytest -q` failed.
+  Working tree (04:12): 1 edit since, untested
   After the last edit (04:12): 1 test run (pytest -q failed), 0 checks
   Against the task (04:12, "Fix the refund rounding in billing/refunds.py and run the t…"):
     billing/refunds.py: changed at 04:12.

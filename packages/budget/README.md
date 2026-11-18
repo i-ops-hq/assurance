@@ -23,6 +23,7 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 10 tool calls, 3 failed — Bash 6, Edit 2, Grep 1, Read 1
 
   Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
+  Working tree (14:09): 2 edits since, unconfirmed
   After the last edit (14:09): whether a test or check ran is unconfirmed; 2 unclassified commands ran after it (make lint-fix, python script)
   Against the last prompt (14:00, "The invoice totals are off by a cent for EUR. Fix it in inv…"):
     invoice.py: changed at 14:04 (src/billing/invoice.py).
