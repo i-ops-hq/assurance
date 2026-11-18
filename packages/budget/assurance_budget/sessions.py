@@ -1902,7 +1902,7 @@ def _quiet_pytest_verified_nothing(
     # raw and raises `ValueError: No closing quotation` out of the reader. That crashed
     # `assurance notices` with a traceback on a real machine's transcripts, which is the one command
     # whose whole job is to measure whether the hook's findings get acted on.
-    segments = split_shell_segments(strip_heredoc_bodies(command))
+    segments = shell_segments(command)
     if sum(1 for seg in segments if seg and _classify_segment(seg, declared) == "test") != 1:
         return False
     if _PYTEST_QUIET_NONE.search(tail):
@@ -2456,7 +2456,7 @@ def runs_elsewhere(command: str, cwd: str, declared: Declared | None = None, sta
     project's code went untested. Only the test and check parts are read: `cp src/a.py /tmp/a.py &&
     ruff check /tmp/a.py` checks the copy, whatever the copy was made from."""
     try:
-        segments = split_shell_segments(strip_heredoc_bodies(command))
+        segments = shell_segments(command)
     except ValueError:
         return False
     place = Place(cwd, "", start)
@@ -2609,7 +2609,7 @@ def _unclassified_counts(
 
 def _unclassified_label(command: str, declared: Declared | None = None) -> str:
     try:
-        segments = split_shell_segments(strip_heredoc_bodies(command))
+        segments = shell_segments(command)
     except ValueError:
         return "(unparsed)"
     for tokens in segments:
@@ -2706,6 +2706,18 @@ def split_shell_segments(command: str) -> list[list[str]]:
     if current:
         segments.append(current)
     return segments
+
+
+def shell_segments(command: str) -> list[list[str]]:
+    """Argv segments ready to classify: heredoc bodies dropped, split, variables resolved.
+
+    The one way to get segments for `_classify_segment`. Eight functions across three modules used to
+    do these three steps themselves, and a ninth that forgot one is how `assurance notices` came to
+    crash on an apostrophe in a heredoc, and how a resolved interpreter would otherwise have reached
+    `classify_bash` and not `bash_label` -- which prints what to run, and so printed a 400-character
+    raw command. Raises `ValueError` on unclosed quotes, as the split does.
+    """
+    return _resolve_variables(split_shell_segments(strip_heredoc_bodies(command)))
 
 
 def _scan_shell_tokens(command: str) -> list[str]:
@@ -3000,9 +3012,8 @@ def bash_test_label(command: str, declared: Declared | None = None) -> str:
 
 def bash_label(command: str, kind: BashKind, declared: Declared | None = None) -> str:
     """Short label for the first segment of `kind`: normalised argv via shlex.join, max 60 chars."""
-    stripped = strip_heredoc_bodies(command)
     try:
-        segments = split_shell_segments(stripped)
+        segments = shell_segments(command)
     except ValueError:
         return _truncate_label(command)
     for tokens in segments:
@@ -3028,7 +3039,7 @@ def is_scan(command: str, declared: Declared | None = None) -> bool:
     """Whether every test or check in `command` is a scan (`_SCAN_PREFIXES`): a check of something other
     than the code edited, so its passing verifies no edit. A declared check is the project's, never a scan."""
     try:
-        segments = split_shell_segments(strip_heredoc_bodies(command))
+        segments = shell_segments(command)
     except ValueError:
         return False
     scans = False
@@ -3051,7 +3062,7 @@ def classify_bash(command: str, declared: Declared | None = None) -> BashKind:
     """
     stripped = strip_heredoc_bodies(command)
     try:
-        segments = split_shell_segments(stripped)
+        segments = shell_segments(command)
         inner = command_substitutions(stripped)
     except ValueError:
         return "unclassified"
@@ -3237,6 +3248,72 @@ def _is_assignment(token: str) -> bool:
         return False
     name, _sep, _val = token.partition("=")
     return bool(name) and name.replace("_", "a").isalnum() and not name[0].isdigit()
+
+
+#: A variable reference, in the two forms a command actually writes: `$PY` and `${PY}`.
+_VAR_REFERENCE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+
+
+def _lone_assignment(tokens: list[str]) -> tuple[str, str] | None:
+    """`(name, value)` when a segment is nothing but one assignment, else None.
+
+    Only a standalone assignment is collected. `VAR=x cmd` sets VAR for `cmd`'s environment and
+    does NOT persist to the next command, so reading it as persistent would resolve a variable the
+    shell never set.
+    """
+    if len(tokens) != 1 or not _is_assignment(tokens[0]):
+        return None
+    name, _sep, value = tokens[0].partition("=")
+    return name, value
+
+
+def _resolve_variables(segments: list[list[str]]) -> list[list[str]]:
+    """Substitute variables that an earlier segment of the same command assigned.
+
+    This is what stood between the audit and a real test run. A session shipping 0.1.37 ran
+    `PY=/abs/path/to/venv/bin/python; find packages -name __pycache__ ...; "$PY" -m pytest packages`,
+    and the audit called the whole thing unclassified -- so it reported "pushed with no passing test"
+    over a suite that had passed four minutes after the last edit. Every other part of the parse was
+    already right: the scanner had stripped the quotes, the heredoc body was already gone, the
+    compound command was already split per segment, and `_program_name` already basenames an absolute
+    path down to `python`. The interpreter was a variable, and nothing resolved it.
+
+    Two properties carry the safety, and neither is a list of refusals. **One level**: a substituted
+    value is never re-scanned, so `PATH=$PATH:/x` yields the token `$PATH:/x` and stops -- there is no
+    loop to guard against. **No re-splitting**: the value becomes exactly one token, so it can only
+    match a program name if it genuinely is one. `PY=$(which python)` yields the token
+    `$(which python)`, `PY="python -X dev"` yields `python -X dev`, and neither is any program, so
+    both stay unclassified without being special-cased. An earlier version refused values holding
+    `$`, a backtick or whitespace; the counterfactual showed every test of those refusals passed with
+    them removed, because they never changed an outcome. What they did cost was real: they also
+    refused `PY=$HOME/bin/python3`, which basenames to `python3` and is a test run.
+
+    The deliberate limitation. An unquoted `$ARGS` word-splits in the shell, so
+    `ARGS="-m pytest"; python3 $ARGS tests` really runs the tests -- and the quoting that decides
+    this is already gone by the time segments exist. Splicing the value into several tokens would
+    read it correctly when it was unquoted and invent a command when it was quoted. So it stays one
+    token and that run goes unseen. It is a false negative on purpose, and it is only tolerable
+    because an unclassified command after an edit is reported as unconfirmed rather than as absent.
+    """
+    known: dict[str, str] = {}
+    out: list[list[str]] = []
+    for tokens in segments:
+        pair = _lone_assignment(tokens)
+        if pair is not None:
+            name, value = pair
+            known[name] = value  # an empty value expands to nothing, so the reference is left as-is
+            out.append(tokens)
+            continue
+        out.append([_expand_variables(tok, known) for tok in tokens] if known else tokens)
+    return out
+
+
+def _expand_variables(token: str, known: dict[str, str]) -> str:
+    def one(match: re.Match[str]) -> str:
+        value = known.get(match.group(1) or match.group(2) or "")
+        return value if value else match.group(0)
+
+    return _VAR_REFERENCE.sub(one, token) if "$" in token else token
 
 
 def find_latest_session(cwd: Path, projects_dir: Path | None = None) -> Path | None:

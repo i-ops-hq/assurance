@@ -65,6 +65,7 @@ from assurance_budget.sessions import (
     outcome_of_test_run,
     runs_elsewhere,
     shell_command,
+    shell_segments,
     split_shell_segments,
     strip_heredoc_bodies,
     tree_rewrites,
@@ -901,7 +902,7 @@ def _project_label(command: str, kind: str, declared: Declared | None, cwd: str,
     """`bash_label`, from the first test or check part that works on the project: in `ruff check
     /tmp/copy.py; ruff check src/a.py` the project's check is the second."""
     try:
-        segments = split_shell_segments(strip_heredoc_bodies(command))
+        segments = shell_segments(command)
     except ValueError:
         return bash_label(command, "test" if kind == "test" else "check", declared)
     place = Place(cwd, "", start)
