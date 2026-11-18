@@ -113,7 +113,7 @@ def test_the_hook_counts_a_passing_project_script(project: Path, capsys: pytest.
     assert _said(_transcript(project, [edit, verify]), capsys) == ""  # verified: nothing to say
     rewrite = ("Edit", {"file_path": str(project / "package.json"), "old_string": "vitest", "new_string": "vitest"}, "ok")
     said = _said(_transcript(project, [rewrite, edit, verify]), capsys)
-    assert said.startswith("assurance · note: no test or check it recognises has passed since")  # not on its own word
+    assert said.startswith("assurance · note: whether a test or check has passed since")  # not on its own word
 
 
 def test_the_fast_read_finds_a_result_past_a_line_that_names_the_call(tmp_path: Path) -> None:
@@ -184,4 +184,4 @@ def test_a_manifest_a_sub_agent_changed_on_a_long_session_teaches_nothing(
     (folder / "agent-w.meta.json").write_text(json.dumps({"toolUseId": spawn_id}), encoding="utf-8")
     import os
     os.utime(folder / "agent-w.jsonl", (0, 0))  # written long before the window: the hook does not merge it
-    assert _said(path, capsys).startswith("assurance · note: no test or check it recognises has passed since")
+    assert _said(path, capsys).startswith("assurance · note: whether a test or check has passed since")

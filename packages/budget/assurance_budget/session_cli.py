@@ -1010,7 +1010,9 @@ def _after_last_edit_line(after: dict[str, Any]) -> str:
         which = _unclassified_breakdown(after.get("unclassified_by_command") or {})
         which = f" ({which})" if which else ""
         ran = _count_phrase(unclassified, "unclassified command", "unclassified commands")
-        return f"{prefix} no test or check it recognises; {ran} ran after it{which}"
+        # Unconfirmed, not absent: one of those commands may be the project's own test. The gate
+        # still fails -- unknown is not passed -- but the sentence no longer denies the run.
+        return f"{prefix} whether a test or check ran is unconfirmed; {ran} ran after it{which}"
     labels = list(after.get("test_labels") or [])
     test_bit = _count_phrase(tests, "test run", "test runs")
     if labels:

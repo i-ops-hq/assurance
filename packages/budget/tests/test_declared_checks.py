@@ -176,7 +176,10 @@ def test_a_session_cannot_declare_its_own_check_and_pass_it(tmp_path: Path, caps
     out = _hook(path, capsys)
     assert out is not None
     message = str(out["systemMessage"])
-    assert "with no passing test or check it recognises after the edits to app.py and .assurance/config.toml" in message
+    # Two assertions, because `(last at 03:02)` sits between the paths and the verdict and the
+    # clock moves. The original matched as a prefix and stopped before it.
+    assert "whether a test or check passed after the edits to app.py and .assurance/config.toml" in message
+    assert "is unconfirmed" in message, "the declaration was set aside, so the run is unreadable, not absent"
     # The finding says the file's declarations were set aside, so the note that says it too is left out.
     assert "and after changing .assurance/config.toml, whose [audit] declarations are not used for this session." in message
     assert "This session changed .assurance/config.toml, so what it declares" not in message

@@ -114,7 +114,8 @@ def test_hook_does_not_say_no_check_ran_when_it_could_not_classify_what_did(tmp_
     assert out is not None  # unknown is still worth saying when it is pushed: silence is not a pass
     message = str(out["systemMessage"])
     assert "with no passing test or check after" not in message
-    assert "with no passing test or check it recognises after the last edit to app.py (" in message
+    assert "whether a test or check passed after the last edit to app.py (" in message
+    assert "is unconfirmed" in message, "it could not classify what ran, so it must not deny it"
     assert "1 command after the last code edit could not be classified (python script)" in message
     context = out["hookSpecificOutput"]
     assert isinstance(context, dict)
@@ -141,7 +142,7 @@ def test_report_names_the_unclassified_commands_after_the_last_edit(tmp_path: Pa
     assert main([str(path)]) == 0
     out = capsys.readouterr().out
     assert "no test or check command ran" not in out
-    assert "no test or check it recognises; 2 unclassified commands ran after it (make lint-fix, python script)" in out
+    assert "whether a test or check ran is unconfirmed; 2 unclassified commands ran after it (make lint-fix, python script)" in out
     # Unknown is not passed: the gate still fails when nothing it recognises ran after the edit.
     assert main([str(path), "--fail-on-unverified"]) == 1
 

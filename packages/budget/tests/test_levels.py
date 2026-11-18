@@ -254,7 +254,8 @@ def test_a_command_it_cannot_classify_is_named_to_you_and_not_to_claude(tmp_path
     out = _hook(path, capsys)
     assert out is not None
     message = str(out["systemMessage"])
-    assert "with no passing test or check it recognises after" in message
+    assert "whether a test or check passed after" in message
+    assert "is unconfirmed" in message, "only the person can declare that script a check"
     assert "1 command after the last code edit could not be classified (python script)" in message
     assert "declare it under [audit] in .assurance/config.toml" in message
     context = out["hookSpecificOutput"]["additionalContext"]

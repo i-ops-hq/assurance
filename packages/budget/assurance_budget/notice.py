@@ -31,7 +31,7 @@ import shlex
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from assurance_budget.asked import NamedCommand, includes, names_cover, names_in, pattern_covers
 from assurance_budget.sessions import (
@@ -337,6 +337,40 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
     )
 
 
+#: How to say that nothing is known to have passed, in the three frames the sentence appears in.
+#: `since` is the note, `ship` the push or commit, `ran` the claim the report holds against a message.
+_PASSED_FRAMES = {
+    "since": ("no test or check has passed since {edits}",
+              "whether a test or check has passed since {edits} is unconfirmed"),
+    "ship": ("with no passing test or check after {edits}",
+             "and whether a test or check passed after {edits} is unconfirmed"),
+    "ran": ("no test or check ran after {edits}",
+            "whether a test or check ran after {edits} is unconfirmed"),
+}
+
+
+def _passed_phrase(frame: str, edits: str, unreadable: Mapping[str, int]) -> str:
+    """Two different claims, and keeping them apart is the whole of this change.
+
+    With nothing unreadable after the edit, the record is complete and the strong negative is true:
+    no test passed. With commands it could not classify after the edit, one of them may have been the
+    project's own test, so the only honest claim is that it is unconfirmed.
+
+    This is our own defect class inverted. A check that was not run is reported as unchecked, never as
+    passed; a check that could not be CLASSIFIED must not be reported as ABSENT. Session 7668d5fa
+    shipping 0.1.37 is what this cost: the hook said "pushed at 21:46 with no passing test or check it
+    recognises" over a suite that had passed at 15:49, and named `$PY` among the five commands it could
+    not read in the very next sentence. It had the evidence that it might be wrong and still chose the
+    strongest possible negative.
+
+    The old wording hedged with " it recognises", which qualifies the recognising and leaves the
+    denial standing. A reader takes "no passing test or check it recognises" as "nothing tested this",
+    because that is what it says.
+    """
+    confirmed, unconfirmed = _PASSED_FRAMES[frame]
+    return (unconfirmed if unreadable else confirmed).format(edits=edits)
+
+
 def _said_before(session: Session, level: str, finding: str) -> bool:
     """Whether this finding was said in an earlier turn, as the hook decides it (`run_hook`): then it
     is not said again, and what it reaches need not be read."""
@@ -410,8 +444,7 @@ def _note(
         finding = f"{last.label}, the last {last.noun} after {edits}, ran no tests"
     else:
         unclassified = dict(_unclassified_counts(session.tool_calls[pending.last_i + 1 :], declared))
-        recognised = " it recognises" if unclassified else ""
-        finding = f"no test or check{recognised} has passed since {edits}"
+        finding = _passed_phrase("since", edits, unclassified)
     reached = _reaches(session, rules, list(pending.paths))
     if reached is not None and reached.reaches_only_itself():
         return None  # nothing else depends on it, by the graph: not worth a sentence
@@ -502,8 +535,7 @@ def _ship_reasons(
     elif pending.paths and runs and runs[-1].outcome == "empty":
         reasons.append(_Finding(pending.last_seq, f"while {runs[-1].label}, the last {runs[-1].noun} after {edit}, ran no tests", _ASK_VERIFY))
     elif pending.paths:
-        recognised = " it recognises" if between else ""
-        why = f"with no passing test or check{recognised} after {_edits(tuple(pending.paths), pending.last_at)}"
+        why = _passed_phrase("ship", _edits(tuple(pending.paths), pending.last_at), between)
         reasons.append(_Finding(pending.last_seq, why, _ASK_VERIFY, between))
     for entry, run in required:
         if run is None:
@@ -572,8 +604,7 @@ def _claim(
             "pipefail`) so the result can be seen, or correct what you said."
         )
     else:
-        recognised = " it recognises" if after else ""
-        why = f"no test or check{recognised} ran after {_edits(tuple(pending.paths), pending.last_at)}"
+        why = _passed_phrase("ran", _edits(tuple(pending.paths), pending.last_at), after)
     return _Finding(text_seq, f"{agent_actor(session.source)}'s last message says the tests pass, but {why}", ask, after)
 
 
