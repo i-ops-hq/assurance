@@ -35,6 +35,7 @@ from assurance_budget.sessions import (
     Prompt,
     Session,
     _call_path,
+    agent_name,
     display_path,
     shell_command,
     split_shell_segments,
@@ -56,6 +57,28 @@ ANSWERS = {
 _ONLY_NAMED = "Only what the last prompt names is checked here; whether the work does what it asks is not."
 _NAMES_NOTHING = "The last prompt names no file, test or command to check the outcome against."
 _NO_PROMPT = "No prompt typed by the person was found to check the outcome against."
+
+
+def _no_prompt_because(session: Session, default: str) -> str:
+    """Why there are nothing to check the outcome against — the harness, or genuinely nothing.
+
+    "No prompt typed by the person was found" describes a search that came up empty, so a reader who
+    has just run this and seen it reasonably concludes the tool is broken. That happened: three
+    refusals in a row, each of them correct, and the conclusion drawn was that the reader could not
+    parse Codex.
+
+    When the earlier turns were sealed, nothing was missed. The prompts are gone for every reader on
+    this machine, and saying which harness did it turns a dead end into a fact somebody can act on —
+    they can stop looking, or run the audit on a session that has not compacted yet.
+    """
+    if not session.sealed_history:
+        return default
+    return (
+        f"No prompt typed by the person survives here: this session was compacted, and "
+        f"{agent_name(session.source)} replaces the earlier turns with an encrypted record that "
+        "nothing on this machine can read, including this tool. So there is nothing left to check "
+        "the outcome against — not a prompt this missed, one that no longer exists."
+    )
 _SHOWN = 6  # checks of one kind listed one per line; past this they are summed up
 
 _Edit = tuple[str, float | None, int, int]
@@ -137,7 +160,7 @@ def outcome(
         since = min(session.prompts) if session.prompts else -1
         checks.extend(_output_check(path, since, walk) for path in expect)
     if prompt is None:
-        not_checked.append(no_prompt)
+        not_checked.append(_no_prompt_because(session, no_prompt))
     else:
         if walk is not None:
             checks.extend(_file_check(name, prompt, walk, reads_unseen) for name in names.files)

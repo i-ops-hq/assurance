@@ -174,6 +174,7 @@ def _parse_lines(raw_lines: list[str], target: Path) -> Session:
     assistant_turns = 0
     calls: list[ToolCall] = []
     record_counts: Counter[str] = Counter()
+    sealed = 0
     not_read = 0
     not_read_reasons: Counter[str] = Counter()
     lines = 0
@@ -224,6 +225,14 @@ def _parse_lines(raw_lines: list[str], target: Path) -> Session:
 
         if kind in _KNOWN_RECORDS:
             record_counts[kind] += 1
+            # A compaction arrives as an ordinary `response_item`, so counting by the outer type
+            # alone threw away the one fact that explains a missing prompt. Measured on 16 rollouts:
+            # 15 carry `payload.type == "compaction"` and none of those 15 kept a typed prompt, yet
+            # `records` named a compaction in only the one session that had not sealed anything.
+            # `encrypted_content` is required rather than the type alone, so the count means what
+            # its name says — earlier turns replaced by something unreadable, not merely compacted.
+            if payload.get("type") == "compaction" and payload.get("encrypted_content"):
+                sealed += 1
             continue
 
         if kind != "event_msg":
@@ -296,6 +305,7 @@ def _parse_lines(raw_lines: list[str], target: Path) -> Session:
         prompts=tuple(prompts),
         last_text=last_text if last_text[0] >= 0 else last_commentary,
         last_prompt=last_prompt,
+        sealed_history=sealed,
     )
 
 
