@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from assurance_budget.session_cli import failed_gates, main, run_hook
-from assurance_budget.sessions import outcome_of_test_run
+from assurance_budget.sessions import Declared, outcome_of_test_run
 
 
 @pytest.mark.parametrize("command, error, output", [
@@ -175,3 +175,42 @@ def test_a_single_pytest_command_is_still_read_as_having_verified_nothing() -> N
     # Without this, a guard that simply refused to ever say "empty" would pass the whole class.
     assert outcome_of_test_run("pytest -q", False, "2 skipped in 0.01s\n") == "empty"
     assert outcome_of_test_run("pytest -q tests/ && echo done", False, "2 skipped in 0.01s\n") == "empty"
+
+
+# --- a heredoc body is not shell to be parsed ------------------------------------------------------
+
+
+@pytest.mark.parametrize("body", [
+    "it doesn't matter",            # an apostrophe in prose: the common case
+    'say "hello',                   # an unbalanced double quote
+    "awk '{print $1}",              # a quote left open in a snippet
+])
+def test_a_heredoc_body_with_an_unbalanced_quote_does_not_raise(body: str) -> None:
+    """This crashed `assurance notices` with a traceback, on real transcripts.
+
+    Every other caller of `split_shell_segments` strips heredoc bodies first, because a body is
+    text the shell never parses as shell — `cat > f <<'EOF'` followed by `it doesn't matter` is a
+    perfectly ordinary command. One call site did not, so the apostrophe reached the quote scanner
+    and `ValueError: No closing quotation` came out of a reader whose whole job is to read whatever
+    a transcript happens to contain.
+
+    It surfaced where it was most expensive: `assurance notices` is the command that measures
+    whether the hook's own findings get acted on, so the crash took out the evidence for a decision
+    about the hook.
+    """
+    command = f"cat > f.txt <<'EOF'\n{body}\nEOF\npytest -q"
+    outcome = outcome_of_test_run(
+        command, False, "\n2 passed in 0.10s\n", Declared(), exit_known=True,
+    )
+    assert outcome in ("passed", "failed", "empty", "unknown"), outcome
+
+
+def test_a_balanced_command_is_still_read_the_same_way() -> None:
+    """The control: stripping heredoc bodies must not change the answer for a command that never
+    had one. A fix that made every run `unknown` would satisfy the test above."""
+    assert outcome_of_test_run(
+        "pytest -q", False, "\n2 passed in 0.10s\n", Declared(), exit_known=True,
+    ) == "passed"
+    assert outcome_of_test_run(
+        "pytest -q", False, "\n2 skipped in 0.00s\n", Declared(), exit_known=True,
+    ) == "empty"

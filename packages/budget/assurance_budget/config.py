@@ -202,6 +202,63 @@ def _source_summary(origins: Mapping[str, str]) -> str:
     return "; ".join(f"{label} ({', '.join(keys)})" for label, keys in grouped.items())
 
 
+
+def learn_command(project: Path, command: str, kind: str) -> tuple[Path, str, bool]:
+    """Record `command` under `[audit]` in the project's config, and verify it took.
+
+    Returns the file written, the key it went under, and whether it was already there. Raises
+    `ConfigError` if the file cannot be read, or if reading it back does not show the command
+    declared -- a writer that reports success without checking is the thing this project exists to
+    object to, so this one checks and restores the original rather than leaving a file it cannot
+    confirm.
+
+    The text is edited rather than re-serialised, because the file is the person's: re-emitting a
+    parsed table would silently delete their comments and reorder their keys.
+    """
+    import json as _json
+    import re as _re
+
+    path = Path(project).expanduser() / ".assurance" / "config.toml"
+    entry = _json.dumps(command)  # a TOML basic string, quoting and escapes included
+    before = path.read_text(encoding="utf-8") if path.is_file() else ""
+
+    existing = _read_audit_table(path).get(kind, ()) if path.is_file() else ()
+    if command in existing:
+        return path, kind, True
+
+    if not _re.search(r"^\s*\[audit\]\s*$", before, _re.M):
+        text = before + ("\n" if before and not before.endswith("\n") else "") + f"\n[audit]\n{kind} = [{entry}]\n"
+    else:
+        start = _re.search(r"^\s*\[audit\]\s*$", before, _re.M)
+        assert start is not None
+        rest = before[start.end() :]
+        nxt = _re.search(r"^\s*\[", rest, _re.M)
+        section = rest[: nxt.start()] if nxt else rest
+        key_at = _re.search(rf"^\s*{kind}\s*=\s*\[", section, _re.M)
+        if key_at is None:
+            text = before[: start.end()] + f"\n{kind} = [{entry}]" + rest
+        else:
+            cut = start.end() + key_at.end()
+            text = before[:cut] + entry + (", " if section[key_at.end():].lstrip()[:1] != "]" else "") + before[cut:]
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    try:
+        written = _read_audit_table(path).get(kind, ())
+    except ConfigError:
+        written = ()
+    if command not in written:
+        # Put it back. A half-written config is worse than no change, and saying it worked would be
+        # the exact failure this tool reports in other people's work.
+        if before:
+            path.write_text(before, encoding="utf-8")
+        else:
+            path.unlink(missing_ok=True)
+        raise ConfigError(
+            f"could not record {command!r} under [audit] {kind} in {path}: the file was left as it was"
+        )
+    return path, kind, False
+
 def _user_config_path() -> Path:
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA", "").strip()

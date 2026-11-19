@@ -75,9 +75,11 @@ def _said(path: Path, capsys: pytest.CaptureFixture[str]) -> str:
 SRC = ".assurance/config.toml"
 
 
-def _level(tmp_path: Path, steps: list[Any], declared: Declared | None = None) -> tuple[str, str] | None:
+def _level(tmp_path: Path, steps: list[Any], declared: Declared | None = None) -> tuple[str, str, str] | None:
+    """(level, finding, fix). The fix is its own field since the notice became three lines: a finding
+    and an instruction are different sentences."""
     notice = stop_notice(read_claude_code(_transcript(tmp_path, steps)), declared)
-    return None if notice is None else (notice.level, notice.finding)
+    return None if notice is None else (notice.level, notice.finding, notice.fix)
 
 
 def test_an_untested_edit_is_a_note_with_the_command_to_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -85,7 +87,7 @@ def test_an_untested_edit_is_a_note_with_the_command_to_run(tmp_path: Path, caps
     assert out is not None and "hookSpecificOutput" not in out  # with --nudge, still nothing asked of Claude
     said = str(out["systemMessage"])  # the time is in the machine's zone
     assert said.startswith("assurance · note: no test or check has passed since the last edit to app.py (")
-    assert said.endswith("). Run the project's tests before you commit or push.")
+    assert said.endswith(").\nRun the project's tests before you commit or push.")
 
 
 def test_a_tested_edit_is_silent(tmp_path: Path) -> None:
@@ -93,7 +95,7 @@ def test_a_tested_edit_is_silent(tmp_path: Path) -> None:
 
 
 def test_a_note_is_said_once_per_stretch_of_untested_edits(tmp_path: Path) -> None:
-    told = "assurance · note: no test or check has passed since the last edit to app.py (10:01). Run pytest -q before you commit or push."
+    told = "assurance · note: no test or check has passed since the last edit to app.py (10:01).\nRun pytest -q before you commit or push."
     first = [("prompt", "fix it"), _edit(tmp_path), ("notice", told)]
     # Three more turns of editing with nothing run: the stretch that was noted has not ended.
     assert _level(tmp_path, [*first, ("prompt", "and b"), _edit(tmp_path, "b.py"), ("prompt", "and c"), _edit(tmp_path, "c.py")]) is None
@@ -104,7 +106,7 @@ def test_a_note_is_said_once_per_stretch_of_untested_edits(tmp_path: Path) -> No
 
 def test_a_turn_with_no_edit_adds_no_note(tmp_path: Path) -> None:
     # The untested edit was the last turn's; this one only read and answered.
-    told = "assurance · note: no test or check has passed since the last edit to app.py (10:01). Run the project's tests before you commit or push."
+    told = "assurance · note: no test or check has passed since the last edit to app.py (10:01).\nRun the project's tests before you commit or push."
     assert _level(tmp_path, [("prompt", "fix it"), _edit(tmp_path), ("notice", told), ("prompt", "what did you change?"), _bash("git diff")]) is None
 
 
@@ -123,7 +125,7 @@ def test_a_note_said_before_the_lines_the_hook_reads_is_not_said_again(
     from assurance_budget import session_cli
 
     monkeypatch.setattr(session_cli, "HOOK_WINDOW", 4_000)
-    told = "assurance · note: no test or check has passed since the last edit to app.py (10:01). Run the project's tests before you commit or push."
+    told = "assurance · note: no test or check has passed since the last edit to app.py (10:01).\nRun the project's tests before you commit or push."
     long_output = _bash("cat build.log", output="x" * 6_000)
     steps = [("prompt", "fix it"), _edit(tmp_path), ("notice", told), ("prompt", "look at the log"), long_output,
              ("prompt", "and c"), _edit(tmp_path, "c.py")]
@@ -131,7 +133,7 @@ def test_a_note_said_before_the_lines_the_hook_reads_is_not_said_again(
 
 
 def test_a_push_after_a_note_is_still_a_stop(tmp_path: Path) -> None:
-    told = "assurance · note: no test or check has passed since the last edit to app.py (10:01). Run the project's tests before you commit or push."
+    told = "assurance · note: no test or check has passed since the last edit to app.py (10:01).\nRun the project's tests before you commit or push."
     said = _level(tmp_path, [("prompt", "fix it"), _edit(tmp_path), ("notice", told), ("prompt", "ship it"), PUSH])
     assert said is not None and said[0] == STOP_AND_CHECK and said[1].startswith("pushed at ")
 
@@ -162,7 +164,8 @@ def test_the_note_names_the_command_the_project_would_run(
     tmp_path: Path, declared: Declared | None, steps: list[Any], run: str,
 ) -> None:
     said = _level(tmp_path, [("prompt", "fix it"), *steps, _edit(tmp_path)], declared)
-    assert said is not None and said[0] == NOTE and said[1].endswith(f". Run {run} before you commit or push")
+    assert said is not None and said[0] == NOTE
+    assert said[2] == f"Run {run} before you commit or push."
 
 
 def test_a_piped_test_is_noted_as_unknown(tmp_path: Path) -> None:

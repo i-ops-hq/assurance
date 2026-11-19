@@ -57,7 +57,8 @@ Claude Code session demo-8f2 — 13 min in /home/you/my-app
 10 tool calls, 3 failed — Bash 6, Edit 2, Grep 1, Read 1
 
   Looped: 3 rounds of Bash `pytest -q tests/test_invoice.py` failing the same way, with nothing new read
-  After the last edit (14:09): no test or check it recognises; 2 unclassified commands ran after it (make lint-fix, python script)
+  Working tree (14:09): 2 edits since, unconfirmed
+  After the last edit (14:09): whether a test or check ran is unconfirmed; 2 unclassified commands ran after it (make lint-fix, python script)
   Against the last prompt (14:00, "The invoice totals are off by a cent for EUR. Fix it in inv…"):
     invoice.py: changed at 14:04 (src/billing/invoice.py).
     pytest -q tests/test_invoice.py: did not run after the last edit to src/billing/rates.py (14:09); it last failed at 14:08, before that.
@@ -202,7 +203,8 @@ It speaks only when there is something to say, at one of three levels, named fir
 | **stop and check** | Untested code was pushed, merged, published, deployed, migrated or committed on main | You, and Claude: verify it before anything builds on it |
 
 ```
-assurance · note: no test or check has passed since the last edit to src/billing/invoice.py (14:04). Run pytest -q tests/test_invoice.py before you commit or push.
+assurance · note: no test or check has passed since the last edit to src/billing/invoice.py (14:04).
+Run pytest -q tests/test_invoice.py before you commit or push.
 assurance · suggested review: the last test run after the last edit to src/billing/invoice.py (14:04) failed: pytest -q tests/test_invoice.py (tests/test_invoice.py::test_eur_rounding; 1 failed, 11 passed in 0.33s).
 assurance · stop and check: pushed at 14:06 with no passing test or check after the last edit to src/billing/invoice.py (14:04).
 ```
