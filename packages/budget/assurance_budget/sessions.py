@@ -675,6 +675,18 @@ _NOT_TYPED = (
 )
 
 
+def _plain_text(content: Any) -> str:
+    """The text of a record whose content is a string or a list of blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(b.get("text") or "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
 def _typed_prompt(record: Mapping[str, Any], content: Any, seq: int, at: float | None) -> Prompt | None:
     """The record as a `Prompt` when the person typed it; None for everything Claude Code wrote in the
     person's place: meta records, a compaction's summary, a background task's notice, a message from
@@ -707,6 +719,20 @@ class Spoken:
     seq: int
     at: float | None
     text: str
+
+
+@dataclass(frozen=True)
+class Compaction:
+    """A point where Claude Code replaced the conversation with a summary and kept the turns.
+
+    `seq` is the summary record's line, so a tool call before it and one after it are told apart by
+    position rather than by the clock -- a transcript is append-only and its timestamps can be wrong.
+    `summary` is the text, kept because it can CORROBORATE a finding (does it name a path the finding
+    already identified?) and must never be able to produce one.
+    """
+
+    seq: int
+    summary: str
 
 
 @dataclass(frozen=True)
@@ -754,6 +780,9 @@ class Session:
     """What this tool's Stop hook showed earlier in the session, word for word, in order."""
     subagent_calls: int = 0
     """Of `tool_calls`, how many its sub-agents made: see `with_subagents`."""
+    compactions: tuple[Compaction, ...] = ()
+    """Where the conversation was replaced by a summary, in order. Claude Code's compaction is
+    additive, so both the summary and the turns it covers are in the record and can be compared."""
     sealed_history: int = 0
     """Records that replaced this session's earlier turns with something nothing local can read.
 
@@ -1075,6 +1104,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     attached_reads: list[tuple[int, str]] = []
     prompts: list[int] = []
     notices: list[int] = []
+    compactions: list[Compaction] = []
     notes: list[int] = []
     spoken: list[Spoken] = []
     last_text: tuple[int, str] = (-1, "")
@@ -1195,6 +1225,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
             continue
 
         if kind == "user":
+            if record.get("isCompactSummary"):
+                compactions.append(Compaction(lines, _plain_text(content)))
             if isinstance(content, str):
                 user_turns += 1
                 if not record.get("isMeta"):
@@ -1302,6 +1334,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
         attached_reads=tuple(attached_reads),
         prompts=tuple(prompts),
         notices=tuple(notices),
+        compactions=tuple(compactions),
         notes=tuple(notes),
         spoken=tuple(spoken),
         last_text=last_text,
@@ -1662,6 +1695,31 @@ def edited_without_read(session: Session) -> list[str]:
         seen.add(key)
         missing.append(_display_path(key, session.cwd))
     return missing
+
+
+def edited_paths(call: ToolCall, cwd: str) -> list[str]:
+    """Project paths this one call changed, as written. Empty when it changed nothing inside it.
+
+    The public seam for "did anything this depends on change between these two points". An
+    Edit/Write/MultiEdit/NotebookEdit names its target; a shell command's targets are read from where
+    the command is when it writes them. A failed or refused call changed nothing.
+    """
+    if call.error or call.refused:
+        return []
+    project = Place(cwd)
+    if call.name in _CHANGE_TOOLS:
+        path = _call_path(call)
+        return [path] if path is not None and project.holds(path) else []
+    if call.name in _SHELL_TOOLS:
+        command = shell_command(call)
+        if command is None:
+            return []
+        targets = bash_edit_targets(command, cwd, call.cwd)
+        if targets is None:
+            return []
+        # An empty target means "something in the project, name unknown": `git apply`, a tree rewrite.
+        return [t for t in targets if not t or project.holds(t)]
+    return []
 
 
 def after_last_edit(session: Session, declared: Declared | None = None) -> dict[str, Any] | None:

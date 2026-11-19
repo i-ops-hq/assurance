@@ -39,6 +39,7 @@ from assurance_budget.notice import (
     verdicts,
 )
 from assurance_budget.codex import CODEX_SOURCE, find_latest_codex_session, is_codex, read_codex
+from assurance_budget.compaction import repeated_across_compaction
 from assurance_budget.otel import TRACE_SOURCE, is_trace, read_trace
 from assurance_budget.outcome import outcome, outcome_lines
 from assurance_budget.record import RunRecord, is_run_record, model_lines, model_summary, read_run_record
@@ -739,6 +740,7 @@ def build_report(
         "edited_without_read": [] if session.source in _READ_BEFORE_EDIT_ENFORCED else list(unread_edits),
         "edits_with_no_recorded_read": no_recorded_read(unread_edits, session.source in _READ_BEFORE_EDIT_ENFORCED, unclassified),
         "after_last_edit": after,
+        "repeated_after_compaction": _repeated_json(repeated_across_compaction(session, declared)),
         # Three verdicts rather than one, because one answers the wrong question: in session
         # 7668d5fa the push WAS tested and the working tree was NOT, and asked as a single
         # question it came out as the false half.
@@ -932,6 +934,7 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
         )))
 
     body.extend(verdict_lines(report.get("verdicts") or []))
+    body.extend(repeated_work_lines(report.get("repeated_after_compaction") or {}))
     after = report.get("after_last_edit")
     if after is not None:
         body.append(_after_last_edit_line(after))
@@ -1064,6 +1067,51 @@ def _end_sentence(text: str) -> str:
 def _count_phrase(n: int, singular: str, plural: str) -> str:
     """`1 thing` / `N things` — singular only at exactly 1."""
     return f"1 {singular}" if n == 1 else f"{n} {plural}"
+
+
+def _repeated_json(work: Any) -> dict[str, Any]:
+    return {
+        "boundaries": work.boundaries,
+        "reported": [
+            {"tool": r.tool, "label": r.label, "first": r.first_seq,
+             "again": r.again_seq, "boundary": r.boundary_seq}
+            for r in work.reported
+        ],
+        "rejected": work.rejected,
+        "undecided": dict(work.undecided),
+    }
+
+
+def repeated_work_lines(work: dict[str, Any]) -> list[str]:
+    """Work repeated across a compaction boundary, as a rate rather than an anecdote.
+
+    Silent when the session never compacted: there is no denominator, so there is no rate.
+
+    What it cannot settle is on the same line as what it found, which is the point. A count of
+    repeats with "18 browser clicks could not be settled" beside it is a different claim from the
+    same count on its own, and the second one reads as completeness it does not have.
+    """
+    boundaries = int(work.get("boundaries") or 0)
+    if not boundaries:
+        return []
+    reported = list(work.get("reported") or [])
+    rejected = int(work.get("rejected") or 0)
+    undecided = dict(work.get("undecided") or {})
+    crossings = _count_phrase(boundaries, "compaction boundary", "compaction boundaries")
+    # Said as a tally of what it could settle, never as "none was found". The second reads as a
+    # completed search, and with candidates the record cannot settle there was no completed search.
+    parts = [f"{len(reported)} repeated with nothing they depend on changed"]
+    if reported:
+        named = ", ".join(str(r.get("label")) for r in reported[:3])
+        more = f" and {len(reported) - 3} more" if len(reported) > 3 else ""
+        parts[0] += f" ({named}{more})"
+    if rejected:
+        parts.append(f"{rejected} had an edit in between, so not repeated work")
+    if undecided:
+        which = ", ".join(f"{tool} ×{n}" if n > 1 else tool
+                          for tool, n in sorted(undecided.items(), key=lambda kv: (-kv[1], kv[0]))[:3])
+        parts.append(f"{sum(undecided.values())} the record cannot settle ({which})")
+    return [_end_sentence(f"Repeats across {crossings}: " + ", ".join(parts))]
 
 
 def verdict_lines(rows: list[dict[str, Any]]) -> list[str]:
