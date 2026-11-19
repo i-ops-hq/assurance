@@ -16,9 +16,9 @@ pip install assurance-cli
 
 ## Quick start
 
-`assurance --help` lists: `audit`, `hook`, `serve`, `reach`, `init`, `check`, `diff`, `pin`, `drift`,
-`deps`, `budget`, `authority`. `audit`, `hook`, `serve`, `reach`, `budget`, `authority` and `deps` forward
-to their packages when installed.
+`assurance --help` lists: `audit`, `hook`, `serve`, `reach`, `batch`, `init`, `check`, `diff`, `pin`,
+`drift`, `deps`, `budget`, `authority`. `audit`, `hook`, `serve`, `reach`, `budget`, `authority` and
+`deps` forward to their packages when installed.
 
 Point `check` at a folder of dated files (real output from a temp folder with Jan, Feb, Apr CSVs):
 
@@ -34,6 +34,8 @@ With `--fail-on-gap` that same line exits `1`.
 ## What it checks
 
 - Dated or numbered series in a folder (`check`) — months, weeks, days, numbered runs
+- What an LLM batch job returned, per record (`batch`) — returned, errored, truncated, empty, or a
+  reply shape it could not read, on Bedrock, OpenAI Batch and Anthropic Message Batches
 - Coverage over any two key sets (`diff`)
 - MCP tool-description drift since a pin (`pin`)
 - Shift in a binary outcome stream (`drift`)
@@ -51,6 +53,9 @@ With `--fail-on-gap` that same line exits `1`.
 ## Limits
 
 - **Does not invent the expected set.** `diff` takes your declaration; `check` derives one and prints how.
+- **Does not guess where a provider keeps a field.** `batch` knows eight reply bodies by name; a
+  record matching none of them is `unreadable` and counted, never read as a pass, and `--stop-path`
+  names the fields of one it has not seen.
 - **No network, no telemetry, no keys.**
 - **A folder it cannot parse exits 1**, not 0 — silence is not a pass.
 - Skipped tool directories (`.git`, `node_modules`, …) are named, not folded into “files not opened” as if they were content.

@@ -1,3 +1,81 @@
+# 0.6.10
+
+- **A deeply nested line no longer crashes the reader.** `json.loads` raises `RecursionError` for
+  the same class of input as `JSONDecodeError` — a line that is not what it claims to be — when the
+  nesting outruns the C stack, and only one of the two was caught. It mattered for two reasons
+  beyond tidiness: the published exit table reserves `1` for "something to look at", so a parser
+  crash reported as a finding about the caller's job, and a traceback is the one output path here
+  never designed to be content-free. Caught wherever `JSONDecodeError` is, and not bounded by a
+  depth constant, because the real limit is how much stack is left at the moment of parsing and it
+  moves between machines. An unparseable *manifest* is exit 2, since it is a file the command was
+  told to read.
+- **`--hash-keys`.** The reply-content promise is about prompts and replies, and holds; the record
+  key is caller data and is kept verbatim, because per-key coverage cannot be stated without it.
+  Callers use natural keys and a run record is built to be shared, so this writes a stable digest
+  into `--records` and `--run-record` while the report you read keeps the real keys. Stable across
+  jobs, so lineage and a rollup across days still work on the digest.
+- A file where no line could be read says so, rather than reporting "all returned" of nothing.
+- **`--lineage`: per-key coverage that counts the work, not the lines.** A pipeline resending a
+  failed record must give the resend a new record ID, so keys-sent against keys-returned calls the
+  original a gap and the resend an extra — wrong twice about one record that succeeded. Declare what
+  you resent and each expected key gets one final state: `returned`, `recovered`, `missing`,
+  `refused`, or the latest accounted attempt's verdict. Chains of several hops are followed.
+- **A resend link is declared, never inferred**, and an unmapped key in the output stays an
+  unexpected key. Guessing the edge from a name or an ordering would put a prediction inside a
+  coverage number, and a map that adopts whatever turns up cannot fail.
+- **A malformed resend map is refused with its reason, not resolved**: two resends for one original,
+  a key that is both a resend and a record of its own, a chain past the bound. Which branch was
+  meant is not something to guess at.
+- **`missing` means an absence of information, not a failure.** A key whose attempts all errored is
+  `errored`; `missing` is the only state that means this cannot tell you. The evidence keeps the
+  whole chain, because "truncated then OK" and "OK first time" are the same verdict and very
+  different facts. `expired` never becomes `recovered` without a declared resend, since Anthropic
+  expiry destroys the result.
+- **Check A, request-to-response binding.** Where a provider echoes the request — Bedrock echoes
+  `modelInput` — it is hashed against what went up under that key. `binding_mismatch` means the line
+  answers a different request and the record is refused; `binding_unverified` means the echo was
+  absent or unreadable, which is neither a pass nor an accusation. The hash is over a canonical form
+  (keys sorted, no whitespace, non-ASCII escaped), written down in the module because the caller must
+  reproduce it — over raw bytes a provider's reserialisation would mismatch every record, and a check
+  that always fires is indistinguishable from a broken one.
+- **Check B reaches the per-key report**: `totalRecordCount − processedRecordCount` is a coverage
+  fact, not a footnote about the manifest.
+- **Check C propagates.** With any unknown usage the token sum is a floor on every surface — per-key
+  report, summary, manifest comparison and the emitted run-record lines — because a floor labelled in
+  one place and printed as a total in another is an understatement that reappears where nobody looks.
+- `--fail-on-uncovered [N]` exits 1 above N uncovered keys, and will not pass while the check that
+  finds an empty reply is unconfigured.
+- **`assurance batch sent.jsonl out.jsonl.out`**: what an LLM batch job actually returned, per
+  record — `returned`, `errored`, `truncated`, `empty`, `unreadable`, `expired`, `canceled` or
+  `refused`. Bedrock, OpenAI Batch and Anthropic Message Batches, from local files, no new
+  dependency. `--fail-on-record` and `--fail-on-truncation [rate]` are the CI gates.
+- **A gate does not pass a check that was not configured.** `--fail-on-record` asks about `empty`,
+  so asking for it with no `--token-floor` and no `--item-pattern` exits 1 and says why: only a
+  wholly blank reply could have been found, and exit 0 would report the job clean on the strength
+  of a check that never ran. Naming the states instead (`--fail-on-record errored truncated`) says
+  you did not mean to ask about reply content, and passes. Exit 1 rather than 2 because both
+  READMEs publish 1 as "something it couldn't check" and 2 as "could not run".
+- **`empty` and `unreadable` are separate states.** An empty reply is an observation; an unreadable
+  one is the absence of one. A reply body matching none of the eight shapes this knows is counted
+  and reported, never read as a pass, and `--stop-path` / `--content-path` / `--output-tokens-path`
+  name the fields of a model that shipped after this release.
+- AWS states that `modelOutput`'s format depends on the invocation type: Converse's body calls the
+  stop reason `stopReason` and the InvokeModel bodies call it `completionReason` or `stop_reason`,
+  so a check that greps one name finds no truncation on half of Bedrock. Each body is named
+  separately and the test for truncation runs once per shape.
+- Content-free by construction: `output_tokens`, a 16-character digest prefix, a count of a declared
+  `--item-pattern`, and how much of the reply repeats itself. The text is read and discarded.
+- `--manifest manifest.json.out` compares Bedrock's own six counts against the records:
+  `totalRecordCount − processedRecordCount` is reported as its own category, records never
+  attempted, and the provider's token total is stated beside the sum of the records rather than
+  preferred. A sum with any unknown usage in it is called a floor.
+- `--error-file` for OpenAI, which keeps its failures in a separate file: without it the shortfall
+  is reported as unaccounted for rather than missing.
+- `--run-record` writes the job as `assurance.run/1` lines, so `assurance audit` and
+  `--fail-on-claim` work on a batch job unchanged; `--records` writes one line per record for
+  `assurance drift`. Two files because a run record also carries a task line, an outcome line per
+  check and a claim, and those would sit in the denominator of a rate.
+
 # 0.6.9
 
 - `assurance audit` is described as reading Claude Code **or Codex**, in the command list and in
