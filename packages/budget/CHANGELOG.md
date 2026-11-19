@@ -1,3 +1,41 @@
+# 0.2.31
+
+One batch rather than six releases. The first entry is a defect you are hitting now; the rest were
+finished earlier and held so they travel together, because every release moves the plugin pin and
+makes every PyPI mirror re-fetch every file of every package.
+
+- **`assurance notices` crashed on any transcript containing a heredoc.** `ValueError: No closing
+  quotation`, exit 1, a raw traceback. An apostrophe inside a `cat <<'EOF'` body reached a
+  quote-aware scanner that nineteen sibling call sites protect with `strip_heredoc_bodies` and one
+  did not. It is the command whose whole job is to measure whether the hook's findings get acted
+  on, so it was unusable for the one question it answers. Fixed at that call site, with three
+  regression cases and a control.
+- **The push, the latest commit and the working tree now get separate verdicts, each naming the run
+  behind it.** One verdict over a session answers the wrong question: a suite can pass, a push can
+  follow it, and one more file can be edited afterwards, and there is no single true sentence about
+  that state. Asked as one question it came out as "pushed with no passing test", which was false
+  about the push and true about the tree. Each verdict now carries the command and the time it
+  started, so a disagreement is settled by looking rather than by deciding who to believe.
+- **A check that could not be classified is reported as unconfirmed, not as absent.** The rule was
+  already that a check which did not run is reported as unchecked and never as passed; the inverse
+  is the same rule. Where commands after the last edit could not be read, the report says so
+  instead of denying the run, and the gate still fails — unknown is not passed.
+- **`assurance audit --learn "<command>"` records your own test or check** instead of telling you to
+  edit `.assurance/config.toml` while you are shipping. It does not count for the session that ran
+  it, and says so: a session that can declare its own check could pass its own audit.
+- **The notice is three lines — finding, evidence, fix — rather than one eighty-word sentence**
+  carrying paths, times, counts and config advice.
+- **An interpreter named by a variable is resolved before a command is classified.** A real suite
+  run invoked as `"$PY" -m pytest packages` was unclassifiable, so a push over a passing suite was
+  reported as untested. Quotes, heredocs and compound commands were already handled; nothing
+  resolved the variable.
+- **A piped test run no longer has the pipe's exit status read as the test's.** Resolving the
+  interpreter made this reachable: a run printing `1 failed, 73 passed` could be recorded as
+  passed. The result now comes from what the runner printed, or is unknown.
+- **New: work repeated across a compaction boundary**, where nothing it depends on changed. Reported
+  as a rate with the count it could not settle beside it, never alone. On this project's own
+  sessions it reports zero across 45 boundaries with 22 unsettled, which is published as measured.
+
 # 0.2.30
 
 - **A `pytest -q` run that skipped every test is no longer recorded as a pass.** Under `-q` pytest

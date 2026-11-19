@@ -1,3 +1,9 @@
+# 0.1.40
+
+- **Carries `assurance-budget` 0.2.31 and `assurance-cli` 0.6.10.** The `notices` crash fix is the
+  one a user is hitting now; the rest were held so one release carries them all. `assurance batch`
+  is new, and the digests it writes into shareable artifacts are salted per workspace.
+
 # 0.1.39
 
 - **The Claude Code plugin ships no hook and no script, so it can be listed again.** Anthropic's

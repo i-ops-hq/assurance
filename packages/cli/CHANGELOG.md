@@ -1,5 +1,14 @@
 # 0.6.10
 
+- **The digests written into the two shareable artifacts are salted with a secret the workspace
+  holds.** Unsalted, a 16-character digest of a record key is reversible for any predictable key
+  space, and a digest of a reply is the reply whenever the reply space is small — for a classifier
+  returning one of a dozen labels it comes back in microseconds. Salted, the digests still count
+  distinct replies and join across jobs and days, and cannot be enumerated without the salt. The
+  salt lives outside any repository and never enters an artifact; a short salt id does, so a join
+  across two differently salted files fails loudly instead of returning zero matches. With no salt
+  configured the command still works and says on stderr that the digests are reversible, naming the
+  one command that sets one. The claim is salted per workspace, not content-free.
 - **A deeply nested line no longer crashes the reader.** `json.loads` raises `RecursionError` for
   the same class of input as `JSONDecodeError` — a line that is not what it claims to be — when the
   nesting outruns the C stack, and only one of the two was caught. It mattered for two reasons
