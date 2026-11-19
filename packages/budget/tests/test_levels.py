@@ -156,7 +156,7 @@ def test_a_push_after_a_failed_check_still_names_what_it_could_not_classify(tmp_
     # project's own check, and a failed mypy does not change that.
     steps = [("prompt", "ship it"), _edit(tmp_path), _bash("mypy src", failed=True, output="error: 1"), _bash("python scripts/verify.py"), PUSH]
     message = _said(_transcript(tmp_path, steps), capsys)
-    assert "had failed: mypy src. 1 command after the last code edit could not be classified (python script)" in message
+    assert "had failed: mypy src.\n1 command after the last code edit could not be classified (python script)" in message
 
 
 @pytest.mark.parametrize("branch, said", [("main", "committed on main"), ("master", "committed on master"), ("feature", None)])
@@ -254,9 +254,10 @@ def test_a_command_it_cannot_classify_is_named_to_you_and_not_to_claude(tmp_path
     out = _hook(path, capsys)
     assert out is not None
     message = str(out["systemMessage"])
-    assert "with no passing test or check it recognises after" in message
+    assert "whether a test or check passed after" in message
+    assert "is unconfirmed" in message, "only the person can declare that script a check"
     assert "1 command after the last code edit could not be classified (python script)" in message
-    assert "declare it under [audit] in .assurance/config.toml" in message
+    assert 'run `assurance audit --learn "<the command>"`' in message
     context = out["hookSpecificOutput"]["additionalContext"]
     assert "[audit]" not in context and "say which one and what it returned" in context
 

@@ -675,6 +675,18 @@ _NOT_TYPED = (
 )
 
 
+def _plain_text(content: Any) -> str:
+    """The text of a record whose content is a string or a list of blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(b.get("text") or "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
 def _typed_prompt(record: Mapping[str, Any], content: Any, seq: int, at: float | None) -> Prompt | None:
     """The record as a `Prompt` when the person typed it; None for everything Claude Code wrote in the
     person's place: meta records, a compaction's summary, a background task's notice, a message from
@@ -707,6 +719,20 @@ class Spoken:
     seq: int
     at: float | None
     text: str
+
+
+@dataclass(frozen=True)
+class Compaction:
+    """A point where Claude Code replaced the conversation with a summary and kept the turns.
+
+    `seq` is the summary record's line, so a tool call before it and one after it are told apart by
+    position rather than by the clock -- a transcript is append-only and its timestamps can be wrong.
+    `summary` is the text, kept because it can CORROBORATE a finding (does it name a path the finding
+    already identified?) and must never be able to produce one.
+    """
+
+    seq: int
+    summary: str
 
 
 @dataclass(frozen=True)
@@ -754,6 +780,9 @@ class Session:
     """What this tool's Stop hook showed earlier in the session, word for word, in order."""
     subagent_calls: int = 0
     """Of `tool_calls`, how many its sub-agents made: see `with_subagents`."""
+    compactions: tuple[Compaction, ...] = ()
+    """Where the conversation was replaced by a summary, in order. Claude Code's compaction is
+    additive, so both the summary and the turns it covers are in the record and can be compared."""
     sealed_history: int = 0
     """Records that replaced this session's earlier turns with something nothing local can read.
 
@@ -1075,6 +1104,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
     attached_reads: list[tuple[int, str]] = []
     prompts: list[int] = []
     notices: list[int] = []
+    compactions: list[Compaction] = []
     notes: list[int] = []
     spoken: list[Spoken] = []
     last_text: tuple[int, str] = (-1, "")
@@ -1195,6 +1225,8 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
             continue
 
         if kind == "user":
+            if record.get("isCompactSummary"):
+                compactions.append(Compaction(lines, _plain_text(content)))
             if isinstance(content, str):
                 user_turns += 1
                 if not record.get("isMeta"):
@@ -1302,6 +1334,7 @@ def _parse_lines(raw_lines: list[str], target: Path, cwd: str = "") -> Session:
         attached_reads=tuple(attached_reads),
         prompts=tuple(prompts),
         notices=tuple(notices),
+        compactions=tuple(compactions),
         notes=tuple(notes),
         spoken=tuple(spoken),
         last_text=last_text,
@@ -1483,9 +1516,13 @@ def changes_limits_file(call: ToolCall, cwd: str) -> bool:
         command = shell_command(call)
         if command is None or call.refused:
             return False
-        # A write target is compared as written, never expanded, so a command that writes the
-        # limits file names it; the shell parser is only needed for the ones that do.
-        return "config.toml" in command and _bash_writes_session_limits(command, cwd, call.cwd)
+        # A write target is compared as written, never expanded, so a command that writes the limits
+        # file names it; the shell parser is only needed for the ones that do. The exception is
+        # `assurance audit --learn`, which writes that file and names no path at all -- and this fast
+        # path, whose comment asserted the rule, is what silently kept the guard from ever seeing it.
+        if "config.toml" not in command and "--learn" not in command:
+            return False
+        return _bash_writes_session_limits(command, cwd, call.cwd)
     return False
 
 
@@ -1498,12 +1535,31 @@ def _bash_writes_session_limits(command: str, cwd: str, start: str = "") -> bool
     except ValueError:
         return False
     place = Place(cwd, "", start)
-    for tokens, _argv in place.walk(segments):
+    for tokens, argv in place.walk(segments):
+        if _learns_a_command(argv or tokens):
+            return True
         for target in _write_targets(tokens):
             where = place.resolve(target)
             if where is not None and _is_session_limits_file(where, cwd):
                 return True
     return False
+
+
+def _learns_a_command(argv: list[str]) -> bool:
+    """`assurance audit --learn "<command>"` writes this project's limits file without naming it.
+
+    No redirection and no path, so `_write_targets` sees nothing. If that went undetected a session
+    could teach itself a check and have the same session count it -- which is the whole reason
+    `load_declared` distrusts a project config the session changed. A flag is not an exception to
+    that guard.
+
+    Matched loosely on purpose: any segment mentioning both `assurance` and `--learn` counts. Over-
+    detecting makes a session distrust its own config, which is the harmless direction; under-
+    detecting hands an agent a way to pass its own audit.
+    """
+    if not any(tok == "--learn" or tok.startswith("--learn=") for tok in argv):
+        return False
+    return any("assurance" in tok for tok in argv)
 
 
 def _is_absolute_path_token(path: str) -> bool:
@@ -1639,6 +1695,31 @@ def edited_without_read(session: Session) -> list[str]:
         seen.add(key)
         missing.append(_display_path(key, session.cwd))
     return missing
+
+
+def edited_paths(call: ToolCall, cwd: str) -> list[str]:
+    """Project paths this one call changed, as written. Empty when it changed nothing inside it.
+
+    The public seam for "did anything this depends on change between these two points". An
+    Edit/Write/MultiEdit/NotebookEdit names its target; a shell command's targets are read from where
+    the command is when it writes them. A failed or refused call changed nothing.
+    """
+    if call.error or call.refused:
+        return []
+    project = Place(cwd)
+    if call.name in _CHANGE_TOOLS:
+        path = _call_path(call)
+        return [path] if path is not None and project.holds(path) else []
+    if call.name in _SHELL_TOOLS:
+        command = shell_command(call)
+        if command is None:
+            return []
+        targets = bash_edit_targets(command, cwd, call.cwd)
+        if targets is None:
+            return []
+        # An empty target means "something in the project, name unknown": `git apply`, a tree rewrite.
+        return [t for t in targets if not t or project.holds(t)]
+    return []
 
 
 def after_last_edit(session: Session, declared: Declared | None = None) -> dict[str, Any] | None:
@@ -1897,7 +1978,12 @@ def _quiet_pytest_verified_nothing(
     """
     if not whole:
         return False
-    segments = split_shell_segments(command)
+    # Heredoc bodies stripped first, as every other caller of this does. Without it a body holding
+    # an apostrophe — `it doesn't matter` in a `cat > file <<'EOF'` block — reaches the quote scanner
+    # raw and raises `ValueError: No closing quotation` out of the reader. That crashed
+    # `assurance notices` with a traceback on a real machine's transcripts, which is the one command
+    # whose whole job is to measure whether the hook's findings get acted on.
+    segments = shell_segments(command)
     if sum(1 for seg in segments if seg and _classify_segment(seg, declared) == "test") != 1:
         return False
     if _PYTEST_QUIET_NONE.search(tail):
@@ -1931,14 +2017,24 @@ def ran_no_tests(tail: str, whole: bool = False) -> bool:
     return False
 
 
-def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
-    """True when the test's own output was piped through `head` or `sed -n`: the start was kept, so a
-    failure printed after the part that was kept could be what is missing. A `head` in another
-    pipeline of the same command does not touch the test's output."""
-    try:
-        tokens = _scan_shell(strip_heredoc_bodies(command))[0]
-    except ValueError:
-        return True
+def shell_pipeline(command: str) -> tuple[list[list[str]], list[str]]:
+    """Segments ready to classify, with the separators between them, variables resolved.
+
+    `shell_segments` throws the separators away, and two functions need them: whether anything after
+    the test can replace its exit status, and whether a `head` cut the test's own output. Both built
+    this by hand and neither resolved variables, so with the interpreter in a variable they could not
+    find the test segment at all -- and `_exit_is_visible` then fell through to its trusting default
+    and said the exit status was the test's. A `"$PY" -m pytest ... | tail -8` whose runner printed
+    `1 failed, 73 passed` was recorded as PASSED. Resolving the interpreter is what made that
+    reachable: before it, the command was unclassified and no outcome was computed at all.
+
+    Empty segments are kept, unlike `split_shell_segments`, because `separators[index:]` only means
+    anything while the indices line up.
+
+    Raises `ValueError` on an unclosed quote. Each caller has its own safe answer for that, and they
+    differ: an unreadable command must not be read as a visible exit status.
+    """
+    tokens = _scan_shell(strip_heredoc_bodies(command))[0]
     segments: list[list[str]] = [[]]
     separators: list[str] = []
     for tok in tokens:
@@ -1947,6 +2043,17 @@ def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
             segments.append([])
         else:
             segments[-1].append(tok)
+    return _resolve_variables(segments), separators
+
+
+def _cut_from_the_end(command: str, declared: Declared | None = None) -> bool:
+    """True when the test's own output was piped through `head` or `sed -n`: the start was kept, so a
+    failure printed after the part that was kept could be what is missing. A `head` in another
+    pipeline of the same command does not touch the test's output."""
+    try:
+        segments, separators = shell_pipeline(command)
+    except ValueError:
+        return True
     for index, seg in enumerate(segments):
         if not seg or _classify_segment(seg, declared) != "test":
             continue
@@ -1991,17 +2098,9 @@ def _unless_flagged(summary: str | None, error: bool, exit_known: bool) -> str:
 
 def _exit_is_visible(command: str, kind: BashKind = "test", declared: Declared | None = None) -> bool:
     try:
-        tokens = _scan_shell(strip_heredoc_bodies(command))[0]
+        segments, separators = shell_pipeline(command)
     except ValueError:
         return False
-    segments: list[list[str]] = [[]]
-    separators: list[str] = []
-    for tok in tokens:
-        if tok in _SHELL_SEPARATORS:
-            separators.append(tok)
-            segments.append([])
-        else:
-            segments[-1].append(tok)
     pipefail = any(_sets_pipefail(seg) for seg in segments)
     for index, seg in enumerate(segments):
         if not seg or _classify_segment(seg, declared) != kind:
@@ -2451,7 +2550,7 @@ def runs_elsewhere(command: str, cwd: str, declared: Declared | None = None, sta
     project's code went untested. Only the test and check parts are read: `cp src/a.py /tmp/a.py &&
     ruff check /tmp/a.py` checks the copy, whatever the copy was made from."""
     try:
-        segments = split_shell_segments(strip_heredoc_bodies(command))
+        segments = shell_segments(command)
     except ValueError:
         return False
     place = Place(cwd, "", start)
@@ -2604,7 +2703,7 @@ def _unclassified_counts(
 
 def _unclassified_label(command: str, declared: Declared | None = None) -> str:
     try:
-        segments = split_shell_segments(strip_heredoc_bodies(command))
+        segments = shell_segments(command)
     except ValueError:
         return "(unparsed)"
     for tokens in segments:
@@ -2701,6 +2800,18 @@ def split_shell_segments(command: str) -> list[list[str]]:
     if current:
         segments.append(current)
     return segments
+
+
+def shell_segments(command: str) -> list[list[str]]:
+    """Argv segments ready to classify: heredoc bodies dropped, split, variables resolved.
+
+    The one way to get segments for `_classify_segment`. Eight functions across three modules used to
+    do these three steps themselves, and a ninth that forgot one is how `assurance notices` came to
+    crash on an apostrophe in a heredoc, and how a resolved interpreter would otherwise have reached
+    `classify_bash` and not `bash_label` -- which prints what to run, and so printed a 400-character
+    raw command. Raises `ValueError` on unclosed quotes, as the split does.
+    """
+    return _resolve_variables(split_shell_segments(strip_heredoc_bodies(command)))
 
 
 def _scan_shell_tokens(command: str) -> list[str]:
@@ -2995,9 +3106,8 @@ def bash_test_label(command: str, declared: Declared | None = None) -> str:
 
 def bash_label(command: str, kind: BashKind, declared: Declared | None = None) -> str:
     """Short label for the first segment of `kind`: normalised argv via shlex.join, max 60 chars."""
-    stripped = strip_heredoc_bodies(command)
     try:
-        segments = split_shell_segments(stripped)
+        segments = shell_segments(command)
     except ValueError:
         return _truncate_label(command)
     for tokens in segments:
@@ -3023,7 +3133,7 @@ def is_scan(command: str, declared: Declared | None = None) -> bool:
     """Whether every test or check in `command` is a scan (`_SCAN_PREFIXES`): a check of something other
     than the code edited, so its passing verifies no edit. A declared check is the project's, never a scan."""
     try:
-        segments = split_shell_segments(strip_heredoc_bodies(command))
+        segments = shell_segments(command)
     except ValueError:
         return False
     scans = False
@@ -3046,7 +3156,7 @@ def classify_bash(command: str, declared: Declared | None = None) -> BashKind:
     """
     stripped = strip_heredoc_bodies(command)
     try:
-        segments = split_shell_segments(stripped)
+        segments = shell_segments(command)
         inner = command_substitutions(stripped)
     except ValueError:
         return "unclassified"
@@ -3232,6 +3342,72 @@ def _is_assignment(token: str) -> bool:
         return False
     name, _sep, _val = token.partition("=")
     return bool(name) and name.replace("_", "a").isalnum() and not name[0].isdigit()
+
+
+#: A variable reference, in the two forms a command actually writes: `$PY` and `${PY}`.
+_VAR_REFERENCE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+
+
+def _lone_assignment(tokens: list[str]) -> tuple[str, str] | None:
+    """`(name, value)` when a segment is nothing but one assignment, else None.
+
+    Only a standalone assignment is collected. `VAR=x cmd` sets VAR for `cmd`'s environment and
+    does NOT persist to the next command, so reading it as persistent would resolve a variable the
+    shell never set.
+    """
+    if len(tokens) != 1 or not _is_assignment(tokens[0]):
+        return None
+    name, _sep, value = tokens[0].partition("=")
+    return name, value
+
+
+def _resolve_variables(segments: list[list[str]]) -> list[list[str]]:
+    """Substitute variables that an earlier segment of the same command assigned.
+
+    This is what stood between the audit and a real test run. A session shipping 0.1.37 ran
+    `PY=/abs/path/to/venv/bin/python; find packages -name __pycache__ ...; "$PY" -m pytest packages`,
+    and the audit called the whole thing unclassified -- so it reported "pushed with no passing test"
+    over a suite that had passed four minutes after the last edit. Every other part of the parse was
+    already right: the scanner had stripped the quotes, the heredoc body was already gone, the
+    compound command was already split per segment, and `_program_name` already basenames an absolute
+    path down to `python`. The interpreter was a variable, and nothing resolved it.
+
+    Two properties carry the safety, and neither is a list of refusals. **One level**: a substituted
+    value is never re-scanned, so `PATH=$PATH:/x` yields the token `$PATH:/x` and stops -- there is no
+    loop to guard against. **No re-splitting**: the value becomes exactly one token, so it can only
+    match a program name if it genuinely is one. `PY=$(which python)` yields the token
+    `$(which python)`, `PY="python -X dev"` yields `python -X dev`, and neither is any program, so
+    both stay unclassified without being special-cased. An earlier version refused values holding
+    `$`, a backtick or whitespace; the counterfactual showed every test of those refusals passed with
+    them removed, because they never changed an outcome. What they did cost was real: they also
+    refused `PY=$HOME/bin/python3`, which basenames to `python3` and is a test run.
+
+    The deliberate limitation. An unquoted `$ARGS` word-splits in the shell, so
+    `ARGS="-m pytest"; python3 $ARGS tests` really runs the tests -- and the quoting that decides
+    this is already gone by the time segments exist. Splicing the value into several tokens would
+    read it correctly when it was unquoted and invent a command when it was quoted. So it stays one
+    token and that run goes unseen. It is a false negative on purpose, and it is only tolerable
+    because an unclassified command after an edit is reported as unconfirmed rather than as absent.
+    """
+    known: dict[str, str] = {}
+    out: list[list[str]] = []
+    for tokens in segments:
+        pair = _lone_assignment(tokens)
+        if pair is not None:
+            name, value = pair
+            known[name] = value  # an empty value expands to nothing, so the reference is left as-is
+            out.append(tokens)
+            continue
+        out.append([_expand_variables(tok, known) for tok in tokens] if known else tokens)
+    return out
+
+
+def _expand_variables(token: str, known: dict[str, str]) -> str:
+    def one(match: re.Match[str]) -> str:
+        value = known.get(match.group(1) or match.group(2) or "")
+        return value if value else match.group(0)
+
+    return _VAR_REFERENCE.sub(one, token) if "$" in token else token
 
 
 def find_latest_session(cwd: Path, projects_dir: Path | None = None) -> Path | None:

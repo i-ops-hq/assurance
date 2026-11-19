@@ -20,6 +20,7 @@ from assurance_budget.config import (
     ConfigError,
     limits_for_json,
     load_ceilings,
+    learn_command,
     load_declared,
     project_overreach_notes,
 )
@@ -35,8 +36,10 @@ from assurance_budget.notice import (
     needs_earlier_lines,
     stop_notice,
     stretch_may_predate,
+    verdicts,
 )
 from assurance_budget.codex import CODEX_SOURCE, find_latest_codex_session, is_codex, read_codex
+from assurance_budget.compaction import repeated_across_compaction
 from assurance_budget.otel import TRACE_SOURCE, is_trace, read_trace
 from assurance_budget.outcome import outcome, outcome_lines
 from assurance_budget.record import RunRecord, is_run_record, model_lines, model_summary, read_run_record
@@ -50,6 +53,7 @@ from assurance_budget.sessions import (
     bash_kinds_count,
     changed_limits_file,
     changed_manifests,
+    classify_bash,
     display_path,
     edited_without_read,
     find_latest_session,
@@ -179,25 +183,44 @@ _UNDECLARABLE = frozenset({"python -", "python -c", "(inside $( ))", "(no comman
 
 
 def _notice_line(notice: Notice, declared_note: str) -> str:
-    """The one line you see: the level first, then what happened."""
-    line = _notice_head(notice)
+    """What you see: the finding, then the evidence, then the fix -- one per line.
+
+    It used to be a single sentence carrying the paths, the times, the unclassified counts and advice
+    about editing a config file. The agent read it; a person skimming did not. Three short lines are
+    read in the order they matter, and the fix goes last because that is where the eye stops.
+
+    The evidence line is told to you and not to Claude on purpose: an agent should not be the one
+    deciding what counts as its own check.
+    """
+    lines = [_notice_head(notice)]
     if notice.consequence:
-        line += f" {_end_sentence(notice.consequence)}"
+        lines[0] += f" {_end_sentence(notice.consequence)}"
     if declared_note:
-        return f"{line} {declared_note}"
+        lines[0] += f" {declared_note}"
+        return "\n".join(lines)
+
     if notice.unclassified:
-        # Told to you, not to Claude: an agent should not be the one declaring what counts as its check.
         n = sum(notice.unclassified.values())
         ran = _count_phrase(n, "command", "commands")
-        line += f" {ran} after the last code edit could not be classified ({_unclassified_breakdown(notice.unclassified)})"
-        declarable = sorted((kind for kind in notice.unclassified if kind not in _UNDECLARABLE), key=lambda kind: (-notice.unclassified[kind], kind))
+        said = f"{ran} after the last code edit could not be classified ({_unclassified_breakdown(notice.unclassified)})"
+        declarable = sorted(
+            (kind for kind in notice.unclassified if kind not in _UNDECLARABLE),
+            key=lambda kind: (-notice.unclassified[kind], kind),
+        )
         if declarable:
             # Only what a declaration could name: one that cannot match is advice that cannot work.
             which = declarable[0] if len(declarable) == 1 else f"{declarable[0]} or {declarable[1]}"
-            line += f"; if {which} is this project's own test or check, declare it under [audit] in .assurance/config.toml and it will count."
+            # One command, not a file to open: the person reading this is mid-ship.
+            said += (
+                f"; if {which} is this project's own test or check, run "
+                f"`assurance audit --learn \"<the command>\"` and later audits will count it."
+            )
         else:
-            line += "."
-    return line
+            said += "."
+        lines.append(said)
+    if notice.fix:
+        lines.append(notice.fix)
+    return "\n".join(lines)
 
 
 #: How much of the end of a transcript the Stop hook reads first; `needs_earlier_lines` says when it
@@ -319,6 +342,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Audit a sample session bundled with assurance, to see what a report looks like",
     )
     parser.add_argument(
+        "--learn",
+        metavar="COMMAND",
+        help=(
+            "Record COMMAND under [audit] in this project's .assurance/config.toml as its own test or "
+            "check, so later audits count it. Nobody edits a config file mid-ship. It does NOT count "
+            "for the session that ran it: a session that can declare its own check could pass its own "
+            "audit, and a flag is not an exception to that"
+        ),
+    )
+    parser.add_argument(
         "--hook",
         action="store_true",
         help=(
@@ -338,6 +371,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _learn(command: str) -> int:
+    """`assurance audit --learn "<command>"`: record it, say where, and never pretend it counts now."""
+    text = command.strip()
+    if not text:
+        print("assurance audit: --learn needs a command, such as --learn \"make verify\"", file=sys.stderr)
+        return EXIT_UNREADABLE
+    kind = "tests" if classify_bash(text) == "test" else "checks"
+    try:
+        path, key, already = learn_command(Path.cwd(), text, kind)
+    except (ConfigError, OSError) as exc:
+        print(f"assurance audit: {exc}", file=sys.stderr)
+        return EXIT_UNREADABLE
+    where = display_path(str(path), str(Path.cwd()))
+    if already:
+        print(f"{text} is already declared under [audit] {key} in {where}.")
+        return EXIT_OK
+    print(f"Recorded {text} under [audit] {key} in {where}; later audits will count it.")
+    # Said plainly rather than left to be discovered: this session changed the file, so its own audit
+    # ignores what the file declares. That is the guard working, not a bug.
+    print("This session changed that file, so its own audit does not use it. The next one will.")
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run `assurance audit` and return its exit code.
 
@@ -354,6 +410,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.nudge:
         parser.error("--nudge only applies with --hook")
     survive_narrow_consoles()
+    if args.learn is not None:
+        if args.demo or args.transcript or args.session:
+            parser.error("--learn records a command for this project; leave out the transcript, --demo and --session")
+        return _learn(args.learn)
     if args.demo and args.transcript:
         parser.error("--demo audits the bundled sample; leave out the transcript path")
     if args.session is not None and (args.demo or args.transcript):
@@ -680,6 +740,15 @@ def build_report(
         "edited_without_read": [] if session.source in _READ_BEFORE_EDIT_ENFORCED else list(unread_edits),
         "edits_with_no_recorded_read": no_recorded_read(unread_edits, session.source in _READ_BEFORE_EDIT_ENFORCED, unclassified),
         "after_last_edit": after,
+        "repeated_after_compaction": _repeated_json(repeated_across_compaction(session, declared)),
+        # Three verdicts rather than one, because one answers the wrong question: in session
+        # 7668d5fa the push WAS tested and the working tree was NOT, and asked as a single
+        # question it came out as the false half.
+        "verdicts": [
+            {"what": v.what, "at": v.at, "state": v.state, "evidence": v.evidence,
+             "edits": list(v.edits)}
+            for v in verdicts(session, declared)
+        ],
         "unclassified_commands": unclassified,
         "unclassified_by_command": unclassified_by_command(session, declared),
         "bash_kinds": kinds,
@@ -864,6 +933,8 @@ def format_report(session: Session, loops: list[Stalled], report: dict[str, Any]
             "classified, so a read may be among them" if unseen.get("unclassified_commands") else ""
         )))
 
+    body.extend(verdict_lines(report.get("verdicts") or []))
+    body.extend(repeated_work_lines(report.get("repeated_after_compaction") or {}))
     after = report.get("after_last_edit")
     if after is not None:
         body.append(_after_last_edit_line(after))
@@ -998,6 +1069,90 @@ def _count_phrase(n: int, singular: str, plural: str) -> str:
     return f"1 {singular}" if n == 1 else f"{n} {plural}"
 
 
+def _repeated_json(work: Any) -> dict[str, Any]:
+    return {
+        "boundaries": work.boundaries,
+        "reported": [
+            {"tool": r.tool, "label": r.label, "first": r.first_seq,
+             "again": r.again_seq, "boundary": r.boundary_seq}
+            for r in work.reported
+        ],
+        "rejected": work.rejected,
+        "undecided": dict(work.undecided),
+    }
+
+
+def repeated_work_lines(work: dict[str, Any]) -> list[str]:
+    """Work repeated across a compaction boundary, as a rate rather than an anecdote.
+
+    Silent when the session never compacted: there is no denominator, so there is no rate.
+
+    What it cannot settle is on the same line as what it found, which is the point. A count of
+    repeats with "18 browser clicks could not be settled" beside it is a different claim from the
+    same count on its own, and the second one reads as completeness it does not have.
+    """
+    boundaries = int(work.get("boundaries") or 0)
+    if not boundaries:
+        return []
+    reported = list(work.get("reported") or [])
+    rejected = int(work.get("rejected") or 0)
+    undecided = dict(work.get("undecided") or {})
+    crossings = _count_phrase(boundaries, "compaction boundary", "compaction boundaries")
+    # Said as a tally of what it could settle, never as "none was found". The second reads as a
+    # completed search, and with candidates the record cannot settle there was no completed search.
+    parts = [f"{len(reported)} repeated with nothing they depend on changed"]
+    if reported:
+        named = ", ".join(str(r.get("label")) for r in reported[:3])
+        more = f" and {len(reported) - 3} more" if len(reported) > 3 else ""
+        parts[0] += f" ({named}{more})"
+    if rejected:
+        parts.append(f"{rejected} had an edit in between, so not repeated work")
+    if undecided:
+        which = ", ".join(f"{tool} ×{n}" if n > 1 else tool
+                          for tool, n in sorted(undecided.items(), key=lambda kv: (-kv[1], kv[0]))[:3])
+        parts.append(f"{sum(undecided.values())} the record cannot settle ({which})")
+    return [_end_sentence(f"Repeats across {crossings}: " + ", ".join(parts))]
+
+
+def verdict_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """One line each for the push, the latest commit and the working tree.
+
+    Separately, because a session has no single true answer. 7668d5fa pushed at 21:46 over a suite
+    that passed at 15:49 and then edited one more file at 21:47: the push was tested, the tree was
+    not, and the one-sentence version said the false half.
+
+    A `tested` line names the run and when it started -- the start, because what makes a run evidence
+    for an edit is that it began after it. A reader then checks a timestamp instead of deciding who to
+    believe.
+
+    What came after what is decided by ORDER in the record, never by the clock, exactly as
+    `stop_notice` decides it: a transcript is append-only, and its timestamps can be wrong, missing or
+    non-monotonic. `realistic-session.jsonl` is non-monotonic -- an edit stamped 11:05 is followed in
+    record order by passing runs stamped 10:10 and 10:11 -- so its report shows evidence whose clock
+    reads earlier than the edit it covers. The verdict is right and the fixture's clock is not. Do not
+    tidy the fixture to make this line look better; that is fitting the record to the tool.
+    """
+    out: list[str] = []
+    for row in rows:
+        what = str(row.get("what") or "")
+        state = str(row.get("state") or "")
+        when = _clock(row.get("at"))
+        edits = list(row.get("edits") or [])
+        evidence = str(row.get("evidence") or "")
+        head = f"{what} ({when})" if when else what
+        if state == "unchanged":
+            continue  # nothing was edited: a verdict here would be reassurance, not a finding
+        if state == "tested":
+            out.append(f"{head}: tested" + (f" — {evidence}" if evidence else ""))
+            continue
+        since = _count_phrase(len(edits), "edit", "edits")
+        said = "untested" if state == "untested" else "unconfirmed"
+        line = f"{head}: {since} since, {said}"
+        # The last thing known to have passed, even here: it bounds when the gap began.
+        out.append(line + (f" (last passing run: {evidence})" if evidence else ""))
+    return out
+
+
 def _after_last_edit_line(after: dict[str, Any]) -> str:
     when = _clock(after.get("at"))
     prefix = f"After the last edit ({when}):" if when else "After the last edit:"
@@ -1010,7 +1165,9 @@ def _after_last_edit_line(after: dict[str, Any]) -> str:
         which = _unclassified_breakdown(after.get("unclassified_by_command") or {})
         which = f" ({which})" if which else ""
         ran = _count_phrase(unclassified, "unclassified command", "unclassified commands")
-        return f"{prefix} no test or check it recognises; {ran} ran after it{which}"
+        # Unconfirmed, not absent: one of those commands may be the project's own test. The gate
+        # still fails -- unknown is not passed -- but the sentence no longer denies the run.
+        return f"{prefix} whether a test or check ran is unconfirmed; {ran} ran after it{which}"
     labels = list(after.get("test_labels") or [])
     test_bit = _count_phrase(tests, "test run", "test runs")
     if labels:

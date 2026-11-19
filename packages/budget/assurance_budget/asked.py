@@ -27,6 +27,7 @@ from assurance_budget.sessions import (
     _path_inside_cwd,
     _truncate_label,
     display_path,
+    shell_segments,
     split_shell_segments,
     strip_heredoc_bodies,
 )
@@ -250,7 +251,7 @@ def names_cover(named: str, path: str) -> bool:
 def _verifications(line: str, declared: Declared | None) -> list[tuple[str, tuple[str, ...]]]:
     """The test and check parts of a command a prompt names, as (label, argv to match)."""
     try:
-        segments = split_shell_segments(strip_heredoc_bodies(line))
+        segments = shell_segments(line)
     except ValueError:
         return []
     found = []
