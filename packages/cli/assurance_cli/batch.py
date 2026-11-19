@@ -36,11 +36,17 @@ order is not guaranteed and tell you to join on `custom_id`; AWS's page says not
 all and names `recordId` as the only correlation. Zipping two files by line number is therefore
 documented-wrong on two providers and merely unsupported on the third.
 
-**Nothing derived from a reply is kept in a form that reconstructs any of it.** `output_tokens`,
-`reply_sha16` (a 16-character prefix of a digest), `parsed_items` and `repeat_ratio` are numbers and
-a hash; the text they were computed from is never written, printed or returned. That is the same
-rule as `process_attribution` matching `ps -o comm=` and never a command line. A provider's error
-object is reduced to its code for the same reason, since an error message can quote the request.
+**The reply text is never written, printed or returned**, and what is kept of it is
+`output_tokens`, `parsed_items`, `repeat_ratio` and `reply_sha16` -- a 16-character digest salted
+with a secret the workspace holds. The salt is what makes that digest safe to put in a file built to
+travel: unsalted, a digest of a reply is the reply whenever the reply space is small, and for a
+classifier it is one of a handful of labels. Measured on this code before the salt: `denied` out of
+fourteen labels recovered in 4 microseconds, a bounded risk-and-score verdict out of thirty-three in
+60. Salted, the digest still counts distinct replies and cannot be enumerated by anyone without the
+salt. With no salt set it is written unsalted, and the command says so rather than implying
+otherwise. That is the same rule as `process_attribution` matching `ps -o comm=` and never a command
+line. A provider's error object is reduced to its code for the same reason, since an error message
+can quote the request.
 
 **What *is* kept is the record key, verbatim, and that is worth saying rather than leaving to be
 inferred.** Per-key coverage is the feature and "person 2210 came back empty" cannot be said without
@@ -61,8 +67,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import secrets
 import sys
+from contextlib import suppress
 from collections import Counter
 from dataclasses import dataclass, replace
 from itertools import chain
@@ -122,13 +131,85 @@ def _keys(count: int) -> str:
     return f"{count} key" if count == 1 else f"{count} keys"
 
 
+#: Where the workspace's salt lives: its own file beside the user config, holding nothing else.
+#:
+#: Not inside `config.toml`, and the reason is a package boundary rather than taste. `assurance-cli`
+#: depends on `assurance-core` and not on `assurance-budget`, so `assurance_budget.config` is
+#: unreachable from here, and the CI matrix tests 3.10 where `tomllib` does not exist -- which is why
+#: budget carries its own TOML subset. A file of its own also keeps a secret out of a config people
+#: paste into issues. The DIRECTORY is the one the user config lives in, so the user-level-not-
+#: project-level reasoning holds exactly: it is outside the repository, it is not in `.gitignore`, and
+#: `load_declared` cannot set it aside for a session that edited a file.
+def _salt_path() -> Path:
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", "").strip()
+        root = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        return root / "assurance" / "batch-salt"
+    return Path.home() / ".config" / "assurance" / "batch-salt"
+
+
+def read_salt(path: Path | None = None) -> str:
+    """The workspace's salt, or "" when none is set. Never raises: an unreadable salt is no salt."""
+    where = path or _salt_path()
+    try:
+        return where.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def new_salt(path: Path | None = None) -> tuple[Path, str]:
+    """Generate a salt, persist it, and return where it went and what it is.
+
+    Printed once so it can be shared with whoever shares the rollup. That sharing is deliberately
+    manual: a salt generated per machine would give two members of one team different digests, their
+    files would never join, and a team rollup would count the same record twice or not at all --
+    while every individual run still looked correct.
+    """
+    where = path or _salt_path()
+    where.parent.mkdir(parents=True, exist_ok=True)
+    value = secrets.token_hex(32)
+    where.write_text(value + "\n", encoding="utf-8")
+    with suppress(OSError):  # best effort: a mode this narrow is not available everywhere
+        where.chmod(0o600)
+    return where, value
+
+
+def salt_id(salt: str) -> str:
+    """A short public name for a salt, or "" when there is none.
+
+    Written into the artifacts so a join across two files made under different salts fails loudly
+    instead of returning zero matches. The salt itself never leaves the machine; this is a digest of
+    it, and it identifies which salt was used without being usable to reverse anything.
+    """
+    return hashlib.sha256(salt.encode("utf-8", "replace")).hexdigest()[:8] if salt else ""
+
+
+def _salted(value: str, salt: str) -> str:
+    """`value` under the salt, or unchanged when there is none.
+
+    Applied to a key and to an already-computed reply digest alike, at the moment of writing rather
+    than the moment of reading. Salting a digest rather than the text it came from is equally
+    unenumerable -- a candidate cannot be tested without the salt either way -- and it keeps the
+    in-run fingerprint that `drift` counts on untouched.
+    """
+    if not salt:
+        return value
+    return hashlib.sha256(
+        salt.encode("utf-8", "replace") + b"\x00" + value.encode("utf-8", "replace")
+    ).hexdigest()[:16]
+
+
 def _key_digest(key: str) -> str:
     """A record key as a stable 16-character digest, for `--hash-keys`.
 
     Stable across jobs and across days on purpose: the same key hashes the same way everywhere, so
-    coverage, lineage and a rollup across stages all still work on the digest. It is not a secret —
-    a caller who knows a key can confirm it is present — it keeps a natural key out of an artifact
-    built to be passed around.
+    coverage, lineage and a rollup across stages all still work on the digest.
+
+    This function is the inner half. On its own it is REVERSIBLE for a predictable key space, which
+    most record keys are -- `person-1042` was recovered from its digest in 1,043 candidates in half a
+    millisecond, and sequential ids, order numbers and addresses off a known domain all enumerate the
+    same way. `_salted` is what closes that, and `record_lines` applies it. Do not use this one bare
+    in anything written to a file.
     """
     return hashlib.sha256(key.encode("utf-8", "replace")).hexdigest()[:16]
 
@@ -950,7 +1031,7 @@ def format_job(report: Mapping[str, Any]) -> str:
 
 
 def run_record_lines(report: Mapping[str, Any], reads: Sequence[Read], run: str, claim: str = "",
-                     *, hash_keys: bool = False) -> list[str]:
+                     *, hash_keys: bool = False, salt: str = "") -> list[str]:
     """The job as `assurance.run/1` lines: one `model` line per record, one `outcome` line per check,
     and the caller's own claim if they gave one.
 
@@ -974,8 +1055,9 @@ def run_record_lines(report: Mapping[str, Any], reads: Sequence[Read], run: str,
             "provider": provider, "model": read.shape,
             "input_tokens": read.input_tokens, "output_tokens": read.output_tokens,
             "stop": read.stop, "error": read.error,
-            "record": _key_digest(read.key) if hash_keys else read.key, "state": read.state,
-            "reply_sha16": read.reply_sha16,
+            "record": _salted(_key_digest(read.key), salt) if hash_keys else read.key,
+            "state": read.state, "salt_id": salt_id(salt),
+            "reply_sha16": _salted(read.reply_sha16, salt),
             "parsed_items": read.parsed_items, "repeat_ratio": read.repeat_ratio,
         }))
     # Check C again, because this is the surface furthest from the reader: an audit of these lines
@@ -998,7 +1080,7 @@ def run_record_lines(report: Mapping[str, Any], reads: Sequence[Read], run: str,
     return lines
 
 
-def record_lines(reads: Sequence[Read], *, hash_keys: bool = False) -> list[str]:
+def record_lines(reads: Sequence[Read], *, hash_keys: bool = False, salt: str = "") -> list[str]:
     """One JSONL line per record and nothing else: the input `assurance drift` reads.
 
     Separate from `--run-record` on purpose, and the reason is arithmetic rather than taste.
@@ -1010,10 +1092,14 @@ def record_lines(reads: Sequence[Read], *, hash_keys: bool = False) -> list[str]
     Concatenate these across jobs to drift a rate over a run: one line stays one record.
     """
     return [json.dumps({
-        "record": _key_digest(read.key) if hash_keys else read.key,
+        "record": _salted(_key_digest(read.key), salt) if hash_keys else read.key,
         "state": read.state, "shape": read.shape, "stop": read.stop,
         "output_tokens": read.output_tokens, "input_tokens": read.input_tokens,
-        "reply_sha16": read.reply_sha16, "parsed_items": read.parsed_items,
+        # Salted on every line, flag or no flag: for a classifier the reply space is a handful of
+        # labels, so an unsalted digest of it is the label. `salt_id` names which salt, so a join
+        # across two files made under different salts fails loudly rather than matching nothing.
+        "reply_sha16": _salted(read.reply_sha16, salt), "salt_id": salt_id(salt),
+        "parsed_items": read.parsed_items,
         "repeat_ratio": read.repeat_ratio, "error": read.error,
     }) for read in reads]
 
@@ -1057,8 +1143,10 @@ def _parser() -> argparse.ArgumentParser:
             "truncated, empty, unreadable. No model, no network; the reply's text is never kept."
         ),
     )
-    parser.add_argument("sent", help="The input JSONL that went up — what makes coverage answerable")
-    parser.add_argument("output", help="The output JSONL that came back")
+    # Both optional so `--new-salt` can run with no files at all; required explicitly below, so
+    # the message for a missing one still says which is missing.
+    parser.add_argument("sent", nargs="?", help="The input JSONL that went up — what makes coverage answerable")
+    parser.add_argument("output", nargs="?", help="The output JSONL that came back")
     parser.add_argument("--provider", choices=sorted(_READERS), help="Default: read it from the keys in the file")
     parser.add_argument("--error-file", help="OpenAI only: the batch's error file, which holds the failures")
     parser.add_argument("--manifest", help="Bedrock only: manifest.json.out, to check the provider's own counts")
@@ -1086,6 +1174,12 @@ def _parser() -> argparse.ArgumentParser:
               "for when your keys are natural ones and those files get shared. Coverage and "
               "lineage still work; the report you read keeps the real keys"),
     )
+    parser.add_argument(
+        "--new-salt", action="store_true",
+        help=("Generate this workspace's salt, store it outside any repository, and print it once so "
+              "whoever shares the rollup can use the same one. Without a salt the digests written "
+              "are reversible for a predictable key or reply space"),
+    )
     parser.add_argument("--run", help="The run id those lines carry. Default: the output file's name")
     parser.add_argument("--claim", default="", help="What the pipeline says it achieved, for --fail-on-claim")
     parser.add_argument(
@@ -1106,7 +1200,24 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """`assurance batch` — read a batch job's output and say what came back."""
-    args = _parser().parse_args(list(argv) if argv is not None else None)
+    parser = _parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    if args.new_salt:
+        if args.sent or args.output:
+            parser.error("--new-salt sets this workspace's salt; leave out the files")
+        where, value = new_salt()
+        print(f"Salt written to {where}")
+        print(f"  {value}")
+        print("Everyone who shares a rollup needs this same salt in that file. Digests made under "
+              "different salts do not join, and each line records which salt it used.")
+        return EXIT_OK
+
+    missing = [name for name, value in (("sent", args.sent), ("output", args.output)) if not value]
+    if missing:
+        parser.error(f"missing: {' and '.join(missing)}. Usage: assurance batch SENT OUTPUT")
+
+    salt = read_salt()
     declared = Declared(
         token_floor=args.token_floor,
         item_pattern=args.item_pattern,
@@ -1152,13 +1263,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         run = args.run or Path(args.output).name
         written = _write(args.run_record,
                          run_record_lines(report, job.records, run, args.claim,
-                                          hash_keys=args.hash_keys))
+                                          hash_keys=args.hash_keys, salt=salt))
         if written is not None:
             return written
     if args.records:
-        written = _write(args.records, record_lines(job.records, hash_keys=args.hash_keys))
+        written = _write(args.records, record_lines(job.records, hash_keys=args.hash_keys, salt=salt))
         if written is not None:
             return written
+
+    if not salt and (args.records or args.run_record):
+        # Said because it is true, not to be safe: a digest of one of fourteen classifier labels is
+        # the label, recoverable in microseconds. On stderr so `--json` stays parseable.
+        print(
+            "assurance batch: no salt is set, so the digests written are reversible for a "
+            "predictable key or reply space -- a label from a short list, a sequential id. "
+            "`assurance batch --new-salt` sets one.",
+            file=sys.stderr,
+        )
 
     return _exit_code(args, report)
 

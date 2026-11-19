@@ -29,11 +29,16 @@ from assurance_cli.batch import (
     STATES,
     BatchError,
     Declared,
+    _key_digest,
+    _salted,
     detect_provider,
     main,
+    new_salt,
     read_job,
+    read_salt,
     record_lines,
     run_record_lines,
+    salt_id,
 )
 
 
@@ -598,7 +603,28 @@ def test_nothing_derived_from_a_reply_can_reconstruct_any_of_it(tmp_path: Path) 
         run_record_lines(job.report, job.records, "day0", "done"))
     for fragment in (secret, "CANARY", "REPLY-BODY", "7f3a"):
         assert fragment not in everywhere, f"{fragment!r} survived into the output"
-    assert job.records[0].reply_sha16 and len(job.records[0].reply_sha16) == 16
+    # What used to stand here was `reply_sha16 and len(reply_sha16) == 16`, and it is the reason this
+    # shipped reversible for five commits: a width-and-alphabet assertion passes identically over a
+    # digest you can enumerate and one you cannot. The property is enumerability, so assert that --
+    # on the value that gets WRITTEN, under a salt. The in-memory `reply_sha16` is unsalted on
+    # purpose: it is the fingerprint `drift` counts within one run and it never leaves the process.
+    # Written under the workspace's salt; enumerated by someone who has the file and NOT the salt,
+    # which is the only threat model that matters. Handing the attacker the salt makes the digest
+    # recoverable by construction and proves nothing -- I wrote that assertion twice before noticing.
+    written = json.loads(record_lines(job.records, salt="workspace-secret")[0])
+    assert not _recovers(written["reply_sha16"], [secret, "CANARY", secret.lower()], salt="")
+
+
+def _recovers(digest: str, candidates: list[str], salt: str = "") -> str | None:
+    """The candidate whose salted digest matches, or None. The attack, written as a function.
+
+    This is the shape of the whole finding: whoever holds a digest and guesses the FORMAT of what
+    went in recovers the value, and for a classifier the format is a list of a dozen labels.
+    """
+    for candidate in candidates:
+        if _salted(_key_digest(candidate), salt) == digest or _salted(candidate, salt) == digest:
+            return candidate
+    return None
 
 
 def test_a_stop_reason_this_does_not_classify_is_named_rather_than_normalised(tmp_path: Path) -> None:
@@ -921,3 +947,136 @@ def test_a_hashed_key_is_the_same_digest_in_every_job(tmp_path: Path) -> None:
     # comparison passes while a real rollup across days -- different processes -- joins nothing. A
     # literal catches a salt of any scope: per call, per process, per machine.
     assert digests[0] == "3436226265916340", "the digest of 'person-1042' moved"
+
+
+# --- the salt, against the criteria agreed before the work -----------------------------------------
+#
+# `--hash-keys` shipped with `sha256(key)[:16]`, unsalted, under a docstring saying the digest was
+# "not a secret -- a caller who knows a key can confirm it is present". It was not confirmable, it was
+# REVERSIBLE: `person-1042` came back from its digest in 1,043 candidates in half a millisecond. And
+# `reply_sha16` was worse, because it is written with no flag at all: for a classifier the reply space
+# is a dozen labels, and `denied` came back in 4 microseconds.
+#
+# None of it reached a release, which is the only reason this is a design note and not a disclosure.
+
+
+def _digest_in_a_separate_process(salt_file: Path, key: str) -> str:
+    """Run the digest in a child process, reading the salt from the file as the real command does."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; from pathlib import Path\n"
+        "import assurance_cli.batch as B\n"
+        f"B._salt_path = lambda: Path({str(salt_file)!r})\n"
+        f"print(B._salted(B._key_digest({key!r}), B.read_salt()))\n"
+    )
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+def test_the_same_key_and_salt_digest_the_same_in_two_separate_processes(tmp_path: Path) -> None:
+    """Criterion 1, and two processes rather than two jobs is the whole point.
+
+    The test this replaces compared two jobs inside ONE process, so a per-process salt produced
+    identical digests and it passed while a real rollup across days -- different processes -- would
+    have joined nothing. A salt read from a file is only stable if it is read from a file twice.
+    """
+    salt_file = tmp_path / "batch-salt"
+    salt_file.write_text("a-workspace-secret\n", encoding="utf-8")
+    first = _digest_in_a_separate_process(salt_file, "person-1042")
+    second = _digest_in_a_separate_process(salt_file, "person-1042")
+    assert first == second and re.fullmatch(r"[0-9a-f]{16}", first), first
+    # And it is not the unsalted digest, or the salt is being read and ignored.
+    assert first != _key_digest("person-1042")
+
+
+def test_a_different_salt_gives_a_different_digest(tmp_path: Path) -> None:
+    """Criterion 2. Without this, a salt that was read and discarded would satisfy criterion 1."""
+    one, two = tmp_path / "one", tmp_path / "two"
+    one.write_text("salt-one\n", encoding="utf-8")
+    two.write_text("salt-two\n", encoding="utf-8")
+    assert (_digest_in_a_separate_process(one, "person-1042")
+            != _digest_in_a_separate_process(two, "person-1042"))
+
+
+def test_with_no_salt_it_works_and_says_the_digests_are_reversible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Criterion 3. It works today and people use it, so an unsalted run is not refused -- it is
+    reported. Saying what was not checked is this project's own rule applied to itself."""
+    import assurance_cli.batch as batch_module
+
+    monkeypatch.setattr(batch_module, "_salt_path", lambda: tmp_path / "absent")
+    sent = _jsonl(tmp_path / "sent.jsonl", [{"recordId": "person-1042"}])
+    out = _jsonl(tmp_path / "out.jsonl",
+                 [{"recordId": "person-1042", "modelOutput": _converse("a full day")}])
+    records = tmp_path / "rec.jsonl"
+    assert main([str(sent), str(out), "--token-floor", "10", "--hash-keys",
+                 "--records", str(records)]) == 0
+    said = capsys.readouterr()
+    assert "no salt is set" in said.err and "reversible" in said.err
+    assert "--new-salt" in said.err, "it has to name the command, not just the problem"
+    # It still did the job, and the digest is the unsalted one, which the message now admits.
+    written = json.loads(records.read_text(encoding="utf-8").strip())
+    assert written["record"] == _key_digest("person-1042")
+    assert written["salt_id"] == "", "no salt means no salt id, not a fake one"
+
+
+def test_the_salt_never_appears_in_any_artifact(tmp_path: Path) -> None:
+    """Criterion 4. Every output, not only the records file: the report, the JSON, the run record.
+
+    The salt id does travel, and must -- it is a digest of the salt, and it makes a join across two
+    differently salted artifacts fail loudly instead of returning zero matches.
+    """
+    salt = "s3cret-workspace-salt-value"
+    sent = _jsonl(tmp_path / "sent.jsonl", [{"recordId": "person-1042"}])
+    out = _jsonl(tmp_path / "out.jsonl",
+                 [{"recordId": "person-1042", "modelOutput": _converse("denied")}])
+    job = read_job(out, sent, declared=Declared(token_floor=1))
+
+    everywhere = (
+        json.dumps(job.report)
+        + "".join(record_lines(job.records, hash_keys=True, salt=salt))
+        + "".join(run_record_lines(job.report, job.records, "day0", "done",
+                                   hash_keys=True, salt=salt))
+    )
+    assert salt not in everywhere, "the salt reached an artifact"
+    sid = salt_id(salt)
+    # Checked non-empty first, and that is not belt-and-braces: `"" in anything` is True, so
+    # `salt_id(salt) in everywhere` passed on its own even with `salt_id` stubbed to return "".
+    # The counterfactual caught it -- an assertion that cannot fail is the thing this file is about.
+    assert sid, "a salt must have an id, or the next assertion is vacuous"
+    assert sid in everywhere, "the salt id has to travel, or a cross-salt join is silent"
+    assert sid != salt
+
+
+@pytest.mark.parametrize(
+    "space,secret,why",
+    [
+        ([f"person-{i}" for i in range(2001)], "person-1042", "a sequential key space"),
+        (["approved", "denied", "refer", "yes", "no", "positive", "negative", "neutral",
+          "spam", "fraud", "legitimate", "low", "medium", "high"], "denied",
+         "a classifier's label space, which is the 4-microsecond case"),
+    ],
+    ids=["predictable-keys", "classifier-labels"],
+)
+def test_an_unsalted_digest_is_enumerable_and_a_salted_one_is_not(
+    space: list[str], secret: str, why: str
+) -> None:
+    """Criterion 6, and it is the test whose absence let this ship.
+
+    Both directions in one test on purpose. The unsalted half asserts the original IS recovered --
+    without it, a silently empty salt would make the salted half pass and the suite would report
+    safety it does not have. The salted half asserts it is NOT, enumerated by someone holding the
+    artifact and not the salt.
+
+    The property is stated in the language of the attack rather than of the implementation: a width
+    assertion, which is what stood here, passes identically over a digest you can enumerate and one
+    you cannot.
+    """
+    unsalted = _salted(_key_digest(secret), "")
+    assert _recovers(unsalted, space, salt="") == secret, f"the attack does not work on {why}"
+
+    salted = _salted(_key_digest(secret), "a-workspace-secret")
+    assert _recovers(salted, space, salt="") is None, f"salted digest still enumerable for {why}"

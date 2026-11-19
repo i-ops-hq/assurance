@@ -39,11 +39,17 @@ def _forbidden_writes(path: Path, tree: ast.AST) -> list[str]:
 
 
 def test_batch_writes_only_through_one_helper():
-    """`batch.py` may write, so there is one place that does it and this is the gate on that.
+    """`batch.py` may write, so the places that do are named here and nowhere else is allowed.
 
     Scattered writes are what the module list used to prevent for free. With `batch.py` on the list
     its own writes are no longer checked by anything, unless something checks that they all go
-    through `_write`, whose two callers are the two flags that name a path.
+    through a known few.
+
+    `_write` is the artifact path: its two callers are the two flags that name a path, and it honours
+    `-` for stdout. `new_salt` is the one exception, and it is a different kind of write -- a secret,
+    to a path the user never names, outside any repository, created `0600`, once. Routing it through
+    `_write` would mean a mode that helper does not set and a `-` that would print the salt to
+    stdout. The allowlist is exact rather than a prefix, so a THIRD write path still fails here.
     """
     tree = ast.parse((PACKAGE / "batch.py").read_text(encoding="utf-8"))
     inside: list[str] = []
@@ -54,7 +60,9 @@ def test_batch_writes_only_through_one_helper():
             if (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)
                     and inner.func.attr in {"write_text", "write_bytes"}):
                 inside.append(node.name)
-    assert inside == ["_write"], f"batch.py writes from {inside or 'nowhere'}, not only from _write"
+    assert sorted(inside) == ["_write", "new_salt"], (
+        f"batch.py writes from {sorted(inside) or 'nowhere'}; only _write and new_salt may"
+    )
 
 
 def test_baseline_write_counterfactual():
