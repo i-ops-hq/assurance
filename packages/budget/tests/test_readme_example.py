@@ -157,4 +157,5 @@ def test_the_readme_hook_lines_are_what_the_hook_says(tmp_path: Path, monkeypatc
     ]
     block = re.search(r"\n(assurance · note: .*?)\n```", README.read_text(encoding="utf-8"), re.S)
     assert block, "the README no longer shows the hook's three levels"
-    assert block.group(1).splitlines() == said
+    # Joined, not compared line by line: each notice is several lines now -- finding, evidence, fix.
+    assert block.group(1) == "\n".join(said)

@@ -31,7 +31,7 @@ import shlex
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from assurance_budget.asked import NamedCommand, includes, names_cover, names_in, pattern_covers
 from assurance_budget.sessions import (
@@ -65,6 +65,7 @@ from assurance_budget.sessions import (
     outcome_of_test_run,
     runs_elsewhere,
     shell_command,
+    shell_segments,
     split_shell_segments,
     strip_heredoc_bodies,
     tree_rewrites,
@@ -118,6 +119,10 @@ class Notice:
     consequence: str = ""
     """What the change reaches and who owns it (`assurance_budget.consequence`), said after the finding
     and kept out of what says whether it was said before: a graph rebuilt is not a new finding."""
+    fix: str = ""
+    """What the person should run, said to them on its own line. Separate from `finding` because a
+    finding and an instruction are different sentences, and running them together is how an 80-word
+    paragraph carrying paths, times, counts and config advice came to be skimmed past."""
     once_per_stretch: bool = False
     """A note raised to a suggested review by what the change reaches: still said once per stretch of
     untested edits, as a note is."""
@@ -204,6 +209,104 @@ class _Asked:
             )
             self._covers[path] = any(names_cover(name, path) for name in named)
         return self._covers[path]
+
+
+#: The count a runner printed, for evidence. A reader checking a verdict wants the number, not a
+#: reassurance that a number existed.
+_PASSED_COUNT = re.compile(r"\b(\d+ (?:passed|passing))\b")
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """What is known about one thing that could have been tested, with the evidence behind it.
+
+    `state` is `tested`, `untested`, `unconfirmed` or `unchanged`. `evidence` names the run and when
+    it ran, so a disagreement is settled by looking at a timestamp instead of deciding who to
+    believe -- which is the whole of why this type carries it.
+    """
+
+    what: str
+    at: float | None
+    state: str
+    evidence: str = ""
+    edits: tuple[str, ...] = ()
+
+
+def verdicts(session: Session, declared: Declared | None = None) -> list[Verdict]:
+    """The push, the latest commit and the working tree, judged separately.
+
+    One verdict over a whole session answers the wrong question, and session 7668d5fa is the proof.
+    The suite passed at 15:49, the push went at 21:46, and one more file was edited at 21:47. There
+    is no single true sentence about that: the push WAS tested and the working tree was NOT. Asked as
+    one question it came out as "pushed at 21:46 with no passing test", which is false about the push
+    and true about the tree -- and the false half is the half that was said.
+
+    Each is judged at its own moment, against the edits outstanding then, with the last passing run
+    before it as its evidence. A thing that never happened gets no verdict rather than a reassuring
+    one.
+    """
+    calls = session.tool_calls
+    pending = _Edits()
+    last_pass: _Run | None = None
+    shipped: dict[str, tuple[str, float | None, tuple[str, ...], _Run | None, int]] = {}
+    edited_at_all = False
+
+    for i, call in enumerate(calls):
+        if call.refused:
+            continue
+        edited = None if call.error else _code_edit(call, session.cwd)
+        if edited is not None:
+            pending.add(edited, call.at, i, call.seq)
+            edited_at_all = True
+            continue
+        command = shell_command(call) if call.name in _SHELL_TOOLS else None
+        if command is None:
+            continue
+        run = _verification(call, command, declared, session.cwd)
+        if run is not None and not run.elsewhere and run.outcome == "passed" and run.noun != "scan":
+            # A scan checks something other than the code edited, so its passing verifies no edit.
+            pending = _Edits()
+            last_pass = run
+        what = None if call.error else ship_action(command, call.branch, session.cwd, call.cwd)
+        if not what:
+            continue
+        key = "commit" if what.startswith(("committed", "merged")) else "push"
+        shipped[key] = (what, call.at, tuple(pending.paths), last_pass, pending.last_i)
+
+    out: list[Verdict] = []
+    for key, label in (("push", "Push"), ("commit", "Latest commit")):
+        if key not in shipped:
+            continue  # it never happened: silence, not a verdict
+        what, at, edits, evidence, last_i = shipped[key]
+        unreadable = _unclassified_counts(calls[last_i + 1 :], declared) if edits else ()
+        out.append(Verdict(label, at, _state(edits, dict(unreadable)), _evidence(evidence), edits))
+    tree_edits = tuple(pending.paths)
+    unreadable = _unclassified_counts(calls[pending.last_i + 1 :], declared) if tree_edits else ()
+    out.append(Verdict(
+        "Working tree",
+        pending.last_at,
+        "unchanged" if not edited_at_all else _state(tree_edits, dict(unreadable)),
+        _evidence(last_pass),
+        tree_edits,
+    ))
+    return out
+
+
+def _state(edits: tuple[str, ...], unreadable: Mapping[str, int]) -> str:
+    """Nothing outstanding is tested; otherwise unconfirmed when a command after the edit could not be
+    read, and untested when the record is complete and simply holds no run."""
+    if not edits:
+        return "tested"
+    return "unconfirmed" if unreadable else "untested"
+
+
+def _evidence(run: _Run | None) -> str:
+    if run is None:
+        return ""
+    count = _PASSED_COUNT.search(run.tail)
+    parts = [run.label] + ([count.group(1)] if count else [])
+    when = _clock(run.at)
+    return ", ".join(parts + ([when] if when else []))
 
 
 def stop_notice(session: Session, declared: Declared | None = None, *, set_aside: bool = False) -> Notice | None:
@@ -336,6 +439,40 @@ def stop_notice(session: Session, declared: Declared | None = None, *, set_aside
     )
 
 
+#: How to say that nothing is known to have passed, in the three frames the sentence appears in.
+#: `since` is the note, `ship` the push or commit, `ran` the claim the report holds against a message.
+_PASSED_FRAMES = {
+    "since": ("no test or check has passed since {edits}",
+              "whether a test or check has passed since {edits} is unconfirmed"),
+    "ship": ("with no passing test or check after {edits}",
+             "and whether a test or check passed after {edits} is unconfirmed"),
+    "ran": ("no test or check ran after {edits}",
+            "whether a test or check ran after {edits} is unconfirmed"),
+}
+
+
+def _passed_phrase(frame: str, edits: str, unreadable: Mapping[str, int]) -> str:
+    """Two different claims, and keeping them apart is the whole of this change.
+
+    With nothing unreadable after the edit, the record is complete and the strong negative is true:
+    no test passed. With commands it could not classify after the edit, one of them may have been the
+    project's own test, so the only honest claim is that it is unconfirmed.
+
+    This is our own defect class inverted. A check that was not run is reported as unchecked, never as
+    passed; a check that could not be CLASSIFIED must not be reported as ABSENT. Session 7668d5fa
+    shipping 0.1.37 is what this cost: the hook said "pushed at 21:46 with no passing test or check it
+    recognises" over a suite that had passed at 15:49, and named `$PY` among the five commands it could
+    not read in the very next sentence. It had the evidence that it might be wrong and still chose the
+    strongest possible negative.
+
+    The old wording hedged with " it recognises", which qualifies the recognising and leaves the
+    denial standing. A reader takes "no passing test or check it recognises" as "nothing tested this",
+    because that is what it says.
+    """
+    confirmed, unconfirmed = _PASSED_FRAMES[frame]
+    return (unconfirmed if unreadable else confirmed).format(edits=edits)
+
+
 def _said_before(session: Session, level: str, finding: str) -> bool:
     """Whether this finding was said in an earlier turn, as the hook decides it (`run_hook`): then it
     is not said again, and what it reaches need not be read."""
@@ -409,8 +546,7 @@ def _note(
         finding = f"{last.label}, the last {last.noun} after {edits}, ran no tests"
     else:
         unclassified = dict(_unclassified_counts(session.tool_calls[pending.last_i + 1 :], declared))
-        recognised = " it recognises" if unclassified else ""
-        finding = f"no test or check{recognised} has passed since {edits}"
+        finding = _passed_phrase("since", edits, unclassified)
     reached = _reaches(session, rules, list(pending.paths))
     if reached is not None and reached.reaches_only_itself():
         return None  # nothing else depends on it, by the graph: not worth a sentence
@@ -425,8 +561,27 @@ def _note(
     if reached is not None and reached.raises():
         # It reaches a protected path, or code someone else owns: worth asking Claude, not only you.
         ask = f"Run {run} for what you changed, or say plainly why they cannot run here."
-        return Notice(SUGGESTED_REVIEW, f"{finding}. Run {run}{NOTE_TAIL}", ask, unclassified, once_per_stretch=True)
-    return Notice(NOTE, f"{finding}. Run {run}{NOTE_TAIL}", "", unclassified)
+        return Notice(SUGGESTED_REVIEW, finding, ask, unclassified,
+                      fix=f"Run {run}{NOTE_TAIL}.", once_per_stretch=True)
+    # The `note` stays. The argument for removing it is recorded here because last time it lived only
+    # in a commit message -- 8218cf2 -- and came back a fortnight later with neither of us able to find
+    # it. That commit proposed demoting this level rather than rewording it, on two grounds: it is the
+    # one level with no agent claim to contradict, so "it is only ever 'you changed code and nothing
+    # tested it'", and `assurance notices` measured it at 0 of 2 followed. Declined by Ashwinth on
+    # 2026-11-18, by which point both grounds had gone.
+    #
+    # The 0 of 2 was two findings on a single day, one of them in a scratchpad trial folder that
+    # exists because I made a fixture there -- so it was 0 of 1 real datum. The level now runs at 5 of
+    # 11, level with `suggested review` at 6 of 10 and above `stop and check` at 7 of 19. And the
+    # quoted sentence is not what four of those eleven said: those reported that a test DID run and a
+    # pipe destroyed its result, which is a different finding wearing this level's clothes. At n=11
+    # none of the rate differences is significant; what they do establish is that the number the
+    # demotion rested on was made of my own measurements of the tool.
+    #
+    # Left open on purpose: `ask` is "" here, so Claude is told nothing at all, and the piped-result
+    # case is the one where that ask would be a single concrete sentence. Giving it one would be a
+    # promotion of a sub-case, not a demotion of the level, and it has not been decided.
+    return Notice(NOTE, finding, "", unclassified, fix=f"Run {run}{NOTE_TAIL}.")
 
 
 #: What a test run prints when its command was never there to run: naming it again would not help.
@@ -483,8 +638,7 @@ def _ship_reasons(
     elif pending.paths and runs and runs[-1].outcome == "empty":
         reasons.append(_Finding(pending.last_seq, f"while {runs[-1].label}, the last {runs[-1].noun} after {edit}, ran no tests", _ASK_VERIFY))
     elif pending.paths:
-        recognised = " it recognises" if between else ""
-        why = f"with no passing test or check{recognised} after {_edits(tuple(pending.paths), pending.last_at)}"
+        why = _passed_phrase("ship", _edits(tuple(pending.paths), pending.last_at), between)
         reasons.append(_Finding(pending.last_seq, why, _ASK_VERIFY, between))
     for entry, run in required:
         if run is None:
@@ -553,8 +707,7 @@ def _claim(
             "pipefail`) so the result can be seen, or correct what you said."
         )
     else:
-        recognised = " it recognises" if after else ""
-        why = f"no test or check{recognised} ran after {_edits(tuple(pending.paths), pending.last_at)}"
+        why = _passed_phrase("ran", _edits(tuple(pending.paths), pending.last_at), after)
     return _Finding(text_seq, f"{agent_actor(session.source)}'s last message says the tests pass, but {why}", ask, after)
 
 
@@ -883,7 +1036,7 @@ def _project_label(command: str, kind: str, declared: Declared | None, cwd: str,
     """`bash_label`, from the first test or check part that works on the project: in `ruff check
     /tmp/copy.py; ruff check src/a.py` the project's check is the second."""
     try:
-        segments = split_shell_segments(strip_heredoc_bodies(command))
+        segments = shell_segments(command)
     except ValueError:
         return bash_label(command, "test" if kind == "test" else "check", declared)
     place = Place(cwd, "", start)

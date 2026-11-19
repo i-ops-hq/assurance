@@ -27,16 +27,18 @@ REALISTIC = FIXTURES / "realistic-session.jsonl"
 
 # Pinned full text output of `TZ=UTC assurance audit` on the realistic fixture.
 # Regenerate with: TZ=UTC assurance audit packages/budget/tests/fixtures/realistic-session.jsonl
-EXPECTED_REALISTIC_AUDIT = """\
+EXPECTED_REALISTIC_AUDIT = """
 Claude Code session a1b2c3d4 — 1h 5 min in /workspace/demo-app
 82 tool calls, 1 failed — Bash 74, Edit 5, Read 2, Write 1
 
+  Push (10:10): tested — pytest -q, 10:10
+  Working tree: tested — pytest -q, 10:11
   After the last edit (11:05): 3 test runs (pytest -q tests/, python -m pytest tests/test_app.py -q, pytest -q), 0 checks
   The last prompt (10:00) names no file, test or command to check the outcome against.
   Not classified: 2 shell commands (python -c ×2), so whether they read, wrote or tested anything is unknown.
   This session changed .assurance/config.toml — the limits file for this project.
   Also in the transcript: 1 assistant turn, 1 user turn, 1 bookkeeping record.
-  Not read: 3 lines — type=progress 2, assistant block server_tool_use 1.\
+  Not read: 3 lines — type=progress 2, assistant block server_tool_use 1.
 """
 
 

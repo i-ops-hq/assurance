@@ -104,7 +104,7 @@ def test_declaring_is_offered_only_for_what_a_declaration_can_name() -> None:
     assert line.endswith("29 commands after the last code edit could not be classified (python - ×24, (inside $( )) ×3, python -c ×2).")
     assert "[audit]" not in line
     assert _line({"python -": 24, "graphify": 5}).endswith(
-        "(python - ×24, graphify ×5); if graphify is this project's own test or check, declare it under [audit] in "
-        ".assurance/config.toml and it will count."
+        "(python - ×24, graphify ×5); if graphify is this project's own test or check, run "
+        '`assurance audit --learn "<the command>"` and later audits will count it.'
     )
     assert "; if graphify or make is this project's own test or check" in _line({"graphify": 5, "make": 2, "uvx": 1, "python -": 9})
