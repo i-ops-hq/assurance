@@ -754,6 +754,14 @@ class Session:
     """What this tool's Stop hook showed earlier in the session, word for word, in order."""
     subagent_calls: int = 0
     """Of `tool_calls`, how many its sub-agents made: see `with_subagents`."""
+    sealed_history: int = 0
+    """Records that replaced this session's earlier turns with something nothing local can read.
+
+    Codex's compaction carries the prior history as an encrypted blob and keeps no plaintext beside
+    it, so after one the prompts that started the work are gone for every reader including this one.
+    Claude Code's compaction is additive — it writes a summary and keeps the turns — and is never
+    counted here. The distinction is the whole point: one is a fact about the harness, the other is
+    nothing at all."""
 
 
 #: `attachment` records that give the model a file's contents, so Claude Code counts it as read.
