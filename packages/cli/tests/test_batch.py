@@ -17,6 +17,7 @@ ones worth naming in the file are the two that would otherwise pass for the wron
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -912,3 +913,11 @@ def test_a_hashed_key_is_the_same_digest_in_every_job(tmp_path: Path) -> None:
         job = read_job(out, sent, declared=Declared(token_floor=10))
         digests.append(json.loads(record_lines(job.records, hash_keys=True)[0])["record"])
     assert digests[0] == digests[1] and "person" not in digests[0]
+    # The shape is pinned, not just the stability: a rollup joins on this string across stages and
+    # days, so a change of width or alphabet would silently stop every prior day's file joining.
+    assert re.fullmatch(r"[0-9a-f]{16}", digests[0]), digests[0]
+    # And the VALUE is pinned, which is what makes this test able to see a salt at all. Both "days"
+    # above run in one process, so a per-process salt produces identical digests here and the
+    # comparison passes while a real rollup across days -- different processes -- joins nothing. A
+    # literal catches a salt of any scope: per call, per process, per machine.
+    assert digests[0] == "3436226265916340", "the digest of 'person-1042' moved"
