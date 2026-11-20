@@ -29,6 +29,7 @@ from assurance_cli.batch import (
     STATES,
     BatchError,
     Declared,
+    _error_code,
     _key_digest,
     _salted,
     detect_provider,
@@ -1080,3 +1081,84 @@ def test_an_unsalted_digest_is_enumerable_and_a_salted_one_is_not(
 
     salted = _salted(_key_digest(secret), "a-workspace-secret")
     assert _recovers(salted, space, salt="") is None, f"salted digest still enumerable for {why}"
+
+
+# --- what a shareable artifact may not carry, and how a reader knows what it is holding ----------
+
+
+def test_a_provider_message_never_reaches_the_error_field() -> None:
+    """`error` is a category. A message can quote the input that caused it, so it cannot pass.
+
+    The mapping branch always honoured this. The other branch was `str(value)`, and the shape that
+    makes that more than a bare-string edge case is a LIST of error objects: a list is not a
+    Mapping, so "the providers send objects" protected nothing. Measured on 0.6.10, all three of
+    these came through byte for byte.
+    """
+    message = "failed for bob@acme.com on prompt 'Summarise the Henderson settlement'"
+    for value in (message, [message, "retry 2"], [{"message": message}], {"detail": message}):
+        got = _error_code(value)
+        assert message not in got, f"{type(value).__name__} leaked the message: {got!r}"
+        assert got == "error", f"expected the mapping branch's own fallback, got {got!r}"
+
+    # And nothing useful was lost: a bare string that really is a code still comes through.
+    for code in ("rate_limit_exceeded", "quota.exceeded", "rate-limit", "ThrottlingException"):
+        assert _error_code(code) == code, f"a real code was discarded: {code}"
+    assert _error_code({"code": "rate_limit_exceeded", "message": message}) == "rate_limit_exceeded"
+    # Bounded, because a 65-character code is a message that happens to have no spaces.
+    assert _error_code("a" * 64) == "a" * 64
+    assert _error_code("a" * 65) == "error"
+
+
+def test_every_record_line_says_what_form_its_record_key_is_in(tmp_path: Path) -> None:
+    """A reader cannot infer it, and the case that proves that is salt-without-hash-keys.
+
+    Named `record_form` and not `keys`: `report["keys"]` is already this module's key-coverage
+    summary, asserted two tests up this very file, and one word for two things is how a reader
+    starts guessing which.
+
+    There `record` is the real key and `salt_id` is non-empty anyway, so a non-empty `salt_id` has
+    never meant the keys were hashed. Anything deciding whether this file is safe to send needs the
+    file to say so.
+    """
+    sent = _jsonl(tmp_path / "sent.jsonl", [{"recordId": "person-1042"}])
+    out = _jsonl(tmp_path / "out.jsonl",
+                 [{"recordId": "person-1042", "modelOutput": _converse("a reply")}])
+    job = read_job(out, sent)
+
+    hashed = json.loads(record_lines(job.records, hash_keys=True, salt="s")[0])
+    assert "record_form" in hashed, (
+        "no line says what form its record key is in, so nothing reading this file can tell a "
+        "digest from a plaintext key -- and salt_id cannot be used to work it out"
+    )
+    assert hashed["record_form"] == "digest" and hashed["record"] != "person-1042"
+
+    raw_under_a_salt = json.loads(record_lines(job.records, hash_keys=False, salt="s")[0])
+    assert raw_under_a_salt["record"] == "person-1042", "the premise of this test has changed"
+    assert raw_under_a_salt["salt_id"], "the premise of this test has changed"
+    assert raw_under_a_salt["record_form"] == "raw", (
+        "a line with a salt id and a plaintext key called itself hashed, which is the one case "
+        "a reader cannot work out for itself"
+    )
+
+
+def test_the_records_lines_carry_the_same_run_id_as_the_run_record(tmp_path: Path) -> None:
+    """One id across both artifacts, so anything counting runs can count them.
+
+    It is the caller's `--run`, defaulting to the output file's name -- which is stable ACROSS runs,
+    so counting distinct runs needs it set per run. That is a documented default and not a bug, but
+    it is the reason this field is the caller's and not generated here.
+    """
+    sent = _jsonl(tmp_path / "sent.jsonl", [{"recordId": "r0"}])
+    out = _jsonl(tmp_path / "out.jsonl", [{"recordId": "r0", "modelOutput": _converse("a reply")}])
+    job = read_job(out, sent)
+
+    records = [json.loads(line) for line in record_lines(job.records, run="ci-8842")]
+    assert records, "no records were written, so this test would pass without checking anything"
+    assert all("run" in row for row in records), (
+        "the records lines carry no run id, so anything joining them cannot count distinct runs "
+        "and a rollup over them would report one run for every run ever made"
+    )
+    assert all(row["run"] == "ci-8842" for row in records)
+
+    run_record = [json.loads(line) for line in run_record_lines(job.report, job.records, "ci-8842")]
+    assert {row["run"] for row in run_record} == {"ci-8842"}, "the two artifacts disagree on the run"

@@ -35,7 +35,7 @@ Homepage = "https://i-ops.dev"
 Source = "https://github.com/i-ops-hq/assurance"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "mypy>=1.0", "types-openpyxl"]
+dev = ["pytest>=8.0,<9.2", "mypy>=1.0", "types-openpyxl"]
 
 [tool.mypy]
 strict = true

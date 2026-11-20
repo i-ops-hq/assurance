@@ -33,7 +33,7 @@ Source = "https://github.com/i-ops-hq/assurance"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.27.0,<3"]
-dev = ["pytest>=8.0", "mypy>=1.0", "types-openpyxl"]
+dev = ["pytest>=8.0,<9.2", "mypy>=1.0", "types-openpyxl"]
 deps = ["assurance-deps>=0.2.4"]
 
 [tool.mypy]
