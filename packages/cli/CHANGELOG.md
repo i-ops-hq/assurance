@@ -29,7 +29,11 @@
   the front door actually routes, and compared for equality in both directions, so a line naming a
   command that does not exist fails too.
 - **`pytest` is pinned below 9.2 in the dev extra.** 9.2.0 fails with an internal error on Python
-  3.10 on a test with no project code in it; 9.1.1 does not, and 9.2.0 is fine on 3.12 and 3.13.
+  **3.10.0** on a test with no project code in it; 9.1.1 does not, and 9.2.0 is fine on 3.12 and
+  3.13. Narrower than it first looked, and said plainly because the first draft of this line was
+  broader: CI's 3.10 jobs have been passing on 9.2.0 all along, on a later 3.10.x, so this was never
+  a CI failure. The pin keeps a developer on 3.10.0 exactly from losing an afternoon to it, and
+  nothing more.
 
 # 0.6.10
 
