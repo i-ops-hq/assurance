@@ -4,15 +4,21 @@ from __future__ import annotations
 
 import importlib.metadata
 
+import ast
 import csv
 import json
+import re
 import sys
 from pathlib import Path
 
 import pytest
 
+import assurance_cli.cli
 from assurance_cli.baseline import BASELINE_NAME, check_against_baseline, init_baseline
-from assurance_cli.cli import main
+from assurance_cli.cli import FORWARDED, main
+
+#: The front door's own source, read for the dispatch decisions argparse cannot be asked about.
+FORWARDED_SOURCE = assurance_cli.cli.__file__
 from assurance_cli.gather import check_coverage
 from assurance_cli.paths import PathEscapeError, resolve_inside
 
@@ -837,12 +843,84 @@ def test_a_missing_sibling_says_how_to_install_it(monkeypatch, capsys) -> None:
     assert "pip install assurance-budget" in capsys.readouterr().err
 
 
-def test_help_lists_every_forwarded_command(capsys) -> None:
+def _advertised_commands(capsys) -> list[str]:
+    """The commands `assurance --help` offers, read out of argparse's own choices block.
+
+    Whitespace is allowed inside the braces because argparse wraps that block on a narrow
+    console, which is a real width for `cmd.exe` and the thing #161 was about.
+    """
     with pytest.raises(SystemExit):
         main(["--help"])
     out = capsys.readouterr().out
-    for name in ("deps", "budget", "authority", "audit", "hook", "serve", "reach", "clearance"):
-        assert name in out
+    blocks = re.findall(r"\{([a-z,\s]+)\}", out)
+    assert blocks, f"argparse printed no choices block, so this test would check nothing: {out[:200]!r}"
+    return [name for name in re.split(r"[,\s]+", blocks[0]) if name]
+
+
+def _routed_before_argparse() -> set[str]:
+    """Commands `main` dispatches before the parser exists — derived, never listed.
+
+    Two kinds: the `FORWARDED` table, and the names short-circuited one by one underneath it.
+    Both route on `tail[0]` before `parse_args`, so each can dispatch perfectly well while being
+    absent from `--help` — which is exactly how `notices` came to be missing from it.
+    """
+    source = (Path(FORWARDED_SOURCE)).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    main_def = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main"
+    )
+    short_circuited = {
+        node.comparators[0].value
+        for node in ast.walk(main_def)
+        if isinstance(node, ast.Compare)
+        and isinstance(node.ops[0], ast.Eq)
+        and isinstance(node.comparators[0], ast.Constant)
+        and isinstance(node.comparators[0].value, str)
+        and ast.unparse(node.left) == "tail[0]"
+    }
+    assert short_circuited, "no short-circuited command found, so half this set is missing"
+    return set(FORWARDED) | short_circuited
+
+
+def test_every_command_routed_before_argparse_is_listed_in_help(capsys) -> None:
+    """A command that dispatches before the parser can dispatch while unlisted. None may.
+
+    This replaces a check that iterated eight hand-written names against a `FORWARDED` table of
+    nine. It missed `coupling` and `notices`, and asserted `clearance`, which is not forwarded at
+    all — so the gate was green while `assurance notices` worked and `assurance --help` denied it.
+    Both sides are derived now, which is the same fix #161 made one layer down.
+    """
+    advertised = _advertised_commands(capsys)
+    routed = _routed_before_argparse()
+    assert len(routed) >= 10, f"found only {sorted(routed)}, so the derivation has stopped working"
+    missing = sorted(routed - set(advertised))
+    assert not missing, (
+        f"of {len(routed)} commands routed before argparse, {len(missing)} are absent from "
+        f"--help: {missing}. Advertised: {advertised}"
+    )
+
+
+def test_the_front_page_and_the_help_name_the_same_commands(capsys) -> None:
+    """Both lists agree with what dispatches, in both directions.
+
+    `_START_HERE` is the bare-`assurance` front page and was curated by hand, which is how `drift`
+    and `init` came to dispatch without appearing on it. Ashwinth closed the curation question on
+    2026-11-19: the lists agree. Set equality rather than two containments, so a line naming a
+    command that does not exist fails here too.
+    """
+    advertised = set(_advertised_commands(capsys))
+    assert main([]) == 0
+    front_page = {
+        line.split()[1]
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("  assurance ")
+    }
+    assert len(front_page) >= 14, f"the front page parsed as {sorted(front_page)}, which cannot be right"
+    assert front_page == advertised, (
+        f"the two lists disagree. On the front page and not in --help: "
+        f"{sorted(front_page - advertised)}. In --help and not on the front page: "
+        f"{sorted(advertised - front_page)}"
+    )
 
 
 def test_the_serve_subcommand_reaches_the_server(capsys) -> None:
