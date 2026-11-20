@@ -38,7 +38,7 @@ from assurance_budget.notice import (
     stretch_may_predate,
     verdicts,
 )
-from assurance_budget.codex import CODEX_SOURCE, find_latest_codex_session, is_codex, read_codex
+from assurance_budget.codex import find_latest_codex_session, is_codex, read_codex
 from assurance_budget.compaction import repeated_across_compaction
 from assurance_budget.otel import TRACE_SOURCE, is_trace, read_trace
 from assurance_budget.outcome import outcome, outcome_lines
@@ -403,13 +403,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     cannot be loaded. A usage error exits 2
     from argparse. `--hook` hands off to `run_hook`, which always returns 0.
     """
+    survive_narrow_consoles()  # above the parser: --help and a usage error print before anything below
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    if args.hook:  # the hook prints JSON, which is ASCII, and must not touch the console's settings
+    if args.hook:
+        # Having already run the guard is safe here: the hook's payload is `json.dumps` at its
+        # default `ensure_ascii`, so it is pure ASCII and `errors="replace"` has nothing to stand in
+        # for. This call used to sit below here to keep clear of that stream, which left `assurance
+        # audit --help` crashing on exactly the console the guard was written for.
         return run_hook(sys.stdin.read(), nudge=args.nudge)
     if args.nudge:
         parser.error("--nudge only applies with --hook")
-    survive_narrow_consoles()
     if args.learn is not None:
         if args.demo or args.transcript or args.session:
             parser.error("--learn records a command for this project; leave out the transcript, --demo and --session")

@@ -17,6 +17,7 @@ from typing import Sequence
 from assurance_authority.declaration import DeclarationError, load, loads
 from assurance_authority.example import EXAMPLE_NAME, example_json
 from assurance_authority.review import Review, review
+from assurance_authority.console import survive_narrow_consoles
 
 EXIT_OK = 0
 EXIT_GATE = 1
@@ -111,6 +112,7 @@ def _write_example(target: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the review. Returns the process exit code rather than raising SystemExit."""
+    survive_narrow_consoles()
     args = build_parser().parse_args(argv)
 
     if args.write:

@@ -370,8 +370,8 @@ def main(
     run: Run | None = None,
 ) -> int:
     """Run `assurance hook`. 0 done (or nothing to do), 1 not written or not installed, 2 refused."""
-    args = build_parser().parse_args(list(argv) if argv is not None else None)
     survive_narrow_consoles()
+    args = build_parser().parse_args(list(argv) if argv is not None else None)
     here = (cwd or Path.cwd()).resolve()
     environ = os.environ if env is None else env
     tty = interactive if interactive is not None else _is_tty

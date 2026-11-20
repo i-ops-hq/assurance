@@ -25,6 +25,7 @@ from assurance_budget.config import (
     project_overreach_notes,
 )
 from assurance_budget.events import LogError, read
+from assurance_budget.console import survive_narrow_consoles
 
 EXIT_OK = 0
 EXIT_GATE = 1
@@ -115,6 +116,7 @@ def render(result: Audit, *, ceilings_source: str = "built-in defaults", overrea
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the audit. Returns the process exit code rather than raising SystemExit."""
+    survive_narrow_consoles()
     args = build_parser().parse_args(argv)
     try:
         ceilings = load_ceilings(Path.cwd(), os.environ)

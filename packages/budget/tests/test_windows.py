@@ -6,28 +6,30 @@ Windows session is read the same way on a Mac, in Linux CI and on Windows.
 
 from __future__ import annotations
 
-import inspect
+import ast
+import difflib
 import io
 import json
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from assurance_budget import console, coupling, hook_setup, session_cli
+from assurance_budget import console, hook_setup, session_cli
 from assurance_budget.hook_setup import hook_command, is_ours
 from assurance_budget.sessions import (
     _POSIX,
     _program_name,
     after_last_edit,
     classify_bash,
-    outcome_of_test_run,
     read_claude_code,
     unclassified_by_command,
 )
 from assurance_budget.powershell import powershell_as_posix
 
 CWD = "C:\\Users\\dev\\proj"
+PACKAGES = Path(__file__).resolve().parents[2]
 
 
 def ps(command: str) -> str:
@@ -225,13 +227,99 @@ def test_a_character_the_console_cannot_encode_is_replaced_not_fatal(monkeypatch
     narrow.flush()
 
 
-def test_every_command_that_prints_free_text_survives_one(tmp_path: Path) -> None:
+def _entry_points() -> list[Path]:
+    """Every module in the monorepo defining a top-level `main()` — found, never listed."""
+    found = []
+    for module in sorted(PACKAGES.glob("*/assurance_*/*.py")):
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        if any(isinstance(node, ast.FunctionDef) and node.name == "main" for node in tree.body):
+            found.append(module)
+    return found
+
+
+def test_the_hooks_json_is_ascii_so_the_guard_above_it_cannot_alter_a_byte(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`main` runs the guard before the parser, so the hook now shares a stream carrying
+    `errors="replace"`. That is harmless for exactly one reason: `json.dumps` escapes at its default
+    `ensure_ascii`, leaving no unencodable character for a replacement to reach. The transcript here
+    is full of them and the payload still comes out ASCII. Assert the reason, not the placement.
+    """
+    path = _transcript(
+        tmp_path,
+        [
+            ("Edit", {"file_path": CWD + "\\名前.py", "old_string": "a", "new_string": "b"}, False, "ok"),
+            _pwsh("pytest -q", failed=True, output="✖ 1 failed — 名前"),
+        ],
+    )
+    capsys.readouterr()
+    assert session_cli.run_hook(json.dumps({"transcript_path": str(path)}), nudge=True) == 0
+    payload = capsys.readouterr().out
+    assert payload.strip(), "the hook printed nothing, so this would pass without checking anything"
+    assert "\\u540d" in payload, f"no escaped character reached the payload, so nothing here is tested: {payload!r}"
+    payload.encode("ascii")  # raises the moment json.dumps stops escaping
+
+
+def _guard_call(main: ast.FunctionDef) -> int | None:
+    """Which statement of `main` calls the guard, by index, or None if none does."""
+    for index, statement in enumerate(main.body):
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "survive_narrow_consoles":
+                return index
+    return None
+
+
+def test_every_command_that_prints_free_text_survives_one() -> None:
     """`coupling` shipped in 0.2.26 without the guard its two siblings had, and it prints the least
     controllable text of the three: paths straight out of someone's git log, and a `·` separator
-    that cp932 has no byte for. A guard that two of three entry points call is not a guard."""
-    for module in (session_cli, hook_setup, coupling):
-        source = inspect.getsource(module)
-        assert "survive_narrow_consoles()" in source, module.__name__
+    that cp932 has no byte for. A guard that two of three entry points call is not a guard.
+
+    The gate that caught that named those three modules by hand, so it could not see the ten
+    commands in the five other packages: `assurance batch --help` printed an em dash on Windows
+    with nothing in front of it, and a source scan of this repo could not tell you, because the
+    report lines are composed in helpers. Discovery is the fix — a new command joins this gate by
+    existing, which is the one thing a hand-written list cannot do.
+
+    And the call has to come first, not merely be present. `session_cli` called it *below* the
+    parser, so `assurance audit --help` died on a cp437 console with the guard right there in the
+    file, four lines too low for a presence check to notice. This asserts the position, because the
+    position is the property — anything printed above the call is unprotected.
+    """
+    entry_points = _entry_points()
+    names = [str(path.relative_to(PACKAGES)) for path in entry_points]
+    assert len(names) >= 13, f"the search found {len(names)}, so it is no longer finding them: {names}"
+    late = []
+    for name, path in zip(names, entry_points):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main")
+        doc = isinstance(main.body[0], ast.Expr) and isinstance(main.body[0].value, ast.Constant)
+        at = _guard_call(main)
+        if at is None:
+            late.append(f"{name}: never calls it")
+        elif at != int(doc):
+            late.append(f"{name}: calls it {at - int(doc)} statements in, not first")
+    assert late == [], f"of {len(names)} entry points, {len(late)} do not guard their first line of output: {late}"
+
+
+def test_the_vendored_console_copies_are_identical() -> None:
+    """Six packages carry their own copy, because the alternative was a dependency edge from
+    `assurance-cli` to `assurance-budget` for six lines of code, pointing the wrong way down the
+    graph. The copy is cheap. Copies drifting apart is not — this function's own history is that
+    living in two private copies is what let a third command ship without it.
+    """
+    copies = sorted(PACKAGES.glob("*/assurance_*/console.py"))
+    names = [str(path.relative_to(PACKAGES)) for path in copies]
+    assert len(names) >= 6, f"the search found {len(names)}, so it is no longer finding them: {names}"
+    texts = {name: path.read_text(encoding="utf-8") for name, path in zip(names, copies)}
+    agreed, agreeing = Counter(texts.values()).most_common(1)[0]
+    odd = sorted(name for name, text in texts.items() if text != agreed)
+    if odd:
+        diff = "\n".join(
+            difflib.unified_diff(
+                agreed.splitlines(), texts[odd[0]].splitlines(), "the copies that agree", odd[0], lineterm=""
+            )
+        )
+        raise AssertionError(f"{odd} diverged from the {agreeing} copies that agree:\n{diff}")
 
 
 def test_a_backslash_in_a_posix_command_is_not_a_path_separator() -> None:

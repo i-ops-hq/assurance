@@ -15,6 +15,7 @@ from assurance_cli.drift import run_drift
 from assurance_cli.paths import PathEscapeError
 from assurance_cli.pin import _ALLOW_HELP as _PIN_ALLOW_HELP, run_pin_action
 from assurance_cli.setdiff import KeySpecError, diff_sets, format_diff
+from assurance_cli.console import survive_narrow_consoles
 
 
 #: Subcommands that are other packages' commands, forwarded whole: `(module, how to install it)`.
@@ -96,6 +97,7 @@ class _PrintVersion(argparse.Action):
 
 def main(argv: list[str] | None = None) -> int:
     """Command-line entry for assurance checks."""
+    survive_narrow_consoles()
     # `deps` is forwarded whole, before argparse sees any of it. argparse claims `--help` for the
     # top-level parser no matter what a REMAINDER positional says, so `assurance deps --help`
     # printed this parser's usage and then called the flag unrecognised. Short-circuiting keeps

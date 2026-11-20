@@ -41,6 +41,7 @@ from assurance_budget.otel import read_spans, trace_from_text, trace_runs
 from assurance_budget.otlp_protobuf import ProtobufError, decode_traces
 from assurance_budget.record import RUN_KEYS, RunRecord, record_from_text
 from assurance_budget.session_cli import GATES, audit, failed_gates, format_report
+from assurance_budget.console import survive_narrow_consoles
 
 DEFAULT_PORT = 4318
 #: The most a request may carry, before and after gzip: an exporter's batch is a few megabytes.
@@ -353,6 +354,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run `assurance serve` until it is stopped. 0 when stopped with Ctrl-C, 2 when it cannot listen."""
+    survive_narrow_consoles()
     args = build_parser().parse_args(list(argv) if argv is not None else None)
     root = Path(args.store).expanduser() if args.store else state_dir(os.environ, "runs")
     try:

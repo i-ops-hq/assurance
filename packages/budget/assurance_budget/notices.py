@@ -42,6 +42,7 @@ from assurance_budget.sessions import (
     shell_command,
     with_learned,
 )
+from assurance_budget.console import survive_narrow_consoles
 
 _LEVEL = re.compile(r"^assurance · ([a-z ]+):")
 #: What the two upper levels were called up to 0.1.28, so a session older than the rename is counted
@@ -214,6 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Report what followed each finding in the window; 0 on a report, 2 when it cannot run."""
+    survive_narrow_consoles()
     args = build_parser().parse_args(argv)
     try:
         since = _since(args.since)

@@ -17,6 +17,7 @@ from assurance_reach.graph import CONFIDENCE, Graph, GraphError, find_graph, loa
 from assurance_reach.reach import NOT_DEPENDENCIES, Reach, Reached, reach, relative
 from assurance_reach.staleness import WALK_LIMIT, Staleness, staleness
 from assurance_reach.verify import Comparison, compare
+from assurance_reach.console import survive_narrow_consoles
 
 SCHEMA = "assurance.reach/1"
 VERIFY_SCHEMA = "assurance.reach.verify/1"
@@ -50,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run `assurance reach`: 0 when it answered, 2 when it could not."""
+    survive_narrow_consoles()
     args = build_parser().parse_args(list(argv) if argv is not None else None)
     if args.before or args.after:
         return _run_verify(args)
