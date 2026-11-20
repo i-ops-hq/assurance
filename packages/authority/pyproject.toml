@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assurance-authority"
-version = "0.1.4"
+version = "0.1.5"
 description = "Decide whether a task may proceed for the person who asked — without lending them somebody else's clearance."
 readme = "README.md"
 license = { text = "Apache-2.0" }

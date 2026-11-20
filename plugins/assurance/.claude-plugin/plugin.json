@@ -1,6 +1,6 @@
 {
   "name": "assurance",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "description": "Ask /assurance:audit what the session you are in actually did: the edits, the tests and checks that ran after them, and what could not be checked. Arithmetic over the transcript; no model decides anything.",
   "author": {
     "name": "I-Ops",

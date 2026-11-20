@@ -1,3 +1,36 @@
+# 0.6.11
+
+- **The command no longer dies on a console that cannot encode an em dash.** `cmd.exe` on a US
+  Windows install uses code page 437, which has no em dash, and any line carrying one raised
+  `UnicodeEncodeError` before it printed. The guard runs as the first statement of `main`, so
+  `--help` and a usage error are covered too, and a character the console cannot represent is
+  replaced rather than fatal.
+- **A records file written before this version can contain a provider's error message, and a
+  message can quote the prompt that caused it.** `--records` is the file this tool tells you is safe
+  to share, and `error` was the one field the workspace salt does not cover. A code was always the
+  intent and the mapping branch enforced it, but a provider sending `error` as a bare string, a list
+  of strings, or a list of error objects fell through to a plain stringification — and the last of
+  those is why "the providers send objects" was no defence, because a list of objects is not a
+  mapping. Three of seven shapes came through verbatim, one carrying an email address and a quoted
+  prompt fragment. Only a code shape passes now; anything else becomes the same `error` the mapping
+  branch already wrote for a message, and a code-shaped string over 64 characters becomes `error`
+  too, because a 65-character code is a message without spaces. **If you have shared a records file
+  written by an earlier version, `error` is the field to check.**
+- **Every records line now says what form its record key is in**, `digest` or `raw`. A reader could
+  not work it out: with a salt set and `--hash-keys` absent, the key is the real key and the salt id
+  is non-empty anyway, so a salt id has never meant the keys were hashed.
+- **Every records line now carries the run id** `--run-record` already carried, so both artifacts
+  agree on one id and anything joining them can count distinct runs. It defaults to the output
+  file's name, which is stable across runs, so counting runs wants `--run` set per run.
+- **`assurance notices` is listed in `assurance --help`, and `drift` and `init` are on the front
+  page.** All three dispatched and all three were absent from a list that claimed to name them. The
+  check that should have caught it compared eight hand-written names against a table of nine, so it
+  missed two and asserted a third that is not forwarded at all. Both lists are now derived from what
+  the front door actually routes, and compared for equality in both directions, so a line naming a
+  command that does not exist fails too.
+- **`pytest` is pinned below 9.2 in the dev extra.** 9.2.0 fails with an internal error on Python
+  3.10 on a test with no project code in it; 9.1.1 does not, and 9.2.0 is fine on 3.12 and 3.13.
+
 # 0.6.10
 
 - **The digests written into the two shareable artifacts are salted with a secret the workspace

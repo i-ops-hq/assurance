@@ -1,3 +1,11 @@
+# 0.2.5
+
+- **The command no longer dies on a console that cannot encode an em dash.** `cmd.exe` on a US
+  Windows install uses code page 437, which has no em dash, and any line carrying one raised
+  `UnicodeEncodeError` before it printed. The guard runs as the first statement of `main`, so
+  `--help` and a usage error are covered too, and a character the console cannot represent is
+  replaced rather than fatal.
+
 # 0.2.4
 
 - **`--version`** prints `assurance deps <version>` and exits 0.
