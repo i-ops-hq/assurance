@@ -79,6 +79,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from assurance_cli.lineage import Attempt, cover, parse_lineage, summarise
+from assurance_cli.console import survive_narrow_consoles
 
 EXIT_OK = 0
 EXIT_GATE = 1
@@ -1200,6 +1201,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """`assurance batch` — read a batch job's output and say what came back."""
+    survive_narrow_consoles()
     parser = _parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 

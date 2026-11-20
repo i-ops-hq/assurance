@@ -16,6 +16,7 @@ from assurance_mcp.checks import (
     check_staleness,
     list_dated_files,
 )
+from assurance_mcp.console import survive_narrow_consoles
 
 
 def _load_fastmcp() -> type[Any]:
@@ -173,6 +174,7 @@ def main() -> None:
     `--version` is handled inside `parse` (argparse `action="version"`) and exits before the
     server starts.
     """
+    survive_narrow_consoles(stdout=False)  # stdout is the protocol, not text for a person
     boundary = parse(sys.argv[1:])
     configure(boundary)
     # stderr, because stdout is the protocol. Clients show a server's stderr in their MCP log, which

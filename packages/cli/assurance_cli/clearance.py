@@ -27,6 +27,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any, Sequence
+from assurance_cli.console import survive_narrow_consoles
 
 #: What to install when a sibling this needs is absent, in the order they are tried.
 _NEEDS = (
@@ -225,6 +226,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     Not being cleared is an answer, not a failure, so it exits 0. A caller that wants it to stop a
     pipeline reads `owners_not_cleared` from `--json`, the way `diff` and `check` are used.
     """
+    survive_narrow_consoles()
     args = build_parser().parse_args(argv)
     try:
         payload = assess(args.path, args.declaration, args.principal,

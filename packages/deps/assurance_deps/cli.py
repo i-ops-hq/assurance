@@ -16,6 +16,7 @@ from assurance_deps.manifest import ManifestError
 from assurance_deps.report import format_report, report_to_json
 from assurance_deps.scan import scan_manifest
 from assurance_deps.text import scrub_controls
+from assurance_deps.console import survive_narrow_consoles
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -59,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """Read a manifest and print what an install of it would execute. Executes nothing itself."""
+    survive_narrow_consoles()
     args = build_parser().parse_args(argv)
     manifest = Path(args.manifest).expanduser()
     if not manifest.is_file():
