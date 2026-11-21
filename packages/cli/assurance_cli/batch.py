@@ -470,6 +470,11 @@ def _read_body(key: str, body: Any, provider: str, declared: Declared) -> Read:
                 why=empty_because if state == "empty" else "")
 
 
+#: A provider error code: letters, digits, and the three separators providers actually use. No
+#: spaces, so a sentence cannot pass, and bounded because a 65-character code is a message.
+_CODE_SHAPE = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
+
+
 def _error_code(value: Any) -> str:
     """A provider error's code, and never its message: a code is a category, a message can quote the
     input that caused it."""
@@ -479,7 +484,16 @@ def _error_code(value: Any) -> str:
             if isinstance(found, str) and found:
                 return found
         return "error"
-    return str(value) if value else "error"
+    if not value:
+        return "error"
+    # Everything that is not a mapping is stringified, and `str` of a message is the message. A
+    # provider sending `error` as a bare string, a list of strings, or a LIST OF ERROR OBJECTS all
+    # arrive here, and the last of those is why "the providers send objects" protects nothing: a
+    # list of objects is not a Mapping. Measured on 0.6.10, a message carrying an email address and
+    # a quoted prompt fragment came through byte for byte. So only a code SHAPE passes, and
+    # anything else becomes the same "error" the mapping branch already returns for a message.
+    text = str(value)
+    return text if _CODE_SHAPE.fullmatch(text) else "error"
 
 
 def _read_bedrock(key: str, line: Mapping[str, Any], declared: Declared) -> Read:
@@ -1081,8 +1095,17 @@ def run_record_lines(report: Mapping[str, Any], reads: Sequence[Read], run: str,
     return lines
 
 
-def record_lines(reads: Sequence[Read], *, hash_keys: bool = False, salt: str = "") -> list[str]:
+def record_lines(reads: Sequence[Read], *, hash_keys: bool = False, salt: str = "",
+                 run: str = "") -> list[str]:
     """One JSONL line per record and nothing else: the input `assurance drift` reads.
+
+    Each line says how to read itself. `record_form` is `digest` or `raw` -- named for the field it
+    describes, because the report already uses `keys` for its key-coverage summary and one word
+    meaning two things in one module is how a reader ends up guessing. A reader cannot tell:
+    with a salt set and `--hash-keys` absent, `record` is the real key and `salt_id` is non-empty
+    anyway, so a non-empty `salt_id` has never meant the keys were hashed. `run` is the same id
+    `--run-record` carries, so a rollup can count distinct runs; it defaults to the output file's
+    name, which is stable ACROSS runs, so anything counting runs wants `--run` set per run.
 
     Separate from `--run-record` on purpose, and the reason is arithmetic rather than taste.
     `assurance_core.spc.failures_from_field` scores every line of its input, and a line without the
@@ -1094,6 +1117,8 @@ def record_lines(reads: Sequence[Read], *, hash_keys: bool = False, salt: str = 
     """
     return [json.dumps({
         "record": _salted(_key_digest(read.key), salt) if hash_keys else read.key,
+        "record_form": "digest" if hash_keys else "raw",
+        "run": run,
         "state": read.state, "shape": read.shape, "stop": read.stop,
         "output_tokens": read.output_tokens, "input_tokens": read.input_tokens,
         # Salted on every line, flag or no flag: for a classifier the reply space is a handful of
@@ -1261,15 +1286,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         print(format_job(report))
 
+    # Both artifacts carry it now, so it is resolved once rather than inside one branch.
+    run = args.run or Path(args.output).name
     if args.run_record:
-        run = args.run or Path(args.output).name
         written = _write(args.run_record,
                          run_record_lines(report, job.records, run, args.claim,
                                           hash_keys=args.hash_keys, salt=salt))
         if written is not None:
             return written
     if args.records:
-        written = _write(args.records, record_lines(job.records, hash_keys=args.hash_keys, salt=salt))
+        written = _write(args.records,
+                         record_lines(job.records, hash_keys=args.hash_keys, salt=salt, run=run))
         if written is not None:
             return written
 

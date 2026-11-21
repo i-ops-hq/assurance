@@ -10,7 +10,7 @@ Run this command with the Bash tool, in the folder the session is working in, an
 it prints:
 
 ```
-uvx assurance@0.1.40 audit --session "$CLAUDE_SESSION_ID"
+uvx assurance@0.1.41 audit --session "$CLAUDE_SESSION_ID"
 ```
 
 The user will be asked to approve it, as they are for any command. Nothing here runs by itself.
@@ -41,8 +41,8 @@ This skill reports when you ask it to. To have the same audit run by itself when
 the Stop hook from the package rather than from this plugin:
 
 ```
-uvx assurance@0.1.40 hook install
+uvx assurance@0.1.41 hook install
 ```
 
 That writes one hook into your own Claude Code settings, backs up what was there first, and shows you
-the change before writing it. `uvx assurance@0.1.40 hook remove` takes it out again.
+the change before writing it. `uvx assurance@0.1.41 hook remove` takes it out again.

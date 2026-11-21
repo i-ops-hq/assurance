@@ -1,3 +1,17 @@
+# 0.2.32
+
+- **The command no longer dies on a console that cannot encode an em dash.** `cmd.exe` on a US
+  Windows install uses code page 437, which has no em dash, and any line carrying one raised
+  `UnicodeEncodeError` before it printed. The guard runs as the first statement of `main`, so
+  `--help` and a usage error are covered too, and a character the console cannot represent is
+  replaced rather than fatal.
+- **`assurance audit --help` no longer crashes on a narrow console.** The guard existed and was
+  called four statements below the parser, so every line argparse printed went out unprotected on
+  exactly the console the guard was written for. It is now the first statement of `main`. Sharing
+  that stream with the Stop hook is safe for one checked reason, which is a test rather than a
+  comment: the hook's payload is `json.dumps` at its default `ensure_ascii`, so it is pure ASCII and
+  there is nothing for the replacement to reach.
+
 # 0.2.31
 
 One batch rather than six releases. The first entry is a defect you are hitting now; the rest were

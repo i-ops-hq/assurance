@@ -49,7 +49,9 @@ assurance — your AI agent says it's done. This tells you what it didn't check.
   assurance pin --save | --check          did an MCP server change a tool after you approved it?
   assurance deps package.json             what an install will execute, read without running it
   assurance budget runs.jsonl             where an agent run's budget went, and where it looped
+  assurance drift runs.jsonl --failure 1  did the failure rate shift, or is that run noise?
   assurance authority --example           may a task proceed for the person who asked?
+  assurance init [FOLDER]                 write the baseline a later check or diff reads
   assurance check [FOLDER]                a folder of dated or numbered files: what is absent
 
 Run it after every session: https://github.com/i-ops-hq/assurance#run-it-after-every-session
@@ -143,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "hook", add_help=False,
         help="Run the audit after every Claude Code turn: install, remove, status",
+    )
+
+    sub.add_parser(
+        "notices", add_help=False,
+        help="After each thing the hook said, did the next turn act on it, from the transcripts on this machine",
     )
 
     sub.add_parser(

@@ -1,3 +1,7 @@
+# 0.1.41
+
+- **Pins the batch above:** budget 0.2.32, cli 0.6.11, deps 0.2.5, authority 0.1.5, reach 0.1.2.
+
 # 0.1.40
 
 - **Carries `assurance-budget` 0.2.31 and `assurance-cli` 0.6.10.** The `notices` crash fix is the

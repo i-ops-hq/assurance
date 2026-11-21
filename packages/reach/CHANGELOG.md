@@ -1,3 +1,11 @@
+# 0.1.2
+
+- **The command no longer dies on a console that cannot encode an em dash.** `cmd.exe` on a US
+  Windows install uses code page 437, which has no em dash, and any line carrying one raised
+  `UnicodeEncodeError` before it printed. The guard runs as the first statement of `main`, so
+  `--help` and a usage error are covered too, and a character the console cannot represent is
+  replaced rather than fatal.
+
 # 0.1.1
 
 - `--before X --after Y --declared PATH`: did the change do what it said, and nothing else? Compares
