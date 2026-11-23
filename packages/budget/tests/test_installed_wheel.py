@@ -13,23 +13,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-
-def _venv_python(venv_dir: Path) -> Path:
-    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
-    if sys.platform == "win32":
-        return venv_dir / "Scripts" / "python.exe"
-    return venv_dir / "bin" / "python"
+from tooling.tree import build_wheel, install_siblings, venv_python
 
 
-def _build_wheel(outdir: Path, project: Path) -> Path:
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "build"], check=True)
-    subprocess.run(
-        [sys.executable, "-m", "build", "--wheel", "--outdir", str(outdir)],
-        cwd=project, check=True, capture_output=True,
-    )
-    wheels = sorted(outdir.glob("*.whl"))
-    assert len(wheels) == 1, wheels
-    return wheels[0]
 
 
 #: Every sibling this package declares, with the published floor to fall back on outside the tree.
@@ -41,23 +27,12 @@ def _build_wheel(outdir: Path, project: Path) -> Path:
 _SIBLINGS = (("core", "assurance-core>=0.13.2"), ("reach", "assurance-reach>=0.1.1"))
 
 
-def _install_core(vpy: Path, tmp_path: Path) -> None:
-    # Prefer the sibling in this tree: Ceilings lands here before the matching PyPI release, and
-    # installing an older published sibling would exercise a floor the suite is not running against.
-    for name, published in _SIBLINGS:
-        sibling = ROOT.parent / name
-        if sibling.is_dir():
-            wheel = _build_wheel(tmp_path / f"{name}-dist", sibling)
-            subprocess.run([str(vpy), "-m", "pip", "install", "-q", str(wheel)], check=True)
-        else:
-            subprocess.run([str(vpy), "-m", "pip", "install", "-q", published], check=True)
-
 
 def test_installed_wheel_runs_the_console_script(tmp_path: Path) -> None:
-    vpy = _venv_python(tmp_path / "venv")
-    _install_core(vpy, tmp_path)
+    vpy = venv_python(tmp_path / "venv")
+    install_siblings(vpy, tmp_path, ROOT)
     subprocess.run([str(vpy), "-m", "pip", "install", "-q",
-                    str(_build_wheel(tmp_path / "dist", ROOT))], check=True)
+                    str(build_wheel(tmp_path / "dist", ROOT))], check=True)
 
     log = tmp_path / "runs.jsonl"
     log.write_text("\n".join(

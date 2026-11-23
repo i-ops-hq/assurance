@@ -14,29 +14,17 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+from tooling.tree import build_wheel, install_siblings, venv_python
 SHOP = ROOT / "tests" / "fixtures" / "shop"
 
 
-def _venv_python(venv_dir: Path) -> Path:
-    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
-    if sys.platform == "win32":
-        return venv_dir / "Scripts" / "python.exe"
-    return venv_dir / "bin" / "python"
-
-
-def _build_wheel(outdir: Path) -> Path:
-    subprocess.run(
-        [sys.executable, "-m", "pip", "wheel", "--no-deps", "-w", str(outdir), str(ROOT)],
-        check=True, capture_output=True,
-    )
-    wheels = sorted(outdir.glob("assurance_reach-*.whl"))
-    assert len(wheels) == 1, wheels
-    return wheels[0]
 
 
 def test_installed_wheel_runs_the_console_script(tmp_path: Path) -> None:
-    vpy = _venv_python(tmp_path / "venv")
-    subprocess.run([str(vpy), "-m", "pip", "install", "-q", str(_build_wheel(tmp_path / "dist"))], check=True)
+    vpy = venv_python(tmp_path / "venv")
+    install_siblings(vpy, tmp_path, ROOT)  # no siblings today; derived, not assumed
+    subprocess.run([str(vpy), "-m", "pip", "install", "-q", str(build_wheel(tmp_path / "dist", ROOT))], check=True)
 
     shop = tmp_path / "shop"
     shutil.copytree(SHOP, shop)

@@ -1,0 +1,23 @@
+name: Install every package in this tree
+description: >
+  Installs all of this repository's packages editable, in dependency order, derived from their
+  own pyproject.toml files rather than from a list kept here.
+
+# Why this exists. Three jobs each carried their own copy of the install list, and they disagreed:
+# the test and sdks jobs named eight packages, the types job seven, and which ones carried `[dev]`
+# differed between all three. On 2026-11-20 `assurance-budget` raised its floor to
+# `assurance-reach>=0.1.2` and the sdks job's copy did not know about `reach`, so pip went to PyPI
+# for a version that was not published yet and the release went red. Two of the copies knew; one did
+# not. A list in three places disagrees with itself long before anybody notices.
+#
+# `tooling/tree.py` reads the graph out of the pyprojects, which is the only place that knows, so a
+# new dependency edge needs no edit here or in any test.
+
+runs:
+  using: composite
+  steps:
+    - name: pip, then every package editable in dependency order
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        python -m tooling.tree editable
