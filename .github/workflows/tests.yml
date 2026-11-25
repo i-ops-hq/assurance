@@ -36,8 +36,11 @@ jobs:
       - name: Install every package from this tree, in dependency order
         uses: ./.github/actions/install-tree
 
+      # The target list is asked for, not kept here. A package added without being added to a
+      # hand-written list has no tests run and nothing says so, which is the quietest failure in
+      # this repository: every gate it owns reports green because none of them ran.
       - name: Tests
-        run: python -m pytest -q packages/core/tests packages/cli/tests packages/mcp/tests packages/budget/tests packages/authority/tests packages/deps/tests packages/reach/tests packages/assurance/tests
+        run: python -m pytest -q $(python -m tooling.tree testpaths)
 
       - name: The baseline file is the only thing the CLI may write
         # Runs with the suite above. It runs again, named, because "read-only except one file you
@@ -74,7 +77,9 @@ jobs:
       - name: mypy --strict, every package, under its own config
         run: |
           failed=""
-          for pkg in core cli mcp budget authority deps reach; do
+          # Seven of the eight: `packages/assurance` ships no module, so the list had to remember
+          # to leave it out. `sources` asks which directories exist instead.
+          for pkg in $(python -m tooling.tree sources); do
             echo "::group::assurance_$pkg"
             (cd "packages/$pkg" && python -m mypy --strict "assurance_$pkg") || failed="$failed assurance_$pkg"
             echo "::endgroup::"

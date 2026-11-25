@@ -110,6 +110,32 @@ def dependency_order() -> list[Path]:
     return done
 
 
+def suite_paths() -> list[str]:
+    """Every package's test directory, for the `pytest` target list CI used to hand-keep.
+
+    NOT named `test_paths`: pytest collects anything matching `test*`, so a function by that name
+    imported into a test module is run as a test case and counted in the suite. It was, and the
+    only thing that said so was a `PytestReturnNotNoneWarning` about a test returning a list.
+
+    Derived rather than listed because the failure mode is silent in the worst way: a package added
+    without its tests being added to the list has no tests run, and nothing says so. The set this
+    returns was equal to the hand-written one when it replaced it, so nothing about what CI runs
+    changed — only whether it stays true.
+    """
+    return [
+        f"packages/{d.name}/tests" for d in dependency_order() if (d / "tests").is_dir()
+    ]
+
+
+def source_packages() -> list[str]:
+    """Packages with an importable module, which is what `mypy --strict` is run over.
+
+    Seven of the eight: `packages/assurance` is the front door and ships no module of its own, so a
+    hand-written list had to remember to leave it out. This asks the directory instead.
+    """
+    return [d.name for d in dependency_order() if (d / f"assurance_{d.name}").is_dir()]
+
+
 def venv_python(venv_dir: Path) -> Path:
     """A fresh virtualenv, and the interpreter inside it."""
     subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
@@ -169,5 +195,11 @@ if __name__ == "__main__":  # pragma: no cover - the CI entry point
     if len(sys.argv) == 2 and sys.argv[1] == "order":
         print(" ".join(d.name for d in dependency_order()))
         raise SystemExit(0)
-    print("usage: python -m tooling.tree [editable|order]", file=sys.stderr)
+    if len(sys.argv) == 2 and sys.argv[1] == "testpaths":
+        print(" ".join(suite_paths()))
+        raise SystemExit(0)
+    if len(sys.argv) == 2 and sys.argv[1] == "sources":
+        print(" ".join(source_packages()))
+        raise SystemExit(0)
+    print("usage: python -m tooling.tree [editable|order|testpaths|sources]", file=sys.stderr)
     raise SystemExit(2)
