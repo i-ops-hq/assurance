@@ -11,21 +11,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-
 from tooling.tree import build_wheel, install_siblings, venv_python
 
-
-
-
-#: Every sibling this package declares, with the published floor to fall back on outside the tree.
-#: `reach` joined on 2026-11-20, when raising budget's floor to an unreleased 0.1.2 made this wheel
-#: unresolvable from PyPI -- which is the gate working, and `assurance-mcp`'s copy of this file had
-#: already hit it and fixed it there. Two copies of one fix is `call-site-patch`; a shared helper
-#: across all seven `test_installed_wheel.py` files is the real answer and is not a release commit's
-#: job.
-_SIBLINGS = (("core", "assurance-core>=0.13.2"), ("reach", "assurance-reach>=0.1.1"))
-
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_installed_wheel_runs_the_console_script(tmp_path: Path) -> None:

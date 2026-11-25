@@ -6,12 +6,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-
 from tooling.tree import build_wheel, install_siblings, venv_python
 
-
-
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_installed_wheel_imports_and_runs_smoke(tmp_path: Path) -> None:

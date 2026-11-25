@@ -160,8 +160,9 @@ def install_siblings(vpy: Path, tmp_path: Path, project: Path) -> list[str]:
     """Install everything `project` needs from THIS TREE, never from the index.
 
     From the tree deliberately: a floor is raised in the same commit that bumps the sibling it
-    names, so the index is a release behind for as long as it takes to publish. Resolving from
-    PyPI there is `released-against-itself`, which this repository has filed twice.
+    names, so the index is a release behind for as long as it takes to publish. Resolving a sibling
+    from PyPI during that window makes a release test itself against a version that does not exist
+    there yet, which has happened here twice.
 
     Returns the names installed, so a caller can assert what it got rather than trust that
     something happened.
