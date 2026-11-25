@@ -157,3 +157,65 @@ def test_no_workflow_keeps_its_own_package_loop() -> None:
         f"hand-kept package loop(s): {'; '.join(listed)}. "
         "Use `$(python -m tooling.tree sources)`."
     )
+
+
+def _steps(workflow: Path) -> list[tuple[int, str]]:
+    """Each step in a workflow, as (first line number, its text).
+
+    Split on indentation rather than parsed: PyYAML is not a declared dependency of any package
+    here, so a test that imported it would be skipped-or-absent in CI, which is where this property
+    matters. A step begins at `      - ` and runs until the next line at that indentation or less.
+    """
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    starts = [i for i, line in enumerate(lines) if line.startswith("      - ")]
+    steps: list[tuple[int, str]] = []
+    for n, start in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        body = [lines[start]]
+        for line in lines[start + 1 : end]:
+            if line.strip() and not line.startswith("        "):
+                break
+            body.append(line)
+        steps.append((start + 1, "\n".join(body)))
+    return steps
+
+
+def test_a_step_that_substitutes_a_command_names_bash_as_its_shell() -> None:
+    """`$(...)` in a `run:` requires `shell: bash`, because the default on Windows is PowerShell.
+
+    PowerShell performs the substitution and then does **not** word-split the result. On 2026-11-25
+    `python -m pytest -q $(python -m tooling.tree testpaths)` sent pytest all eight paths as ONE
+    argument, and all four Windows jobs failed with *"file or directory not found: packages/core/tests
+    packages/deps/tests ..."* while ubuntu and macos passed. The derivation was correct; the shell
+    consuming it was not bash.
+
+    This holds the seam rather than the derivation, which is the half no local run on macOS can
+    exercise. It also covers a step that is fine only because of which runner it happens to be
+    scheduled on — the mypy step runs on ubuntu alone and declares bash anyway.
+    """
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    actions = sorted((ROOT / ".github" / "actions").glob("*/action.yml"))
+    assert workflows, "no workflows read, so this test would pass having checked nothing"
+
+    checked = 0
+    wrong: list[str] = []
+    for f in workflows + actions:
+        for number, step in _steps(f):
+            # Comments stripped first. The bulk edit that fixed this wrote a COMMENT containing
+            # the words `shell: bash`, and the first version of this test passed on it -- green,
+            # with six steps still unfixed. A check must not be satisfiable by prose written about
+            # the thing it looks for.
+            code = "\n".join(
+                line for line in step.splitlines() if not line.lstrip().startswith("#")
+            )
+            if "run:" not in code or "$(" not in code:
+                continue
+            checked += 1
+            if not re.search(r"^\s+shell: bash\s*$", code, re.M):
+                first = step.strip().splitlines()[0].lstrip("- ")
+                wrong.append(f"{f.name}:{number} ({first[:60]}) substitutes a command without shell: bash")
+    assert checked >= 3, (
+        f"only {checked} step(s) with a command substitution were found, so this test is not "
+        "reading what it thinks it is"
+    )
+    assert not wrong, "; ".join(wrong)

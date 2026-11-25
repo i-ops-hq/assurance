@@ -40,6 +40,12 @@ jobs:
       # hand-written list has no tests run and nothing says so, which is the quietest failure in
       # this repository: every gate it owns reports green because none of them ran.
       - name: Tests
+        # `shell: bash` because of the `$(...)`. The runner's default shell on windows-latest is
+        # PowerShell, which performs the substitution and then does NOT word-split the result, so
+        # pytest received all eight paths as ONE argument and answered "file or directory not
+        # found: packages/core/tests packages/deps/tests ...". Four Windows jobs, ubuntu and macos
+        # green, because the derivation was right and the shell consuming it was not bash.
+        shell: bash
         run: python -m pytest -q $(python -m tooling.tree testpaths)
 
       - name: The baseline file is the only thing the CLI may write
@@ -75,6 +81,10 @@ jobs:
       # CONTRIBUTING gives. From the repository root mypy reads no config at all and answers with
       # dozens of errors that mean nothing.
       - name: mypy --strict, every package, under its own config
+        # Same `$(...)` as the Tests step above, and the same reason for naming the shell. This job
+        # runs on ubuntu only, so PowerShell never sees it -- declared anyway, because "it is fine
+        # because of where it happens to run" is how the Tests step was fine until it was not.
+        shell: bash
         run: |
           failed=""
           # Seven of the eight: `packages/assurance` ships no module, so the list had to remember
@@ -171,6 +181,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Look for the pinned version on PyPI
         id: published
+        # `shell: bash` for the `$(...)`: the runner default on Windows is PowerShell, which
+        # substitutes without word-splitting. Declared on the step, not assumed from the job's OS.
+        shell: bash
         run: |
           VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' packages/cli/pyproject.toml | head -1)
           if [ -z "$VERSION" ]; then

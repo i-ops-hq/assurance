@@ -57,6 +57,9 @@ jobs:
 
       - name: The tag must agree with that package's pyproject.toml
         id: version
+        # `shell: bash` for the `$(...)`: the runner default on Windows is PowerShell, which
+        # substitutes without word-splitting. Declared on the step, not assumed from the job's OS.
+        shell: bash
         run: |
           PKG="${{ steps.target.outputs.pkg }}"
           VERSION=$(python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('packages/$PKG/pyproject.toml').read_text())['project']['version'])")
@@ -71,6 +74,9 @@ jobs:
 
       - name: Is this version already on PyPI?
         id: published
+        # `shell: bash` for the `$(...)`: the runner default on Windows is PowerShell, which
+        # substitutes without word-splitting. Declared on the step, not assumed from the job's OS.
+        shell: bash
         run: |
           CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/${{ steps.target.outputs.dist }}/${{ steps.version.outputs.version }}/json")
           if [ "$CODE" = "200" ]; then
@@ -95,6 +101,10 @@ jobs:
       # on 2026-11-23 by the rewritten gate, which refuses any hand-written install in any workflow.
       - uses: ./.github/actions/install-tree
       - name: Tests must pass before anything is published
+        # `shell: bash` for the `$(...)`: see the Tests step in tests.yml. This job runs on ubuntu,
+        # so it was never broken; it is declared so the property is of the step rather than of the
+        # runner it happens to be scheduled on.
+        shell: bash
         run: |
           python -m pytest -q $(python -m tooling.tree testpaths)
 
@@ -144,6 +154,9 @@ jobs:
         # The manifest is a mirror of pyproject, and on 2026-09-02 it was found a patch behind —
         # 0.4.0 against a shipped 0.4.1. Listing a stale version is worse than not listing, because
         # it is wrong in public and nothing upstream would have caught it.
+        # `shell: bash` for the `$(...)`: the runner default on Windows is PowerShell, which
+        # substitutes without word-splitting. Declared on the step, not assumed from the job's OS.
+        shell: bash
         run: |
           cd packages/mcp
           MANIFEST=$(python3 -c "import json;print(json.load(open('server.json'))['version'])")
@@ -155,6 +168,9 @@ jobs:
 
       - name: Wait for the version to be installable
         # PyPI's index, JSON API, resolver and CDN do not agree instantly.
+        # `shell: bash` for the `$(...)`: the runner default on Windows is PowerShell, which
+        # substitutes without word-splitting. Declared on the step, not assumed from the job's OS.
+        shell: bash
         run: |
           for _ in $(seq 1 30); do
             if curl -sf "https://pypi.org/pypi/assurance-mcp/${{ needs.build.outputs.version }}/json" > /dev/null; then
