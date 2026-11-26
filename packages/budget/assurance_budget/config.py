@@ -48,6 +48,18 @@ _COMMAND_KEYS = frozenset({"tests", "checks", "must_run"})
 _EXAMPLES = {"tests": "make test", "checks": "make lint", "must_run": "make lint", "must_not_touch": "migrations/"}
 _KEY_ORDER = ("iterations", "tool_calls", "frontier_calls", "seconds", "retries")
 
+#: The `[declined]` table's one reserved key: the date after which every decline in it stops
+#: applying. One date for the table rather than one per decline, because the file format forced the
+#: simpler shape and the simpler shape is better -- `[[declined]]` would have let each decline carry
+#: its own date, and `toml_subset` refuses an array of tables while `tomllib` accepts one, which is a
+#: split a test in this package exists to prevent. A single review date is also the thing a team
+#: actually looks at, where a wall of per-finding dates is a thing nobody curates.
+_REVIEW_BY = "review_by"
+
+#: A decline matches a finding by substring, so the key has to be long enough not to match
+#: everything. `"no"` would decline every finding in the report and look like a working config.
+_SHORTEST_DECLINE = 8
+
 
 class ConfigError(ValueError):
     """A config file or environment variable could not be applied."""
@@ -111,6 +123,51 @@ def load_ceilings(cwd: Path, env: Mapping[str, str]) -> Ceilings:
         origins=tuple((key, origins[key]) for key in _KEY_ORDER if key in origins),
         project_asked_more=tuple(project_asked_more),
     )
+
+
+def load_declines(
+    project: Path, *, trust_project: bool = True
+) -> tuple[dict[str, str], str, list[str]]:
+    """Declines for `project`: {finding substring: reason}, the `review_by` date, and notes.
+
+    **`trust_project` has no default worth relying on and the caller must think about it.** The same
+    set-aside as `load_declared`: a project `.assurance/config.toml` the session changed does not get
+    to say what that session's findings mean. An agent that could write its own decline would be
+    deciding whether the check judging it counts, which is the one thing this product refuses.
+
+    **And the set-aside is per session, not per file, which is narrower than it sounds.** A session
+    that writes a decline is caught in that session, with a note. In a later session the file is
+    pre-existing and is trusted, and no note fires — so the code bounds "a session may not act on a
+    decline it just wrote" and nothing more. What bounds a decline nobody reviewed is `review_by`,
+    and after it there is only somebody reading a diff. That is a human control and is written here
+    as one rather than left for a reader to discover.
+
+    The user-level file is outside any repository an agent works in, so its declines always apply.
+    """
+    declines: dict[str, str] = {}
+    review_by = ""
+    notes: list[str] = []
+    project_path = Path(project).expanduser() / ".assurance" / "config.toml"
+    for path, is_project in ((_user_config_path(), False), (project_path, True)):
+        if not path.is_file():
+            continue
+        label = _display_path(path, project)
+        if is_project and not trust_project:
+            try:
+                declares = bool(_read_declined_table(path)[0])
+            except ConfigError:
+                declares = True  # changed and now unreadable: say so rather than guess, as [audit] does
+            if declares:
+                notes.append(
+                    f"This session changed {label}, so the declines it holds were not applied to "
+                    "this session's findings."
+                )
+            continue
+        found, file_review_by = _read_declined_table(path)
+        declines.update(found)
+        if file_review_by:
+            review_by = file_review_by if not review_by else min(review_by, file_review_by)
+    return declines, review_by, notes
 
 
 def load_declared(project: Path, *, trust_project: bool = True) -> tuple[Declared, list[str], list[str]]:
@@ -314,6 +371,39 @@ def _read_budget_table(path: Path) -> dict[str, float]:
     return out
 
 
+def _read_declined_table(path: Path) -> tuple[dict[str, str], str]:
+    """The `[declined]` table as {finding substring: reason}, and its `review_by` date or "".
+
+    Keys are substrings of a finding's text, quoted, because that is what a person can copy out of
+    the report. Values are the reason, which is the whole point: a finding that disappears teaches
+    nobody anything, and one that says *declined: this package's tests need a device* is a sentence
+    the next person can argue with.
+    """
+    table = _read_toml(path).get("declined")
+    if table is None:
+        return {}, ""
+    if not isinstance(table, dict):
+        raise ConfigError(f"{path}: [declined] must be a table of \"finding\" = \"reason\" pairs")
+    review_by = ""
+    found: dict[str, str] = {}
+    for key, value in table.items():
+        if key == _REVIEW_BY:
+            if not isinstance(value, str) or not _ISO_DATE.fullmatch(value):
+                raise ConfigError(f"{path}: [declined] {_REVIEW_BY} must be a date, as \"2026-12-31\"")
+            review_by = value
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigError(f"{path}: [declined] \"{key}\" needs a reason, as \"why this is declined\"")
+        if len(key.strip()) < _SHORTEST_DECLINE:
+            raise ConfigError(
+                f"{path}: [declined] \"{key}\" is too short to name one finding. A decline matches by "
+                f"substring, so a key under {_SHORTEST_DECLINE} characters would decline findings it "
+                "was never meant to."
+            )
+        found[key.strip()] = value.strip()
+    return found, review_by
+
+
 def _read_audit_table(path: Path) -> dict[str, list[str]]:
     """`[audit]` tests, checks and must_run, each a single command, and must_not_touch, each a path in
     the project. Anything else is refused with the file named."""
@@ -343,6 +433,10 @@ def _read_audit_table(path: Path) -> dict[str, list[str]]:
         out[key] = [c.strip() for c in raw]
     return out
 
+
+#: `review_by`, as a plain date. Not parsed with `datetime.date` at read time so an unreadable
+#: value is refused with the file named rather than raising from inside a formatter later.
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 _OUTSIDE = re.compile(r"^(?:/|~|[A-Za-z]:|\\\\)")
 
