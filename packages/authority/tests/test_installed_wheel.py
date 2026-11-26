@@ -11,43 +11,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tooling.tree import build_wheel, install_siblings, venv_python
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _venv_python(venv_dir: Path) -> Path:
-    subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
-    if sys.platform == "win32":
-        return venv_dir / "Scripts" / "python.exe"
-    return venv_dir / "bin" / "python"
-
-
-def _build_wheel(outdir: Path, project: Path) -> Path:
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "build"], check=True)
-    subprocess.run(
-        [sys.executable, "-m", "build", "--wheel", "--outdir", str(outdir)],
-        cwd=project, check=True, capture_output=True,
-    )
-    wheels = sorted(outdir.glob("*.whl"))
-    assert len(wheels) == 1, wheels
-    return wheels[0]
-
-
-def _install_core(vpy: Path, tmp_path: Path) -> None:
-    # Prefer the sibling in this tree: a floor raise lands here before the matching PyPI release, and
-    # installing an older published core would exercise a floor the suite is not running against.
-    sibling = ROOT.parent / "core"
-    if sibling.is_dir():
-        wheel = _build_wheel(tmp_path / "core-dist", sibling)
-        subprocess.run([str(vpy), "-m", "pip", "install", "-q", str(wheel)], check=True)
-        return
-    subprocess.run([str(vpy), "-m", "pip", "install", "-q", "assurance-core>=0.14.0"], check=True)
-
-
 def test_installed_wheel_runs_the_console_script(tmp_path: Path) -> None:
-    vpy = _venv_python(tmp_path / "venv")
-    _install_core(vpy, tmp_path)
+    vpy = venv_python(tmp_path / "venv")
+    install_siblings(vpy, tmp_path, ROOT)
     subprocess.run([str(vpy), "-m", "pip", "install", "-q",
-                    str(_build_wheel(tmp_path / "dist", ROOT))], check=True)
+                    str(build_wheel(tmp_path / "dist", ROOT))], check=True)
 
     declaration = tmp_path / "team.json"
     declaration.write_text(json.dumps({

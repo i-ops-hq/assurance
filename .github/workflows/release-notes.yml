@@ -46,6 +46,9 @@ jobs:
           # someone chose.
           DISPATCH_TAGS: ${{ inputs.tags }}
           RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        # `shell: bash` for the `$(...)`: the runner default on Windows is PowerShell, which
+        # substitutes without word-splitting. Declared on the step, not assumed from the job's OS.
+        shell: bash
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TAGS="$DISPATCH_TAGS"; else TAGS="$RUN_TAG"; fi
