@@ -25,15 +25,17 @@ import json
 import re
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Sequence
 
-from assurance_budget.config import ConfigError, load_declared
+from assurance_budget.config import ConfigError, load_declared, load_declines
 from assurance_budget.events import LogError
 from assurance_budget.notice import LEGACY_LEVELS, _verification, changed_paths
 from assurance_budget.sessions import (
+    changed_limits_file,
     _SHELL_TOOLS,
     Declared,
     Session,
@@ -62,13 +64,41 @@ class FollowUp:
     text: str
     asked: str
     """`test`, `pass` or `revert`: see the module."""
-    followed: bool
+    outcome: str
+    """`followed`, `declined` or `unanswered`.
+
+    Three, not a boolean, and that is the whole point of this field. `followed: bool` conflated two
+    opposite situations: a person read the finding, judged it and decided not to act -- the tool
+    working -- and a person never engaging with it at all -- the tool failing to reach anyone. A
+    follow rate made of the first is a good product and made of the second is a bad one, and the
+    boolean could not tell them apart, so no control added to make findings more actionable could be
+    shown to have helped.
+
+    `followed` wins over `declined` when both apply: what happened is more informative than what was
+    intended, and `why` is still carried so a decline that was acted on anyway is still visible.
+    """
     how: str
     """What came after, in a few words: `pytest -q passed at 10:05`, `no test or check ran`."""
+    why: str = ""
+    """The recorded reason, when this was declined. Never sent anywhere: see `report`."""
+
+    @property
+    def followed(self) -> bool:
+        """Derived, so there is no second field to drift from `outcome`."""
+        return self.outcome == "followed"
 
 
-def follow_ups(session: Session, declared: Declared | None = None) -> list[FollowUp]:
-    """Each finding the hook said in `session`, with whether what it asked for followed it."""
+def follow_ups(
+    session: Session,
+    declared: Declared | None = None,
+    declines: Mapping[str, str] | None = None,
+) -> list[FollowUp]:
+    """Each finding the hook said in `session`, and what became of it.
+
+    `declines` is already set aside by the caller for a session that wrote the config: this function
+    takes what applies rather than deciding it, because the decision needs the session and the
+    caller has it.
+    """
     found: list[FollowUp] = []
     for spoken in session.spoken:
         level_match = _LEVEL.match(spoken.text)
@@ -79,8 +109,26 @@ def follow_ups(session: Session, declared: Declared | None = None) -> list[Follo
         until = _end_of_next_turn(session, spoken.seq)
         calls = [call for call in session.tool_calls if spoken.seq < call.seq <= until and not call.refused]
         followed, how = _followed(asked, spoken.text, calls, session, declared)
-        found.append(FollowUp(session.session_id, session.cwd, spoken.at, level, spoken.text, asked, followed, how))
+        why = _declined_because(spoken.text, declines)
+        outcome = "followed" if followed else ("declined" if why else "unanswered")
+        found.append(FollowUp(
+            session.session_id, session.cwd, spoken.at, level, spoken.text, asked, outcome, how, why,
+        ))
     return found
+
+
+def _declined_because(text: str, declines: Mapping[str, str] | None) -> str:
+    """The recorded reason whose finding substring appears in `text`, or "".
+
+    Substring and case-insensitive, because the key is what a person copied out of the report. The
+    longest matching key wins, so a specific decline beats a general one rather than depending on
+    which order a dict happened to be written in.
+    """
+    if not declines:
+        return ""
+    lowered = text.lower()
+    matches = [(len(key), why) for key, why in declines.items() if key.lower() in lowered]
+    return max(matches)[1] if matches else ""
 
 
 def _asked(text: str) -> str:
@@ -139,11 +187,14 @@ def _declared(project: str) -> Declared | None:
     return with_learned(declared, Path(project))
 
 
-def collect(root: Path, since: float, project: Path | None = None) -> tuple[list[FollowUp], int, int]:
+def collect(
+    root: Path, since: float, project: Path | None = None
+) -> tuple[list[FollowUp], int, int, list[str]]:
     """Every finding said within `since` seconds, in transcripts under `root`; how many transcripts were
-    read; how many could not be."""
+    read; how many could not be; and any `review_by` dates that have passed."""
     cutoff = time.time() - since
     found: list[FollowUp] = []
+    expired: set[str] = set()
     read = unreadable = 0
     folders = sorted(root.iterdir()) if root.is_dir() else []
     for folder in folders:
@@ -163,8 +214,49 @@ def collect(root: Path, since: float, project: Path | None = None) -> tuple[list
                 continue
             read += 1
             declared = _declared(session.cwd) if session.cwd else None
-            found.extend(f for f in follow_ups(session, declared) if f.at is None or f.at >= cutoff)
-    return found, read, unreadable
+            # Per session, not per file. `session_cli.audit` computes this and passes it; `notices`
+            # did not pass it at all and so trusted a project config unconditionally -- which is
+            # fine for `[audit]`, where it only helps recognise a declared test, and wrong for a
+            # decline, which decides whether a finding counts. A finding from a session that wrote
+            # the config is never declined.
+            declines, review_by, _notes = _declines(session)
+            if _expired(review_by):
+                # Past its review date the table stops applying, and the findings come back as
+                # unanswered. Said out loud in the report rather than letting them quietly reappear
+                # as if nobody had ever decided anything -- silence is what this feature removes.
+                expired.add(review_by)
+                declines = {}
+            found.extend(
+                f for f in follow_ups(session, declared, declines) if f.at is None or f.at >= cutoff
+            )
+    return found, read, unreadable, sorted(expired)
+
+
+def _expired(review_by: str) -> bool:
+    """Whether a `review_by` date has passed. An unreadable date is treated as expired.
+
+    Expired rather than ignored on a bad date: a decline is a check not running, so the failure
+    that leaves checks running is the right one. `config` already refuses a malformed date when it
+    reads the file, so this is the second line and not the first.
+    """
+    if not review_by:
+        return False
+    try:
+        return date.fromisoformat(review_by) < date.today()
+    except ValueError:
+        return True
+
+
+def _declines(session: Session) -> tuple[dict[str, str], str, list[str]]:
+    """This session's applicable declines, with the set-aside decided from its own tool calls."""
+    if not session.cwd:
+        return {}, "", []
+    try:
+        return load_declines(
+            Path(session.cwd), trust_project=not changed_limits_file(session)
+        )
+    except (ConfigError, OSError):
+        return {}, "", []
 
 
 def report(found: list[FollowUp], window: str, where: str) -> str:
@@ -173,22 +265,37 @@ def report(found: list[FollowUp], window: str, where: str) -> str:
     if not found:
         lines.append("  The hook said nothing in this window, so there is nothing to follow up.")
         return "\n".join(lines)
-    followed = sum(f.followed for f in found)
+    followed = sum(f.outcome == "followed" for f in found)
+    declined = sum(f.outcome == "declined" for f in found)
+    unanswered = sum(f.outcome == "unanswered" for f in found)
     sessions = len({f.session for f in found})
     lines.append(
         f"  {_count(len(found), 'finding')} in {_count(sessions, 'session')}. "
         f"What it asked for came next after {followed} of them ({round(100 * followed / len(found))}%)."
     )
+    if declined:
+        lines.append(
+            f"  {declined} declined with a recorded reason, {unanswered} unanswered. The number "
+            "worth watching is not the follow rate but what fraction of the unfollowed are "
+            "declines: a decline is a person judging, and unanswered is nobody reading."
+        )
     for level in ("note", "suggested review", "stop and check"):
         mine = [f for f in found if f.level == level]
         if mine:
-            lines.append(f"    {level}: {sum(f.followed for f in mine)} of {len(mine)} followed")
+            parts = [f"{sum(f.outcome == 'followed' for f in mine)} of {len(mine)} followed"]
+            if any(f.outcome == "declined" for f in mine):
+                parts.append(f"{sum(f.outcome == 'declined' for f in mine)} declined")
+            lines.append(f"    {level}: {', '.join(parts)}")
     lines.append("  Followed by, not caused by: an agent may have run the test anyway. Nothing here left this machine.")
     lines.append("  The latest:")
     for f in sorted(found, key=lambda f: f.at or 0)[-8:]:
         when = datetime.fromtimestamp(f.at).strftime("%Y-%m-%d %H:%M") if f.at is not None else "(no time)"
-        mark = "followed" if f.followed else "not followed"
-        lines.append(f"    {when}  {Path(f.project).name or '?'}  {f.level}  {mark}: {f.how}")
+        mark = {"followed": "followed", "declined": "declined", "unanswered": "not followed"}[f.outcome]
+        # The reason is printed because that is the point of recording one: a finding that vanishes
+        # teaches nobody anything. It is printed HERE and nowhere else -- never uploaded, and the
+        # rollup, when it lands, sends a salted digest of it and never the sentence.
+        tail = f"{f.why} ({f.how})" if f.outcome == "declined" else f.how
+        lines.append(f"    {when}  {Path(f.project).name or '?'}  {f.level}  {mark}: {tail}")
     return "\n".join(lines)
 
 
@@ -226,22 +333,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     if root is None:
         print("assurance notices: no Claude Code transcripts on this machine (~/.claude/projects)", file=sys.stderr)
         return 2
-    found, read, unreadable = collect(root, since, args.project)
+    found, read, unreadable, expired = collect(root, since, args.project)
     where = f"sessions in {args.project}" if args.project else "every project on this machine"
     if args.json:
-        followed = sum(f.followed for f in found)
+        followed = sum(f.outcome == "followed" for f in found)
         print(json.dumps({
             "schema": "assurance.notices/1",
             "since": args.since,
             "findings": len(found),
             "followed": followed,
+            "declined": sum(f.outcome == "declined" for f in found),
+            "unanswered": sum(f.outcome == "unanswered" for f in found),
+            "declines_expired": expired,
             "rate": round(followed / len(found), 4) if found else None,
             "transcripts_with_findings": read,
             "unreadable": unreadable,
-            "items": [asdict(f) for f in found],
+            # Built field by field rather than with `asdict`, which would have silently dropped
+            # `followed` the moment it became a derived property -- a key disappearing from a
+            # published schema because of a refactor nobody connected to it.
+            "items": [{**asdict(f), "followed": f.followed} for f in found],
         }, indent=2))
     else:
         print(report(found, args.since, where))
+        for when in expired:
+            print(
+                f"  A [declined] table's review_by was {when}, which has passed, so its declines "
+                "no longer apply and those findings are counted as unanswered."
+            )
         if unreadable:
             print(f"  {_count(unreadable, 'transcript')} could not be read.")
     return 0
