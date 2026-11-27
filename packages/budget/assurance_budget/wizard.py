@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -361,24 +362,83 @@ def installed_hook(cwd: Path, env: Mapping[str, str]) -> Installed:
 
 # --- the frame -------------------------------------------------------------------------------------
 
-_VALUE = "Your agent says it's done. This says what it didn't check."
-
 _WHAT_IT_DOES = (
-    "Read the coding session in this folder and report what it",
-    "actually did and what it skipped. Every answer is arithmetic",
-    "over what happened; no model decides anything.",
+    "What a coding-agent session actually covered, and what it quietly did not.",
+    "Runs on your machine. No account, no API key, no network.",
 )
 
+#: Drawn in `RICH.rule`, which is the one character `glyphs_for` already proves encodable against
+#: the stream — it tests `RICH.rule` by name, and this is that character. So a console that is given
+#: RICH can draw this, and one that cannot never sees it. The alternative, a wordmark that arrives as
+#: a rectangle of replacement characters, is worse than no wordmark at all.
+_WORDMARK = (
+    "   █████  ███████ ███████ ██    ██ ██████   █████  ███    ██  ██████ ███████",
+    "  ██   ██ ██      ██      ██    ██ ██   ██ ██   ██ ████   ██ ██      ██",
+    "  ███████ ███████ ███████ ██    ██ ██████  ███████ ██ ██  ██ ██      █████",
+    "  ██   ██      ██      ██ ██    ██ ██   ██ ██   ██ ██  ██ ██ ██      ██",
+    "  ██   ██ ███████ ███████  ██████  ██   ██ ██   ██ ██   ████  ██████ ███████",
+)
 
-def _welcome(out: TextIO, st: Style, gl: Glyphs) -> None:
-    print(st.dim("WELCOME TO"), file=out)
-    print(st.bold(st.cyan("ASSURANCE")), file=out)
-    print(st.cyan(gl.rule * 9), file=out)
+#: Who made it, said once. The separator is `gl.sep` rather than a literal, because `·` has no byte
+#: at all in a Windows locale code page and this line is the one a first-time reader is most likely
+#: to be looking at.
+_FROM = ("from I-Ops", "Operations Intelligence, LLC", "https://i-ops.dev")
+
+
+def _wordmark(out: TextIO, st: Style, gl: Glyphs, columns: int | None = None) -> None:
+    """The name, in block letters where the console can draw them and in plain capitals where it
+    cannot.
+
+    Width is checked as well as encoding. The block form is 76 columns, and a wordmark that wraps is
+    the same failure as one that mojibakes — it is the first thing a new reader sees, and a broken
+    first impression is the thing this whole change exists to fix.
+    """
+    width = shutil.get_terminal_size(fallback=(80, 24)).columns if columns is None else columns
+    if gl is RICH and width >= max(len(line) for line in _WORDMARK):
+        for line in _WORDMARK:
+            print(st.cyan(line), file=out)
+    else:
+        # Contiguous, not spaced out: `test_a_narrow_console_gets_the_ascii_wordmark_and_does_not
+        # _raise` looks for the product name, and spacing it apart was a styling preference with
+        # no argument behind it that happened to break a test checking something real.
+        print(st.bold(st.cyan("  ASSURANCE")), file=out)
+        print(st.cyan("  " + gl.rule * 9), file=out)
+
+
+def _welcome(out: TextIO, st: Style, gl: Glyphs, columns: int | None = None) -> None:
+    _wordmark(out, st, gl, columns)
     print(file=out)
-    print(st.bold(_VALUE), file=out)
+    print(st.dim(f"  {f' {gl.sep} '.join(_FROM)}"), file=out)
+    print(file=out)
     for line in _WHAT_IT_DOES:
-        print(line, file=out)
+        print(f"  {line}", file=out)
     print(file=out)
+
+
+def _pick_a_command(
+    out: TextIO, st: Style, gl: Glyphs, commands: Sequence[tuple[str, str]],
+    read_key: ReadKey | None,
+) -> bool:
+    """Show what there is to run and print the line for the one they pick. False if they cancelled.
+
+    It prints the command rather than running it, and that is the whole design. A first-run screen
+    that starts executing things is a surprise, and this tool's posture everywhere else is that
+    nothing happens the caller did not ask for — `deps` reads an install without running it, the
+    hook is shown before it is written. A signpost is also the more useful artifact: the reader ends
+    up with a line they can run again tomorrow, rather than output they cannot reproduce.
+    """
+    question = "What do you want to look at?"
+    labels = tuple(f"{name:<10} {summary}" for name, summary in commands)
+    picked = choose(question, labels, default=0, stream=out, style=st, glyphs=gl, read_key=read_key)
+    if picked is None:
+        return False
+    name, summary = commands[picked]
+    _collapse(out, st, gl, question, name)
+    print(file=out)
+    print(f"  Run:  {st.bold('assurance ' + name)}", file=out)
+    print(f"  {st.dim(summary)}", file=out)
+    print(file=out)
+    return True
 
 
 def _step(out: TextIO, st: Style, number: int, total: int, name: str) -> None:
@@ -402,6 +462,7 @@ def run(
     stream: TextIO | None = None,
     read_key: ReadKey | None = None,
     hook_main: Callable[..., int] | None = None,
+    commands: Sequence[tuple[str, str]] = (),
 ) -> int:
     """The first run. 0 finished, `EXIT_CANCELLED` when Esc or Ctrl-C left everything as it was.
 
@@ -419,8 +480,18 @@ def run(
 
     _welcome(out, st, gl)
 
+    # The list comes from the caller. `assurance_cli` declares the subcommands and owns their one
+    # liners; `assurance_budget` holds the wizard and must not import it, so passing them in is what
+    # keeps this a presentation layer instead of a second place the command list lives.
+    total = 2 if commands else 1
+    if commands:
+        _step(out, st, 1, total, "What this can tell you")
+        if not _pick_a_command(out, st, gl, commands, read_key):
+            print(st.dim("Cancelled. Nothing was changed."), file=out)
+            return EXIT_CANCELLED
+
     state = installed_hook(here, environ)
-    _step(out, st, 1, 1, "Run the audit after every turn")
+    _step(out, st, total, total, "Run the audit after every turn")
     print("Add a Stop hook to your Claude Code user settings, so the audit runs", file=out)
     print("when a session ends. Your current settings are backed up first.", file=out)
     if state.unreadable:
