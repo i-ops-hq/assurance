@@ -8,10 +8,23 @@ code, and until something runs them they are marketing.
 
 So each scenario here builds the situation its page describes -- files on disk in a real project, and
 a transcript in the shape Claude Code writes -- and asserts what the audit *says*, not what the page
-says it says. Each is paired with its counterfactual: the same session with the cause taken out,
-which must go quiet. A test that only ever sees the finding it expects cannot tell a working check
-from one that fires at everything, and `test-proves-nothing` is the highest-count row in this
-project's own defect ledger.
+says it says.
+
+A scenario is worth more when it is paired with its counterfactual: the same session with the cause
+taken out, which must go quiet. A test that only ever sees the finding it expects cannot tell a
+working check from one that fires at everything.
+
+**Nine of the sixteen are paired (9/16). Seven are not**, and this paragraph used to say "each is paired
+with its counterfactual", which was not true of this file on the day it was written. The seven
+without one are listed in `test_every_positive_scenario_declares_its_counterfactual`, which fails
+when that number is wrong in either direction -- so the claim above cannot drift from the code
+again, and nobody has to count.
+
+Two of the seven may stay unpaired on purpose. `energy_the_whole_audit_runs_with_networking_refused`
+has no negative: "it runs with networking allowed" falsifies nothing.
+`banking_the_json_record_carries_the_four_things_the_page_promises` asserts that fields are present,
+where the negative is a question about the schema rather than a scenario to build. For those two the
+honest move is to sharpen what the page promises, not to invent a case that passes.
 
 Times are fixed rather than read from the clock. `test_world.py` takes them from the clock because
 the findings it covers are read out of git, whose times have to agree with the transcript's. Nothing
@@ -580,3 +593,95 @@ def test_payments_a_teams_own_reconciliation_script_counts_as_a_test_once_declar
     assert after["tests"] == 0, "an unrecognised script is not a test until the project says so"
     # named by its basename, which is how the report prints an unclassified command
     assert after["unclassified_by_command"] == {"reconcile.sh": 1}, "and it is named"
+
+# --- what this file claims about itself ---------------------------------------------------------
+
+#: Which scenario each counterfactual falsifies. Declared rather than derived, and that is the gap
+#: rather than the design: the pairing is written in a COMMENT inside each negative ("the
+#: counterfactual for both gates above"), so `ast` cannot see it -- an AST detector run over this
+#: file reported ZERO counterfactuals in a file that has seven, because `ast.unparse` discards
+#: comments. Position cannot stand in for it either: four positives sit between the first negative
+#: and the second, and the second falsifies only the last of them. So until each negative names its
+#: subject somewhere a tool can read, this map is the only machine-readable statement of the
+#: pairing, and its job is to break when the file changes.
+_FALSIFIES = {
+    "test_payments_the_same_session_with_the_ledger_test_passing_is_done": (
+        "test_payments_a_declared_ledger_test_that_failed_after_the_fix_is_not_done",
+    ),
+    "test_banking_a_suite_that_genuinely_passed_clears_the_edit": (
+        # "both gates above" is two gate assertions inside ONE scenario, not two scenarios.
+        "test_banking_a_suite_whose_every_test_was_skipped_does_not_clear_the_edit",
+    ),
+    "test_banking_a_build_that_skipped_the_tests_is_not_a_test_run": (
+        "test_banking_a_java_shops_commands_are_known_without_configuration",
+    ),
+    "test_healthcare_the_same_session_is_quiet_when_the_prompt_asked_for_that_file": (
+        "test_healthcare_a_protected_patient_fixture_the_prompt_did_not_name_is_named",
+    ),
+    "test_platform_a_session_that_stayed_in_its_own_code_is_quiet_about_paths": (
+        # Covers two although its comment does not say so: same project, same protected list,
+        # neither protected path touched.
+        "test_platform_a_lockfile_changed_without_being_asked_is_named",
+        "test_platform_production_terraform_changed_without_being_asked_is_named",
+    ),
+    "test_agent_builders_a_run_that_did_what_it_said_passes_both_gates": (
+        "test_agent_builders_a_claim_of_done_over_a_failed_check_does_not_stand",
+        "test_agent_builders_an_expected_output_the_run_never_wrote_is_named",
+    ),
+    "test_pharma_a_different_session_produces_a_different_record": (
+        "test_pharma_the_same_session_produces_a_byte_identical_record",
+    ),
+}
+
+#: The positives with no counterfactual, which the module docstring states as a number. Two of them
+#: are expected to stay here: `energy` has no negative to build, and `banking_the_json_record`
+#: asserts fields are present, where the negative is a schema question.
+_UNPAIRED = (
+    "test_payments_a_declared_test_that_ran_before_the_last_edit_has_not_run",
+    "test_banking_the_json_record_carries_the_four_things_the_page_promises",
+    "test_banking_an_unclassified_command_is_never_counted_as_a_pass",
+    "test_banking_a_run_of_zero_tests_is_called_that_and_not_a_pass",
+    "test_healthcare_an_agent_cannot_take_a_path_off_the_list_to_pass_its_own_audit",
+    "test_energy_the_whole_audit_runs_with_networking_refused",
+    "test_payments_a_teams_own_reconciliation_script_counts_as_a_test_once_declared",
+)
+
+
+def test_every_positive_scenario_declares_its_counterfactual() -> None:
+    """The module docstring says nine of sixteen are paired. This is what makes that true.
+
+    It fails in both directions on purpose. Add a counterfactual and `_UNPAIRED` is stale, so this
+    breaks until the docstring's number is corrected too -- which is the point: the sentence at the
+    top of this file was false for as long as nobody had to count.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    scenarios = [
+        line.split("(")[0].removeprefix("def ")
+        for line in source.splitlines()
+        if line.startswith("def test_") and "scenario" not in line
+    ]
+    assert len(scenarios) >= 20, f"only {len(scenarios)} scenarios found, so this checks almost nothing"
+
+    negatives = set(_FALSIFIES)
+    positives = [s for s in scenarios if s not in negatives]
+    covered = {name for names in _FALSIFIES.values() for name in names}
+
+    unknown = (negatives | covered) - set(scenarios)
+    assert not unknown, f"_FALSIFIES names scenarios that do not exist: {sorted(unknown)}"
+
+    unpaired = [s for s in positives if s not in covered]
+    assert sorted(unpaired) == sorted(_UNPAIRED), (
+        f"the pairing changed. {len(positives)} positives, {len(covered)} covered, "
+        f"{len(unpaired)} unpaired: {sorted(unpaired)}. Update _UNPAIRED and the number in this "
+        "module's docstring together, because the docstring states it."
+    )
+    # The docstring carries the figure as digits as well as words, and this asserts on the digits.
+    # The first version of this check was `f"{covered} of the {positives}" in source or ("Nine of
+    # the sixteen" in source and ...)`, which passed on the clean file because of the second clause
+    # and kept passing when the docstring's number was changed -- a check whose `or` made it
+    # satisfiable two ways, one of which was true for the wrong reason. Caught by mutating the
+    # docstring and watching it stay green.
+    assert f"({len(covered)}/{len(positives)})" in source, (
+        f"this file is {len(covered)} of {len(positives)} paired, and its docstring does not say "
+        f"({len(covered)}/{len(positives)}). Correct the docstring: it is the published claim."
+    )
