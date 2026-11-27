@@ -16,6 +16,7 @@ package's tests need a device* is a sentence the next person can argue with.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -97,16 +98,33 @@ def test_the_file_format_refuses_the_shape_this_feature_would_rather_have_had(tm
 
     This is here because the next person to want per-decline dates should find out why in a test
     rather than by shipping a config that works on one interpreter.
-    """
-    import tomllib
 
+    **The first version of this test imported `tomllib` at the top and failed on all three 3.10
+    runners** -- `ModuleNotFoundError: No module named 'tomllib'`. A test explaining why 3.10 cannot
+    read this shape, brought down on 3.10 by importing the 3.11 module whose absence is the entire
+    reason `toml_subset` exists. So the half that can run everywhere runs everywhere, and the half
+    that needs both readers says why it is skipped.
+    """
     from assurance_budget import toml_subset
 
     text = '[[declined]]\nfinding = "x"\nwhy = "y"\n'
-    assert tomllib.loads(text) == {"declined": [{"finding": "x", "why": "y"}]}
+
+    # Unconditional: this is the half that decides the shape. The reader used on the oldest
+    # interpreter this package supports refuses an array of tables, so the config cannot contain one
+    # whatever any other reader would do with it.
     with pytest.raises(Exception) as refused:
         toml_subset.loads(text)
     assert "array of tables" in str(refused.value)
+
+    # And the disagreement, which can only be shown where both readers exist.
+    if sys.version_info < (3, 11):
+        pytest.skip("tomllib arrives in 3.11; on 3.10 `toml_subset` IS the reader, which is the point")
+    import tomllib
+
+    assert tomllib.loads(text) == {"declined": [{"finding": "x", "why": "y"}]}, (
+        "tomllib stopped accepting an array of tables, so the two readers no longer disagree and "
+        "the reason this config is a table rather than entries has changed"
+    )
 
 
 # --- the set-aside, which is narrower than it sounds ----------------------------------------------
